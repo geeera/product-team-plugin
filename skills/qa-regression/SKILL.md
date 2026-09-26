@@ -1,0 +1,22 @@
+---
+name: qa-regression
+description: Regression on the stage release candidate during the freeze — run the full e2e suite and the polish checklist against stage, file findings, fix release blockers via fix/* PRs to stage, and back-merge fixes to dev. Used by slot-dev and slot-qa on freeze days.
+model: claude-opus-5-5
+---
+
+# QA regression on `stage`
+
+Runs inside the calling slot's run protocol. `B` = `${CLAUDE_PLUGIN_ROOT}/scripts/backlog`. Stage URL:
+`environments.stage.url` in `.product-team/project.yml` (missing → `kind:question` for devops/owner, stop).
+
+1. **Run the suite** — `qa-runner` agent: full `e2e` command with `BASE_URL=<stage url>` on a checkout of `stage`,
+   plus the a11y assertions. It reports failures with evidence; no code changes.
+2. **Judgement pass** — `qa` agent: failures from step 1 triaged into findings with severity; polish checklist
+   (`reference/qa-checklists.md`) on the flows changed this sprint; security spot-check of changed auth/data
+   paths. Security Critical/High and UX blockers get `release-blocker`.
+3. **Fix blockers only** — for each `release-blocker` (and P0/P1 bug) in the sprint: dev agent on
+   `fix/<issue>-<slug>` from `stage`, PR to `stage`, `qa` review, merge on green CI + `QA: APPROVED`. Then
+   `devops` opens the back-merge PR `stage` → `dev` and merges it when green. No other changes enter `stage`.
+4. **Release status** — comment on the sprint's `team:demo` issue: open blockers (links), findings by severity,
+   the team's recommendation. Any open `release-blocker` = automatic no-go (the owner may override at the demo
+   with a written reason).

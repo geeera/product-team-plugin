@@ -44,14 +44,30 @@ Communication is from the phone.
 
 - A task-manager integration (Linear, Jira…) — cheap later thanks to the backlog adapter.
 - Reading the remaining usage quota dynamically — the schedule is static until this is verified.
-- Stop conditions (e.g. three failed runs in a row → pause and notify) — decided while writing the slot skills.
+
+## Decided while building
+
+- **Stop conditions**: every run writes a `started`/`finished`/`failed` entry on a run-log issue; a dangling
+  `started` older than 3 h counts as failed. Three failed runs in a row pause the team until the owner comments
+  `/resume`. A run of the same slot still in progress makes the next one exit (overlap guard).
+- **Model pinning** (decision 13): plugin agents accept full model IDs in `model:`. Where one role needs two
+  models, a variant agent pins the second one (`fullstack-dev-senior`, `qa-runner`, `scribe`).
+- **Demo write-back** (decision 9): decisions are stored in the demo artifact's database (only the artifact's
+  owner may write) and read by `demo-apply` via ArtifactData. Fallbacks that work without the Artifact tool:
+  a `/demo-decisions` block pasted on the demo issue, or `/approve`, `/reject`, `/go`, `/no-go` comments on the
+  issues themselves. Issues stay the source of truth.
+- **QA verdicts**: all agents act as one GitHub user and GitHub rejects approving your own PR, so QA posts a
+  `QA: APPROVED` / `QA: CHANGES REQUESTED` review comment and the orchestrator merges.
+- **Owner commands** are honoured only from the repository owner's account.
 
 ## To verify before building on it
 
 - How scheduled tasks attach a repository in code mode, and whether a scheduled task can fire into a
   project's persistent chat (decision 17) rather than a fresh session.
-- Whether each role subagent can be pinned to its own model inside a plugin (decision 13).
-- Whether an interactive demo page can write approvals somewhere the next run can read (decision 9).
+- Whether `gh` is authenticated in scheduled cloud sessions (the scripts depend on it) and whether the
+  Artifact / ArtifactData tools exist there (`demo-prep` falls back to the demo issue when they do not).
+- Whether `${CLAUDE_PLUGIN_ROOT}` is expanded inside agent prompts; skills pass `PLUGIN_ROOT` explicitly in case
+  it is not.
 
 ## Projects
 

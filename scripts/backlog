@@ -4,7 +4,7 @@
 The contract is the subcommand set below and its JSON output; a different tracker replaces this file, not the
 skills. Output is JSON on stdout; errors go to stderr with a non-zero exit.
 
-  backlog init                                   create/refresh the label set (idempotent)
+  backlog init                                   create missing labels (idempotent; existing ones untouched)
   backlog list [--status S] [--kind K] [--label L]... [--milestone M|current] [--state open|closed|all]
   backlog show N                                 issue with body, labels, comments
   backlog create --title T --kind K [--status proposed] [--severity SEV] [--label L]...
@@ -84,17 +84,16 @@ def resolve_milestone(repo: str, value):
 
 
 def cmd_init(repo: str, _args) -> None:
+    # Labels the project already has are left as they are: the project's conventions beat the plugin's.
     existing = {l["name"] for l in gh.api_list(f"repos/{repo}/labels?per_page=100")}
-    created, updated = [], []
+    created, kept = [], []
     for name, (color, desc) in LABELS.items():
-        payload = {"new_name": name, "color": color, "description": desc}
         if name in existing:
-            gh.api(f"repos/{repo}/labels/{gh_quote(name)}", "PATCH", payload)
-            updated.append(name)
-        else:
-            gh.api(f"repos/{repo}/labels", "POST", {"name": name, "color": color, "description": desc})
-            created.append(name)
-    out({"created": created, "updated": updated})
+            kept.append(name)
+            continue
+        gh.api(f"repos/{repo}/labels", "POST", {"name": name, "color": color, "description": desc})
+        created.append(name)
+    out({"created": created, "kept": kept})
 
 
 def gh_quote(name: str) -> str:

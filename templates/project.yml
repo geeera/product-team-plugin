@@ -1,0 +1,38 @@
+# .product-team/project.yml — the stack-agnostic contract (reference/stack-contract.md).
+# Skills read commands and URLs from here and never guess them.
+name: storify
+repo: geeera/storify
+mode: adopted            # new | adopted
+stack: "TODO: summary — see decision record"
+decisions_dir: docs/decisions
+
+commands:
+  install: "TODO"
+  lint: "TODO"
+  test: "TODO"
+  build: "TODO"
+  e2e: "TODO"            # must honour BASE_URL, e.g. BASE_URL=$STAGE_URL <command>
+  storybook: "TODO"      # build command; leave empty for products without a UI
+
+environments:
+  dev:
+    url: ""
+  stage:
+    url: ""
+  production:
+    url: ""
+
+design:
+  tokens: []             # token source files
+  storybook_url: ""
+
+sprint:
+  length_days: 14
+  freeze_days: 2
+
+# Optional overrides of reference/schedule-and-models.md caps, per mode.
+caps: {}
+
+owner:
+  timezone: Europe/Kyiv
+  language: en           # language of owner-facing summaries and questions

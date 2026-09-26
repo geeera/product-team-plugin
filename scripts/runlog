@@ -1,0 +1,134 @@
+#!/usr/bin/env python3
+"""Team run log on a single GitHub issue labelled team:run-log (stop conditions, reference/schedule-and-models.md).
+
+  runlog start SLOT        → {"decision": "proceed"|"overlap"|"paused"|"pause", "run_id": ...}
+                             proceed: a `started` entry was written, do the work, then call finish.
+                             overlap/paused: exit without work. pause: this call paused the team — notify, exit.
+  runlog finish RUN_ID finished|failed [--summary-file F]
+  runlog status            → recent runs and pause state
+  runlog url               → the run-log issue URL (for owner notifications)
+
+Exit code is 0 for proceed and finish, 3 for any decision that means "do no work".
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+from datetime import datetime, timezone
+from urllib.parse import quote
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from ptlib import commands, gh, runstate  # noqa: E402
+
+TITLE = "Team run log"
+LABEL = "team:run-log"
+PAUSED = "team:paused"
+
+
+def log_issue(repo: str) -> dict:
+    found = gh.api_list(f"repos/{repo}/issues?state=all&labels={LABEL}&per_page=10")
+    if found:
+        return found[0]
+    return gh.api(f"repos/{repo}/issues", "POST", {
+        "title": TITLE,
+        "labels": [LABEL],
+        "body": "One comment per scheduled team run. Owner commands here: `/resume` after a pause.",
+    })
+
+
+def load(repo: str):
+    issue = log_issue(repo)
+    comments = gh.api_list(f"repos/{repo}/issues/{issue['number']}/comments?per_page=100")
+    return issue, comments
+
+
+def pause_at(comments: list) -> str:
+    stamps = [c["created_at"] for c in comments if runstate.PAUSE_MARKER in (c.get("body") or "")]
+    return max(stamps) if stamps else ""
+
+
+def cmd_start(repo: str, args) -> int:
+    issue, comments = load(repo)
+    now = datetime.now(timezone.utc)
+    labels = {l["name"] for l in issue["labels"]}
+    owner_cmds = commands.parse(comments, gh.owner_login(repo))
+    paused_since = pause_at(comments)
+    paused = PAUSED in labels
+    if paused and runstate.resumed_after_pause(paused_since, owner_cmds):
+        gh.api(f"repos/{repo}/issues/{issue['number']}/labels/{quote(PAUSED, safe='')}", "DELETE")
+        paused = False
+    resume = commands.latest(owner_cmds, ["resume"])
+    reset_at = max(resume.get("at") or "", paused_since)
+    decision = runstate.decide(runstate.parse_runs(comments), args.slot, now, paused, reset_at)
+
+    if decision["decision"] == "pause":
+        gh.api(f"repos/{repo}/issues/{issue['number']}/labels", "POST", {"labels": [PAUSED]})
+        gh.api(f"repos/{repo}/issues/{issue['number']}/comments", "POST", {"body": (
+            f"{runstate.PAUSE_MARKER}\n**Team paused**: {decision['reason']}. No scheduled run will do work "
+            "until the owner comments `/resume` here. Check the failed runs above.")})
+    elif decision["decision"] == "proceed":
+        run_id = now.strftime("%Y%m%dT%H%M%SZ") + "-" + args.slot
+        c = gh.api(f"repos/{repo}/issues/{issue['number']}/comments", "POST", {"body": (
+            f"<!-- pt-run id={run_id} slot={args.slot} state=started -->\n"
+            f"**{args.slot}** started {now.isoformat(timespec='minutes')}")})
+        decision.update(run_id=run_id, comment_id=c["id"])
+    decision["log_url"] = issue["html_url"]
+    print(json.dumps(decision, indent=2))
+    return 0 if decision["decision"] == "proceed" else 3
+
+
+def cmd_finish(repo: str, args) -> int:
+    if args.state not in ("finished", "failed"):
+        sys.exit("state must be finished or failed")
+    issue, comments = load(repo)
+    target = next((r for r in runstate.parse_runs(comments) if r["id"] == args.run_id), None)
+    if not target:
+        sys.exit(f"run {args.run_id} not found in the run log")
+    summary = ""
+    if args.summary_file:
+        with open(args.summary_file, encoding="utf-8") as f:
+            summary = f.read().strip()
+    slot = target["slot"]
+    now = datetime.now(timezone.utc).isoformat(timespec="minutes")
+    body = (f"<!-- pt-run id={args.run_id} slot={slot} state={args.state} -->\n"
+            f"**{slot}** {args.state} {now}\n\n{summary}").strip()
+    gh.api(f"repos/{repo}/issues/comments/{target['comment_id']}", "PATCH", {"body": body})
+    print(json.dumps({"run_id": args.run_id, "state": args.state, "log_url": issue["html_url"]}))
+    return 0
+
+
+def cmd_status(repo: str, _args) -> int:
+    issue, comments = load(repo)
+    now = datetime.now(timezone.utc)
+    runs = runstate.parse_runs(comments)[-10:]
+    print(json.dumps({
+        "paused": PAUSED in {l["name"] for l in issue["labels"]},
+        "log_url": issue["html_url"],
+        "runs": [dict(r, effective=runstate.effective_state(r, now)) for r in runs],
+    }, indent=2))
+    return 0
+
+
+def cmd_url(repo: str, _args) -> int:
+    print(log_issue(repo)["html_url"])
+    return 0
+
+
+def main() -> None:
+    p = argparse.ArgumentParser(prog="runlog", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = p.add_subparsers(dest="cmd", required=True)
+    st = sub.add_parser("start"); st.add_argument("slot")
+    fi = sub.add_parser("finish"); fi.add_argument("run_id"); fi.add_argument("state"); fi.add_argument("--summary-file")
+    sub.add_parser("status"); sub.add_parser("url")
+    args = p.parse_args()
+    handlers = {"start": cmd_start, "finish": cmd_finish, "status": cmd_status, "url": cmd_url}
+    try:
+        sys.exit(handlers[args.cmd](gh.repo(), args))
+    except gh.GhError as exc:
+        sys.exit(str(exc))
+
+
+if __name__ == "__main__":
+    main()

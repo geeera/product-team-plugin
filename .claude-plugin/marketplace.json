@@ -1,0 +1,16 @@
+{
+  "name": "product-team",
+  "owner": {
+    "name": "Geeera"
+  },
+  "metadata": {
+    "description": "The Product Team plugin: an autonomous product team for GitHub repositories."
+  },
+  "plugins": [
+    {
+      "name": "product-team",
+      "source": "./",
+      "description": "Autonomous product team on scheduled cloud runs."
+    }
+  ]
+}

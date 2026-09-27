@@ -37,8 +37,8 @@ has commits:
 - Branches `main`, `stage`, `dev`; ask the owner to set `dev` as the default branch.
 - `.product-team/project.yml` from `${CLAUDE_PLUGIN_ROOT}/templates/project.yml` (`mode: new`).
 - `.product-team/owner-checklist.md` from the template, filled with the accounts and secrets the stack needs.
-- `.claude/settings.json` from `${CLAUDE_PLUGIN_ROOT}/templates/claude-settings.json` so cloud sessions load
-  this plugin.
+- The team itself: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/vendor install .` (agents, skills, scripts into
+  `.claude/`) — cloud sessions load them from the clone; they never install plugins from repository settings.
 - `CLAUDE.md`: how to work in this repo — commands, structure, conventions, links to decisions.
 - `backlog init`; `backlog sprint create "Sprint 01" <demo day, two weeks out, a weekday>`; `inbox update`.
 
@@ -49,7 +49,8 @@ Storybook, e2e harness. `foundation` executes them.
 
 ## 6. Schedule
 Show the owner the routines to create (from `reference/schedule-and-models.md`): prompts
-`/product-team:slot-pm`, `/product-team:slot-dev`, `/product-team:slot-qa` on this repository, with local times
+`/slot-pm`, `/slot-dev`, `/slot-qa` on this repository only (one repository per routine: project agents and
+skills load only in single-repository sessions), with local times
 converted to the routine's timezone. Creating routines is the owner's action (or `/schedule` on their
 confirmation).
 

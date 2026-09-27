@@ -10,6 +10,17 @@ disable-model-invocation: true
 Follow `${CLAUDE_PLUGIN_ROOT}/reference/run-protocol.md` with slot name `slot-pm`. You are the orchestrator
 (PM + DevOps). `B` = `${CLAUDE_PLUGIN_ROOT}/scripts/backlog`.
 
+## 0. Keep the team current (first run of the day)
+If `.claude/product-team/MANIFEST.json` exists and no open PR is titled `chore: product team <version>`:
+`python3 .claude/product-team/scripts/vendor self-update` (it follows `team.plugin_ref` in `project.yml`:
+the `stable` channel, or a pinned tag). When it reports `updated: true`:
+branch `chore/product-team-<version>` from `dev`, commit `.claude/`, open a PR to `dev` titled
+`chore: product team <version>` whose body is the CHANGELOG entries between the two versions (flag every
+**Breaking** entry and do its migration step in the same PR). It changes only generated `.claude/` files, so it
+merges on green CI without a QA review. The new version takes effect from the next run.
+`overwrote_local_edits` in the output means someone edited generated files: list them in the PR body — the fix
+belongs in the plugin, not in the product.
+
 ## 1. Owner answers
 - **Designs**: for each issue labelled `design:awaiting-approval`, `B answers N` (only commands newer than the
   design-link comment count):

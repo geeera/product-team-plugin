@@ -33,6 +33,10 @@ sprint:
 # Optional overrides of reference/schedule-and-models.md caps, per mode.
 caps: {}
 
+team:
+  # Release channel the daily self-update follows: `stable` (every release) or a tag such as v0.3.0 (pinned).
+  plugin_ref: stable
+
 owner:
   timezone: Europe/Kyiv
   language: en           # language of owner-facing summaries and questions

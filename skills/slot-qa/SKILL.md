@@ -24,7 +24,7 @@ For each linked open PR, oldest first:
 3. Green → start the **`qa` agent** with only: `PLUGIN_ROOT=<path>`, repo, PR number, issue number. Never pass
    the developer's summary or transcript. Independent reviews may run in parallel (up to 3).
 4. Verdict:
-   - `QA: APPROVED` → `PR merge <pr> --squash --delete-branch` (it refuses unless CI passes), `B label N -qa:changes-requested`,
+   - `QA: APPROVED` → `PR merge <pr> --method squash --delete-branch` (it refuses unless CI passes), `B label N -qa:changes-requested`,
      `B move N done`.
    - `QA: CHANGES REQUESTED` → `B move N in-progress`, `B label N +qa:changes-requested` (this is what puts it
      in the next `B next` plan). If the changes are small and the issue is P0/P1, dispatch the developer now on

@@ -39,7 +39,8 @@ Also run the owner's `engineering-baseline:conformance-audit` if installed, to r
   `docs/decisions/` and record "0001 — adopted by the product team" with the audit summary.
 - `.product-team/project.yml` (`mode: adopted`, `decisions_dir` = the project's folder).
 - `.product-team/owner-checklist.md` — only what is missing.
-- The team itself: `python3 <plugin root>/scripts/vendor install .` — agents to `.claude/agents/`, skills to
+- The team itself: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/vendor install .` from the installed plugin (in a
+  product that already has the vendored copy, `vendor self-update` instead) — agents to `.claude/agents/`, skills to
   `.claude/skills/`, scripts and references to `.claude/product-team/`. Cloud sessions load these from the clone;
   they never install plugins listed in `.claude/settings.json`. `vendor` refuses to overwrite the project's own
   agents or skills of the same name — rename the plugin's side only by changing the plugin.

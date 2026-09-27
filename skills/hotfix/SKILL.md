@@ -24,11 +24,11 @@ no refactors, no drive-by fixes.
 ## 3. Gate and release
 - CI green **and** `qa` verdict `QA: APPROVED` (independent review, as always; OWASP pass if the defect is
   security-relevant).
-- Merge the PR into `main` (`${CLAUDE_PLUGIN_ROOT}/scripts/pr merge <pr> --squash`); production deploys from `main` through Actions. `devops`
+- Merge the PR into `main` (`${CLAUDE_PLUGIN_ROOT}/scripts/pr merge <pr> --method squash --delete-branch`); production deploys from `main` through Actions. `devops`
   confirms the deploy finished and the defect is gone on production (e2e smoke or the reproduction steps).
 - Tag the release with the project's scheme plus a hotfix suffix (e.g. `v2026.10.02-hotfix.1`).
 - Back-merge: PR `main` → `stage`, then `stage` → `dev` (or `main` → `dev` outside a freeze); merge each on
-  green CI. Conflicts are resolved in the back-merge PR, never by pushing to the branches.
+  green CI with `--method merge` (never squash long-lived branches into each other). Conflicts are resolved in the back-merge PR, never by pushing to the branches.
 - `B move N done`.
 
 ## 4. Roll back

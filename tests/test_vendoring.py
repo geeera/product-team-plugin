@@ -71,6 +71,16 @@ class InstallTest(unittest.TestCase):
             self.assertEqual(third["written"], [])  # idempotent
 
 
+class VendoredCopyTest(unittest.TestCase):
+    def test_installing_from_the_vendored_copy_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            vendor.install(ROOT, target)
+            with self.assertRaises(SystemExit):
+                vendor.install(target / vendoring.HOME, target)
+            self.assertTrue((target / ".claude/agents/qa.md").exists())
+
+
 class PluginRefTest(unittest.TestCase):
     def test_defaults_to_stable_and_reads_a_pin(self):
         with tempfile.TemporaryDirectory() as tmp:

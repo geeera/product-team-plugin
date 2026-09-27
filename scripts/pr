@@ -8,7 +8,9 @@
   pr review N (--body B | --body-file F)      a review comment (QA verdicts: "QA: APPROVED" / "QA: CHANGES REQUESTED")
   pr reviews N         review bodies, oldest first
   pr update-branch N   merge the base into the PR branch on GitHub (no force-push); fails on conflicts
-  pr merge N [--method squash|merge|rebase] [--delete-branch]   refuses unless CI passes
+  pr merge N --method squash|merge [--delete-branch]
+                       refuses unless CI passes; `squash` for feature/fix/hotfix PRs, `merge` for the
+                       stage cut, releases and back-merges (long-lived branches must keep shared history)
   pr list [--base B] [--state open|closed|all]
 
 Output is JSON (the diff is plain text).
@@ -50,10 +52,25 @@ def view(repo: str, n: int) -> dict:
     }
 
 
+LONG_LIVED = {"dev", "stage", "main", "master"}
+
+
+def branch_deletion_blocker(repo: str, number: int, info: dict) -> str:
+    """Only short-lived branches of this repository are deleted after a merge."""
+    pr = gh.api(f"repos/{repo}/pulls/{number}")
+    head_repo = ((pr.get("head") or {}).get("repo") or {}).get("full_name")
+    if head_repo != repo:
+        return f"the head branch lives in {head_repo or 'a deleted fork'}"
+    if info["head"] in LONG_LIVED or info["head"] == info["base"]:
+        return f"{info['head']} is a long-lived branch"
+    return ""
+
+
 def ci(repo: str, sha: str) -> dict:
     runs = gh.api_list(f"repos/{repo}/commits/{sha}/check-runs?per_page=100")
     statuses = gh.api_list(f"repos/{repo}/commits/{sha}/statuses?per_page=100")
-    return checks.summarise(runs, statuses)
+    suites = gh.api_list(f"repos/{repo}/commits/{sha}/check-suites?per_page=100")
+    return checks.summarise(runs, statuses, suites)
 
 
 def main() -> None:
@@ -65,7 +82,7 @@ def main() -> None:
         sub.add_parser(name).add_argument("number", type=int)
     r = sub.add_parser("review"); r.add_argument("number", type=int); r.add_argument("--body"); r.add_argument("--body-file")
     m = sub.add_parser("merge"); m.add_argument("number", type=int)
-    m.add_argument("--method", default="squash", choices=["squash", "merge", "rebase"]); m.add_argument("--delete-branch", action="store_true")
+    m.add_argument("--method", required=True, choices=["squash", "merge", "rebase"]); m.add_argument("--delete-branch", action="store_true")
     ls = sub.add_parser("list"); ls.add_argument("--base"); ls.add_argument("--state", default="open", choices=["open", "closed", "all"])
     args = p.parse_args()
 
@@ -97,9 +114,15 @@ def main() -> None:
                 sys.exit(f"refusing to merge #{args.number}: CI is {state['state']} {state['failing'] or state['pending']}")
             res = gh.api(f"repos/{repo}/pulls/{args.number}/merge", "PUT",
                          {"merge_method": args.method, "sha": info["head_sha"]})
+            deleted = False
             if args.delete_branch:
-                gh.api(f"repos/{repo}/git/refs/heads/{quote(info['head'], safe='/')}", "DELETE")
-            out({"merged": res.get("merged"), "sha": res.get("sha"), "branch_deleted": args.delete_branch})
+                reason = branch_deletion_blocker(repo, args.number, info)
+                if reason:
+                    print(f"not deleting the branch: {reason}", file=sys.stderr)
+                else:
+                    gh.api(f"repos/{repo}/git/refs/heads/{quote(info['head'], safe='/')}", "DELETE")
+                    deleted = True
+            out({"merged": res.get("merged"), "sha": res.get("sha"), "branch_deleted": deleted})
         else:
             query = f"state={args.state}&per_page=100" + (f"&base={quote(args.base)}" if args.base else "")
             out([{"number": x["number"], "title": x["title"], "base": x["base"]["ref"], "head": x["head"]["ref"],

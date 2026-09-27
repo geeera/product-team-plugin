@@ -32,4 +32,5 @@ Rules:
 - Exactly one `status:*` label per issue — only `move` changes it.
 - Only the repository owner's commands count; `answers` already filters out everyone else.
 - Write bodies to a temp file and use `--body-file` for anything longer than a line (no shell-quoting bugs).
-- Requires `gh` authenticated for the repository (`PT_REPO=owner/repo` overrides the checkout's repo).
+- Talks to the GitHub REST API with the session's token (`GH_TOKEN`); no `gh` CLI needed. The repository comes
+  from `PT_REPO`, else `repo:` in `.product-team/project.yml`, else the `origin` remote.

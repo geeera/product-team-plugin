@@ -30,6 +30,16 @@ class PaginationTest(unittest.TestCase):
             self.assertEqual(gh.api_list("a"), [1, 2, 3])
 
 
+class ErrorTest(unittest.TestCase):
+    def test_timeouts_and_non_json_become_gh_errors(self):
+        with mock.patch("urllib.request.urlopen", side_effect=TimeoutError("read timed out")):
+            with self.assertRaises(gh.GhError):
+                gh.api("repos/o/r")
+        with mock.patch.object(gh, "_request", return_value=("<html>proxy error</html>", {})):
+            with self.assertRaises(gh.GhError):
+                gh.api("repos/o/r")
+
+
 class TokenTest(unittest.TestCase):
     def setUp(self):
         gh._token_cache = None
@@ -62,10 +72,17 @@ class ChecksTest(unittest.TestCase):
     def test_running_is_pending(self):
         self.assertEqual(checks.summarise([run("ci", status="in_progress", conclusion=None)], [])["state"], "pending")
 
-    def test_rerun_supersedes_the_failed_attempt(self):
-        result = checks.summarise([run("ci", conclusion="failure", started="2026-09-27T10:00:00Z"),
-                                   run("ci", started="2026-09-27T11:00:00Z")], [])
-        self.assertEqual(result["state"], "pass")
+    def test_same_job_name_in_two_workflows_both_count(self):
+        result = checks.summarise([run("build"), run("build", conclusion="failure")], [])
+        self.assertEqual(result["state"], "fail")
+
+    def test_unfinished_actions_suite_keeps_ci_pending(self):
+        suites = [{"id": 7, "status": "in_progress", "app": {"slug": "github-actions"}}]
+        self.assertEqual(checks.summarise([run("ci")], [], suites)["state"], "pending")
+
+    def test_idle_suites_of_other_apps_are_ignored(self):
+        suites = [{"id": 8, "status": "queued", "app": {"slug": "some-app"}}]
+        self.assertEqual(checks.summarise([run("ci")], [], suites)["state"], "pass")
 
     def test_no_checks_yet_is_pending_not_pass(self):
         self.assertEqual(checks.summarise([], [])["state"], "pending")

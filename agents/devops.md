@@ -22,7 +22,8 @@ Read first: `${CLAUDE_PLUGIN_ROOT}/reference/workflow.md`, `${CLAUDE_PLUGIN_ROOT
 - `templates/workflows/branch-guard.yml` is installed in every product: it is the only after-the-fact check
   that `dev`, `stage` and `main` move through PRs.
 - Branch operations always as PRs: the stage cut (`dev` → `stage`), back-merges (`stage` → `dev`), release
-  (`stage` → `main` only with the owner's recorded **go**).
+  (`stage` → `main` only with the owner's recorded **go**). Merge these with `scripts/pr merge N --method merge`
+  — squashing one long-lived branch into another makes them drift apart.
 - When a secret or account is missing, add it to the owner checklist (`.product-team/owner-checklist.md`) and
   open a `kind:question` issue; never ask for the value in chat or commit it.
 

@@ -6,6 +6,7 @@ token at all requests go out unauthenticated, which still works where a proxy ad
 """
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import re
@@ -52,6 +53,15 @@ def _request(method: str, url: str, body: Optional[dict] = None, accept: str = "
         raise GhError(f"{method} {url} → HTTP {exc.code}: {detail}") from exc
     except urllib.error.URLError as exc:
         raise GhError(f"{method} {url} failed: {exc.reason}") from exc
+    except (OSError, http.client.HTTPException) as exc:  # timeouts, dropped connections
+        raise GhError(f"{method} {url} failed: {exc!r}") from exc
+
+
+def _json(text: str, what: str) -> Any:
+    try:
+        return json.loads(text) if text.strip() else None
+    except ValueError as exc:  # e.g. an HTML error page from a proxy
+        raise GhError(f"{what}: expected JSON, got {text[:120]!r}") from exc
 
 
 def _url(path: str) -> str:
@@ -60,7 +70,7 @@ def _url(path: str) -> str:
 
 def api(path: str, method: str = "GET", fields: Optional[dict] = None) -> Any:
     text, _ = _request(method, _url(path), fields)
-    return json.loads(text) if text.strip() else None
+    return _json(text, f"{method} {path}")
 
 
 def api_list(path: str) -> List[Any]:
@@ -69,7 +79,7 @@ def api_list(path: str) -> List[Any]:
     url: Optional[str] = _url(path)
     while url:
         text, headers = _request("GET", url)
-        page = json.loads(text) if text.strip() else []
+        page = _json(text, f"GET {url}") or []
         # Some list endpoints wrap the array, e.g. check-runs → {"total_count", "check_runs": [...]}.
         if isinstance(page, dict):
             page = next((v for v in page.values() if isinstance(v, list)), [])

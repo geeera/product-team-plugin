@@ -1,7 +1,11 @@
 {
   "extraKnownMarketplaces": {
     "product-team": {
-      "source": { "source": "github", "repo": "geeera/product-team-plugin" }
+      "source": {
+        "source": "github",
+        "repo": "geeera/product-team-plugin",
+        "ref": "v0.2.0"
+      }
     }
   },
   "enabledPlugins": {

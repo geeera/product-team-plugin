@@ -58,6 +58,8 @@ Communication is from the phone.
   from `qa`. Merge requires a review gate enforced in code: CI plus current-head approvals from `qa` and
   `reviewer`, and from `security` when the changed paths or labels call for it. Products add stack specialists
   as their own agents, routed with `agent:<name>`.
+- **Model by tier** (amends decision 13, 2026-09-27): the architect sizes each issue; light → Sonnet 5, standard →
+  Opus 5.5, heavy → Fable 5.1 (never for security work), with the guard rails in `scripts/ptlib/tiers.py`.
 - **Development on Opus** (amends decision 13, 2026-09-27): `fullstack-dev` runs on Opus 5.5 in every mode; the
   separate senior variant is gone. Weekday caps stay conservative to keep the weekly quota.
 - **Demo write-back** (decision 9): decisions are stored in the demo artifact's database (only the artifact's

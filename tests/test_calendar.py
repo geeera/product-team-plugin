@@ -37,7 +37,6 @@ class ComputeTest(unittest.TestCase):
         ctx = compute(kyiv(2026, 9, 29, 23, 13))
         self.assertEqual(ctx.mode, "normal")
         self.assertEqual(ctx.caps["dev_tasks"], 2)
-        self.assertEqual(ctx.caps["dev_agent"], "fullstack-dev")
 
     def test_cut_day_is_two_days_before_demo_and_starts_freeze(self):
         ctx = compute(kyiv(2026, 10, 7, 18, 7), "Sprint 01", date(2026, 10, 9))

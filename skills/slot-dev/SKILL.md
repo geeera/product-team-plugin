@@ -17,7 +17,8 @@ Follow `${CLAUDE_PLUGIN_ROOT}/reference/run-protocol.md` with slot name `slot-de
 
 ## 1. Plan
 `B next` returns the plan for this run — deterministic, from the backlog and `slot-context`:
-- `dispatch`: ordered issues with `agent`, `base` branch and `branch_prefix`. Order: production defects,
+- `dispatch`: ordered issues with `agent`, `tier`, `base` branch and `branch_prefix`. The `agent` already
+  reflects the architect's tier and the guard rails (`tier_notes` say which applied) — start exactly that agent. Order: production defects,
   P0/P1 bugs and release blockers (outside the cap), then QA rework (`qa:changes-requested`), then approved
   sprint work up to the cap.
 - `skipped`: with the reason (design not approved, over the cap, `needs:local`, `needs:owner`, freeze).

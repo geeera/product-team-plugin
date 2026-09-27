@@ -87,6 +87,10 @@ class PickTest(unittest.TestCase):
         plan = picker.pick([issue(1, labels=["agent:qa"])], S, NORMAL)
         self.assertEqual(plan["skipped"][0]["reason"], "agent:qa cannot develop")
 
+    def test_tier_variants_are_chosen_by_tier_not_by_agent_label(self):
+        plan = picker.pick([issue(1, labels=["agent:fullstack-dev-heavy"])], S, NORMAL)
+        self.assertIn("tier:* label", plan["skipped"][0]["reason"])
+
     def test_unknown_project_agent_is_flagged(self):
         plan = picker.pick([issue(1, labels=["agent:flutter-dev"])], S, NORMAL, known_agents={"fullstack-dev"})
         self.assertEqual(plan["skipped"][0]["reason"], "no .claude/agents/flutter-dev.md in this repository")
@@ -98,6 +102,18 @@ class PickTest(unittest.TestCase):
     def test_complexity_high_with_note_is_planned(self):
         plan = picker.pick([issue(1, labels=["complexity:high", "architect-note"])], S, NORMAL)
         self.assertEqual(plan["dispatch"][0]["agent"], "fullstack-dev")
+
+    def test_tier_picks_the_developer(self):
+        plan = picker.pick([issue(1, labels=["tier:light"]), issue(2, labels=["tier:heavy"]), issue(3)], S, BURN)
+        self.assertEqual([(d["agent"], d["tier"]) for d in plan["dispatch"]],
+                         [("fullstack-dev", "standard"), ("fullstack-dev-heavy", "heavy"), ("fullstack-dev", "standard")])
+
+    def test_light_tier_on_a_weekday(self):
+        self.assertEqual(picker.pick([issue(1, labels=["tier:light"])], S, NORMAL)["dispatch"][0]["agent"], "fullstack-dev-light")
+
+    def test_specialist_ignores_tiers(self):
+        entry = picker.pick([issue(1, labels=["tier:heavy", "agent:flutter-dev"])], S, NORMAL)["dispatch"][0]
+        self.assertEqual((entry["agent"], entry["tier"]), ("flutter-dev", None))
 
 
 class ReviewRegressionTest(unittest.TestCase):

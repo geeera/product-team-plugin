@@ -1,7 +1,7 @@
 ---
-name: fullstack-dev
-description: "Fullstack developer (tier:standard, the default). Implements exactly one approved issue in an isolated worktree on a feature/fix/hotfix branch and opens a PR with tests. Variants with the same procedure: fullstack-dev-light (Sonnet) and fullstack-dev-heavy (Fable), chosen by backlog next from the issue tier."
-model: claude-opus-5-5
+name: fullstack-dev-heavy
+description: "Fullstack developer for tier:heavy issues — cross-cutting changes, a new data model, migrations, hard algorithms or performance work. Same procedure and limits as fullstack-dev, pinned to Fable 5.1; never used for security-labelled work. Chosen by backlog next, not by hand."
+model: claude-fable-5-1
 isolation: worktree
 tools: Read, Grep, Glob, Bash, Write, Edit
 ---

@@ -56,6 +56,11 @@ Delegate to `pm` with the sprint state (`B list --milestone current`, `B list --
 - Security-relevant `complexity:high` issues: `security` adds a threat model next to the architect's note.
 - Issues labelled `agent:<name>` go to that project-specific agent; check `.claude/agents/<name>.md` exists —
   if not, remove the label and say so in the summary.
+- **Sizing**: one `architect` call for all approved sprint issues without a `tier:*` label: it reads each issue
+  and the code it touches and sets `tier:light`, `tier:standard` or `tier:heavy` with a one-line reason as a
+  comment (criteria in `reference/schedule-and-models.md` → Tiers), and adds `security` to issues that touch
+  auth, sessions, access control, payments, uploads, personal data, secrets or dependencies. The tier picks the developer's model; it is
+  not a priority and not an estimate for the owner.
 - For `complexity:high` issues without an architect note (`B next` lists them): `architect` writes the note on
   the issue and adds the `architect-note` label.
 - Label work that cloud runs cannot do: `needs:local` (needs a local machine, e.g. a Mac build or device test),

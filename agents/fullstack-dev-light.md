@@ -1,7 +1,7 @@
 ---
-name: fullstack-dev
-description: "Fullstack developer (tier:standard, the default). Implements exactly one approved issue in an isolated worktree on a feature/fix/hotfix branch and opens a PR with tests. Variants with the same procedure: fullstack-dev-light (Sonnet) and fullstack-dev-heavy (Fable), chosen by backlog next from the issue tier."
-model: claude-opus-5-5
+name: fullstack-dev-light
+description: "Fullstack developer for tier:light issues — local changes along an existing pattern (copy, config, a small UI tweak, a bug with a reproduction). Same procedure and limits as fullstack-dev, pinned to Sonnet 5. Chosen by backlog next, not by hand."
+model: claude-sonnet-5
 isolation: worktree
 tools: Read, Grep, Glob, Bash, Write, Edit
 ---

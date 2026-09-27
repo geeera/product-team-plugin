@@ -8,9 +8,15 @@
   pr review N (--body B | --body-file F)      a review comment (QA verdicts: "QA: APPROVED" / "QA: CHANGES REQUESTED")
   pr reviews N         review bodies, oldest first
   pr update-branch N   merge the base into the PR branch on GitHub (no force-push); fails on conflicts
-  pr merge N --method squash|merge [--delete-branch]
-                       refuses unless CI passes; `squash` for feature/fix/hotfix PRs, `merge` for the
-                       stage cut, releases and back-merges (long-lived branches must keep shared history)
+  pr files N           changed paths
+  pr security-check N  does this PR need a security review? reasons from the paths and the linked issue's labels
+  pr gate N            CI plus the independent verdicts it needs: QA, REVIEW, and SECURITY when security-check says so;
+                       each must be APPROVED on the current head commit
+  pr merge N --method squash|merge [--delete-branch] [--ci-only]
+                       refuses unless the gate passes. `squash` for feature/fix/hotfix PRs, `merge` for the
+                       stage cut, releases and back-merges (long-lived branches must keep shared history).
+                       `--ci-only` skips the verdicts and is only for those branch operations and the
+                       `chore/product-team-*` self-update PR
   pr list [--base B] [--state open|closed|all]
 
 Output is JSON (the diff is plain text).
@@ -24,7 +30,9 @@ import sys
 from urllib.parse import quote
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from ptlib import checks, gh  # noqa: E402
+import re  # noqa: E402
+
+from ptlib import checks, gh, review  # noqa: E402
 
 
 def out(data) -> None:
@@ -55,6 +63,11 @@ def view(repo: str, n: int) -> dict:
 LONG_LIVED = {"dev", "stage", "main", "master"}
 
 
+def ci_only_allowed(info: dict) -> bool:
+    """Only branch operations (cut, release, back-merge) and the plugin's self-update may skip the verdicts."""
+    return info["head"] in LONG_LIVED or info["head"].startswith("chore/product-team-")
+
+
 def branch_deletion_blocker(repo: str, number: int, info: dict) -> str:
     """Only short-lived branches of this repository are deleted after a merge."""
     pr = gh.api(f"repos/{repo}/pulls/{number}")
@@ -73,16 +86,46 @@ def ci(repo: str, sha: str) -> dict:
     return checks.summarise(runs, statuses, suites)
 
 
+def changed_files(repo: str, n: int) -> list:
+    return [f["filename"] for f in gh.api_list(f"repos/{repo}/pulls/{n}/files?per_page=100")]
+
+
+def linked_issue_labels(repo: str, n: int) -> list:
+    body = gh.api(f"repos/{repo}/pulls/{n}").get("body") or ""
+    labels = []
+    for number in re.findall(r"(?i)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)", body):
+        labels += [l["name"] for l in gh.api(f"repos/{repo}/issues/{number}").get("labels", [])]
+    return labels
+
+
+def security_check(repo: str, n: int) -> list:
+    return review.security_reasons(changed_files(repo, n), linked_issue_labels(repo, n))
+
+
+def gate(repo: str, n: int) -> dict:
+    info = view(repo, n)
+    reasons = security_check(repo, n)
+    reviews = gh.api_list(f"repos/{repo}/pulls/{n}/reviews?per_page=100")
+    result = review.gate(reviews, info["head_sha"], bool(reasons))
+    result["ci"] = ci(repo, info["head_sha"])
+    result["security_reasons"] = reasons[:10]
+    if result["ci"]["state"] != "pass":
+        result["missing"].insert(0, f"CI: {result['ci']['state']}")
+        result["passed"] = False
+    return result
+
+
 def main() -> None:
     p = argparse.ArgumentParser(prog="pr", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("create"); c.add_argument("--base", required=True); c.add_argument("--head", required=True)
     c.add_argument("--title", required=True); c.add_argument("--body"); c.add_argument("--body-file")
-    for name in ("view", "checks", "diff", "reviews", "update-branch"):
+    for name in ("view", "checks", "diff", "reviews", "update-branch", "files", "security-check", "gate"):
         sub.add_parser(name).add_argument("number", type=int)
     r = sub.add_parser("review"); r.add_argument("number", type=int); r.add_argument("--body"); r.add_argument("--body-file")
     m = sub.add_parser("merge"); m.add_argument("number", type=int)
     m.add_argument("--method", required=True, choices=["squash", "merge", "rebase"]); m.add_argument("--delete-branch", action="store_true")
+    m.add_argument("--ci-only", action="store_true")
     ls = sub.add_parser("list"); ls.add_argument("--base"); ls.add_argument("--state", default="open", choices=["open", "closed", "all"])
     args = p.parse_args()
 
@@ -107,11 +150,25 @@ def main() -> None:
         elif args.cmd == "update-branch":
             head = view(repo, args.number)["head_sha"]
             out(gh.api(f"repos/{repo}/pulls/{args.number}/update-branch", "PUT", {"expected_head_sha": head}))
+        elif args.cmd == "files":
+            out(changed_files(repo, args.number))
+        elif args.cmd == "security-check":
+            reasons = security_check(repo, args.number)
+            out({"required": bool(reasons), "reasons": reasons})
+        elif args.cmd == "gate":
+            out(gate(repo, args.number))
         elif args.cmd == "merge":
             info = view(repo, args.number)
-            state = ci(repo, info["head_sha"])
-            if state["state"] != "pass":
-                sys.exit(f"refusing to merge #{args.number}: CI is {state['state']} {state['failing'] or state['pending']}")
+            if args.ci_only and not ci_only_allowed(info):
+                sys.exit(f"--ci-only is for branch operations and the self-update PR, not {info['head']}")
+            if args.ci_only:
+                state = ci(repo, info["head_sha"])
+                if state["state"] != "pass":
+                    sys.exit(f"refusing to merge #{args.number}: CI is {state['state']} {state['failing'] or state['pending']}")
+            else:
+                result = gate(repo, args.number)
+                if not result["passed"]:
+                    sys.exit(f"refusing to merge #{args.number}: " + "; ".join(result["missing"]))
             res = gh.api(f"repos/{repo}/pulls/{args.number}/merge", "PUT",
                          {"merge_method": args.method, "sha": info["head_sha"]})
             deleted = False

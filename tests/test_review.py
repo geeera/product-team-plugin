@@ -50,6 +50,16 @@ class MorePathsTest(unittest.TestCase):
                 self.assertEqual(review.security_reasons([path]), [])
 
 
+class AgentToolingTest(unittest.TestCase):
+    def test_files_that_steer_agents_or_the_gate_need_security(self):
+        for path in (".claude/settings.json", ".claude/agents/qa.md", ".claude/product-team/scripts/pr",
+                     ".claude/product-team/scripts/ptlib/review.py", ".product-team/project.yml", ".mcp.json",
+                     "CLAUDE.md", "AGENTS.md", ".github/CODEOWNERS", "apps/web/.claude/settings.json",
+                     "apps/web/.claude/agents/x.md", "CLAUDE.local.md", "apps/api/CLAUDE.md"):
+            with self.subTest(path=path):
+                self.assertTrue(review.security_reasons([path]))
+
+
 class CiOnlyTest(unittest.TestCase):
     def test_release_flow_operations_are_allowed(self):
         for head, base in (("dev", "stage"), ("stage", "main"), ("stage", "dev"), ("main", "stage"), ("main", "dev")):

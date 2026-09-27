@@ -82,7 +82,97 @@ class VendoredCopyTest(unittest.TestCase):
             self.assertTrue((target / ".claude/agents/qa.md").exists())
 
 
+class SelfUpdateVerificationTest(unittest.TestCase):
+    def test_installed_manifest_is_exactly_what_verification_expects(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            result = vendor.install(ROOT, target)
+            files = vendoring.render(ROOT, result["version"]["version"])
+            expected = vendoring.manifest_bytes(result["version"]["version"], result["version"]["commit"], files)
+            self.assertEqual((target / vendoring.MANIFEST).read_bytes(), expected)
+            for rel, data in files.items():
+                self.assertEqual((target / rel).read_bytes(), data, rel)
+
+    def setUp(self):
+        self.expected = {".claude/agents/qa.md": b"qa v2", vendoring.MANIFEST: b"{}"}
+        self.modes = {".claude/agents/qa.md": "100644", vendoring.MANIFEST: "100644"}
+
+    def entry(self, path, data=b"qa v2", status="M", mode="100644"):
+        return {"status": status, "path": path, "mode": mode, "blob": vendoring.git_blob_sha(data)}
+
+    def verify(self, *entries, before=()):
+        return vendoring.verify_tree(list(entries), self.expected, self.modes, set(before))
+
+    def test_exact_release_content_passes(self):
+        self.assertEqual(self.verify(self.entry(".claude/agents/qa.md"), self.entry(vendoring.MANIFEST, b"{}")), [])
+
+    def test_modified_content_is_refused(self):
+        self.assertTrue(self.verify(self.entry(".claude/agents/qa.md", b"qa v2 + injected")))
+
+    def test_files_only_the_old_install_had_may_only_be_deleted(self):
+        before = [".claude/product-team/scripts/ptlib/tiers.py"]
+        self.assertTrue(self.verify(self.entry(before[0], b"evil"), before=before))
+        self.assertEqual(self.verify(self.entry(before[0], status="D", mode="000000"), before=before), [])
+
+    def test_symlinks_and_mode_changes_are_refused(self):
+        self.assertTrue(self.verify(self.entry(".claude/agents/qa.md", mode="120000")))
+        self.assertTrue(self.verify(self.entry(".claude/agents/qa.md", mode="100755")))
+
+    def test_settings_are_refused_even_if_generated(self):
+        self.expected[".claude/settings.json"] = b"{}"
+        self.modes[".claude/settings.json"] = "100644"
+        self.assertTrue(self.verify(self.entry(".claude/settings.json", b"{}")))
+        self.assertTrue(self.verify(self.entry("apps/web/.claude/settings.local.json", b"{}", status="A")))
+
+    def test_other_files_are_refused(self):
+        self.assertTrue(self.verify(self.entry(".product-team/project.yml", b"x")))
+
+    def test_diff_tree_parsing(self):
+        raw = (b":100644 100644 aaa bbb M\0.claude/agents/qa.md\0"
+               b":100644 000000 ccc 0000 D\0.claude/old.md\0")
+        self.assertEqual(vendoring.parse_diff_tree(raw), [
+            {"status": "M", "path": ".claude/agents/qa.md", "mode": "100644", "blob": "bbb"},
+            {"status": "D", "path": ".claude/old.md", "mode": "000000", "blob": "0000"}])
+
+    def test_unparseable_diff_tree_fails_closed(self):
+        with self.assertRaises(ValueError):
+            vendoring.parse_diff_tree(b":100644 100644 aaa bbb M\0a\0garbage\0more\0")
+
+    def test_blob_sha_matches_git(self):
+        import subprocess
+        out = subprocess.run(["git", "hash-object", "--stdin"], input=b"hello\n", capture_output=True).stdout.decode().strip()
+        self.assertEqual(vendoring.git_blob_sha(b"hello\n"), out)
+
+    def test_versions_must_be_releases(self):
+        self.assertLess(vendoring.parse_version("0.4.0"), vendoring.parse_version("0.10.0"))
+        with self.assertRaises(ValueError):
+            vendoring.parse_version("0.5.0 -->\n<!--")
+
+
 class PluginRefTest(unittest.TestCase):
+    def test_reviewer_logins_inline_and_block_lists(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "project.yml"
+            cases = {
+                "team:\n  reviewer_logins: []\n": [],
+                "team:\n  reviewer_logins: [bot-a, 'bot-b']\n": ["bot-a", "bot-b"],
+                "team:\n  reviewer_logins:\n    - bot-a\n    - \"bot-b\"  # note\n  plugin_ref: stable\n": ["bot-a", "bot-b"],
+                "team:\n  reviewer_logins:\n\n    - bot-a\nowner:\n  timezone: x\n": ["bot-a"],
+            }
+            for text, expected in cases.items():
+                with self.subTest(text=text):
+                    path.write_text(text)
+                    self.assertEqual(project.reviewer_logins(str(path)), expected)
+
+    def test_unreadable_reviewer_logins_fail_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "project.yml"
+            for text in ("team:\n  reviewer_logins: [\n    a,\n    b]\n", "team:\n  reviewer_logins:\n- a\n"):
+                with self.subTest(text=text):
+                    path.write_text(text)
+                    with self.assertRaises(ValueError):
+                        project.reviewer_logins(str(path))
+
     def test_defaults_to_stable_and_reads_a_pin(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "project.yml"

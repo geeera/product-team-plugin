@@ -36,10 +36,12 @@ def token() -> str:
     return _token_cache
 
 
-def _request(method: str, url: str, body: Optional[dict] = None, accept: str = "application/vnd.github+json") -> Tuple[str, dict]:
+def _request(method: str, url: str, body: Optional[dict] = None, accept: str = "application/vnd.github+json",
+             auth: Optional[str] = None) -> Tuple[str, dict]:
     headers = {"Accept": accept, "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "product-team-plugin"}
-    if token():
-        headers["Authorization"] = f"Bearer {token()}"
+    credential = auth if auth is not None else token()
+    if credential:
+        headers["Authorization"] = f"Bearer {credential}"
     data = None
     if body is not None:
         data = json.dumps(body).encode()
@@ -68,8 +70,8 @@ def _url(path: str) -> str:
     return path if path.startswith("http") else f"{API}/{path.lstrip('/')}"
 
 
-def api(path: str, method: str = "GET", fields: Optional[dict] = None) -> Any:
-    text, _ = _request(method, _url(path), fields)
+def api(path: str, method: str = "GET", fields: Optional[dict] = None, auth: Optional[str] = None) -> Any:
+    text, _ = _request(method, _url(path), fields, auth=auth)
     return _json(text, f"{method} {path}")
 
 
@@ -131,6 +133,25 @@ def repo() -> str:
     if not found:
         raise GhError("cannot tell the repository: set PT_REPO=owner/repo or `repo:` in .product-team/project.yml")
     return found
+
+
+def review_token() -> Optional[str]:
+    """The reviewing account's token (PT_REVIEW_TOKEN), set only in the reviewers' cloud environment."""
+    return os.environ.get("PT_REVIEW_TOKEN") or None
+
+
+def token_login() -> Optional[str]:
+    """The account the agents act as; None when it cannot be told (e.g. an app token without /user access)."""
+    try:
+        return (api("user") or {}).get("login") or None
+    except GhError:
+        return None
+
+
+def acts_as_owner(repo_name: str) -> bool:
+    """True when the agents act as the owner's account — or when that cannot be ruled out (fail closed)."""
+    login = token_login()
+    return login is None or login.lower() == owner_login(repo_name).lower()
 
 
 def owner_login(repo_name: str) -> str:

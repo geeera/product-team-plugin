@@ -25,6 +25,11 @@ class RenderTest(unittest.TestCase):
         self.assertEqual(order, sorted(order))
         self.assertNotIn("#8 ", body)
 
+    def test_same_account_mode_is_a_standing_item(self):
+        body = inbox.render([issue(4, kind="question")], same_account_url="https://x/checklist")
+        self.assertLess(body.index("Security setup"), body.index("Questions"))
+        self.assertIn("**2 things need you.**", body)
+
     def test_pause_is_listed_first(self):
         body = inbox.render([issue(4, kind="question")], paused_url="https://x/log")
         self.assertLess(body.index("Team is paused"), body.index("Questions"))

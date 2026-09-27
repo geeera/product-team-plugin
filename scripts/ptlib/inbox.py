@@ -7,6 +7,7 @@ MARKER = "<!-- pt-inbox -->"
 
 # (label or predicate key, section title, the one action the owner takes)
 SECTIONS = (
+    ("setup", "Security setup", "Until this is done, agents can imitate your approvals"),
     ("paused", "Team is paused", "Check the failed runs, then comment `/resume` on the run log"),
     ("release", "Release decision", "Answer `/go` or `/no-go <why>` on the demo issue"),
     ("design", "Designs to approve", "Open the link, then `/approve` or `/reject <why>` on the issue"),
@@ -31,8 +32,12 @@ def classify(issue: dict) -> Optional[str]:
     return None
 
 
-def render(issues: List[dict], paused_url: str = "", updated: str = "") -> str:
+def render(issues: List[dict], paused_url: str = "", updated: str = "", same_account_url: str = "") -> str:
+    """same_account_url: link to the owner checklist, set while the agents act as the owner's account."""
     groups = {key: [] for key, _, _ in SECTIONS}
+    if same_account_url:
+        groups["setup"].append({"title": "Agents use your GitHub account — add a reviewing account and "
+                                         "team.reviewer_logins", "url": same_account_url})
     if paused_url:
         groups["paused"].append({"title": "Run log", "url": paused_url})
     for issue in sorted(issues, key=lambda i: i["number"]):

@@ -31,7 +31,9 @@ def build(repo: str) -> str:
     paused = next((i for i in issues if "team:paused" in i["labels"]), None)
     mine = [i for i in issues if LABEL not in i["labels"] and "team:run-log" not in i["labels"]]
     updated = datetime.now(KYIV).strftime("%a %d %b %H:%M Kyiv")
-    return inbox.render(mine, paused["url"] if paused else "", updated)
+    same_account = gh.acts_as_owner(repo)
+    checklist = f"https://github.com/{repo}/blob/HEAD/.product-team/owner-checklist.md" if same_account else ""
+    return inbox.render(mine, paused["url"] if paused else "", updated, checklist)
 
 
 def main() -> None:

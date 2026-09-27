@@ -66,6 +66,31 @@ class ParseRunsTest(unittest.TestCase):
         self.assertEqual([r["id"] for r in runstate.parse_runs(comments)], ["a", "b"])
 
 
+class OwnerPauseTest(unittest.TestCase):
+    def comment(self, body, at):
+        return {"body": body, "created_at": at}
+
+    def test_latest_unresumed_pause_is_active(self):
+        comments = [self.comment(runstate.owner_pause_marker({"routines": [{"id": "trig_1"}]}), "2026-10-01T10:00:00Z")]
+        record = runstate.active_owner_pause(comments)
+        self.assertEqual(record["routines"], [{"id": "trig_1"}])
+        self.assertEqual(record["paused_at"], "2026-10-01T10:00:00Z")
+
+    def test_resume_after_pause_clears_it(self):
+        comments = [self.comment(runstate.owner_pause_marker({"routines": []}), "2026-10-01T10:00:00Z"),
+                    self.comment(runstate.OWNER_RESUME, "2026-10-05T10:00:00Z")]
+        self.assertIsNone(runstate.active_owner_pause(comments))
+
+    def test_new_pause_after_resume_is_active_again(self):
+        comments = [self.comment(runstate.owner_pause_marker({"n": 1}), "2026-10-01T10:00:00Z"),
+                    self.comment(runstate.OWNER_RESUME, "2026-10-05T10:00:00Z"),
+                    self.comment(runstate.owner_pause_marker({"n": 2}), "2026-10-09T10:00:00Z")]
+        self.assertEqual(runstate.active_owner_pause(comments)["n"], 2)
+
+    def test_malformed_record_is_ignored(self):
+        self.assertIsNone(runstate.active_owner_pause([self.comment("<!-- pt-owner-pause {bad} -->", "2026-10-01T10:00:00Z")]))
+
+
 class ResumeTest(unittest.TestCase):
     def test_resume_after_pause_lifts_it(self):
         cmds = [{"command": "resume", "at": "2026-09-26T10:00:00Z"}]

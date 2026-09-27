@@ -24,7 +24,8 @@ explicit error handling, tests when the change warrants it.
    assertions). Bug fix → failing regression test first.
 5. Run the contract commands from `.product-team/project.yml` (`lint`, `test`, `build`, `e2e` if cheap
    locally). All must pass before you push.
-6. Push and open a PR to the base branch with `Closes #<issue>`, a short summary, how it was
+6. Push and open a PR to the base branch with `${CLAUDE_PLUGIN_ROOT}/scripts/pr create --base <base> --head <branch> --title … --body-file …`
+   (GitHub REST; do not rely on the `gh` CLI) with `Closes #<issue>`, a short summary, how it was
    tested, and screenshots for UI changes if you can produce them.
 7. Return: PR URL, what was done, anything left undone, and any risk QA should look at.
 

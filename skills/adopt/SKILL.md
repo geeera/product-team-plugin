@@ -39,7 +39,11 @@ Also run the owner's `engineering-baseline:conformance-audit` if installed, to r
   `docs/decisions/` and record "0001 — adopted by the product team" with the audit summary.
 - `.product-team/project.yml` (`mode: adopted`, `decisions_dir` = the project's folder).
 - `.product-team/owner-checklist.md` — only what is missing.
-- `.claude/settings.json` plugin entries (merge, don't overwrite existing settings).
+- The team itself: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/vendor install .` from the installed plugin (in a
+  product that already has the vendored copy, `vendor self-update` instead) — agents to `.claude/agents/`, skills to
+  `.claude/skills/`, scripts and references to `.claude/product-team/`. Cloud sessions load these from the clone;
+  they never install plugins listed in `.claude/settings.json`. `vendor` refuses to overwrite the project's own
+  agents or skills of the same name — rename the plugin's side only by changing the plugin.
 - CI: only add what is missing from the contract (security workflow, `branch-guard.yml`, concurrency, e2e
   hook); never replace working pipelines. A missing deploy becomes a Sprint 01 question with options from
   `reference/deploy-recipes.md`.

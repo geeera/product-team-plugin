@@ -10,6 +10,20 @@ disable-model-invocation: true
 Follow `${CLAUDE_PLUGIN_ROOT}/reference/run-protocol.md` with slot name `slot-pm`. You are the orchestrator
 (PM + DevOps). `B` = `${CLAUDE_PLUGIN_ROOT}/scripts/backlog`.
 
+## 0. Keep the team current (products with a vendored team only)
+Skip if `.claude/product-team/MANIFEST.json` does not exist. `PR` = `${CLAUDE_PLUGIN_ROOT}/scripts/pr`.
+1. `PR list --base dev` → an open PR whose head starts with `chore/product-team-`?
+   - `PR checks N` is `pass` → `PR merge N --method squash --delete-branch`. It changes only generated `.claude/`
+     files, so it merges on green CI **without a QA review** (the one exception). Done for today.
+   - `fail` → add it to the owner's inbox (comment on the PR, `needs:owner` is not needed: say it in the run
+     summary) and stop; `pending` → leave it for the next run. Never open a second update PR.
+2. No such PR → `python3 .claude/product-team/scripts/vendor self-update` (follows `team.plugin_ref` in
+   `project.yml`: the `stable` channel or a pinned tag). On `updated: true`: branch
+   `chore/product-team-<version>` from `dev`, commit `.claude/`, `PR create --base dev` titled
+   `chore: product team <version>` with the CHANGELOG entries between the two versions as the body. Do the
+   migration step of every **Breaking** entry in the same PR. List `overwrote_local_edits` in the body — those
+   fixes belong in the plugin, not here. The PR merges on a later run (step 1); the new team takes effect after.
+
 ## 1. Owner answers
 - **Designs**: for each issue labelled `design:awaiting-approval`, `B answers N` (only commands newer than the
   design-link comment count):
@@ -41,7 +55,8 @@ Delegate to `pm` with the sprint state (`B list --milestone current`, `B list --
 - `analyst`: success metric and tracking tasks for newly approved features.
 
 ## 4. Stage cut (only when `slot-context` says `is_cut_day`)
-`devops` opens PR `dev` → `stage` titled `Stage cut: <sprint>`, listing merged issues. Merge it when CI is green
+`devops` opens PR `dev` → `stage` titled `Stage cut: <sprint>`, listing merged issues. Merge it with
+`${CLAUDE_PLUGIN_ROOT}/scripts/pr merge <pr> --method merge` when CI is green
 (this is the release candidate; the owner approves the release at the demo, not the cut). Everything still
 `in-progress` moves to the next sprint milestone. Comment on the `team:demo` issue (create it with
 `B create --kind question --label team:demo --title "<sprint> demo" …` if missing) with the stage URL.

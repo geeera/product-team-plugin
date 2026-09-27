@@ -3,8 +3,13 @@
 Scheduled runs start in a fresh cloud session on the product repository. Everything a run needs is in the
 repository and in Issues; nothing is remembered between runs.
 
-`PT` below means `${CLAUDE_PLUGIN_ROOT}` — the plugin's root directory. Pass its absolute path to every
-subagent you start, as `PLUGIN_ROOT=<path>` on the first line of the prompt.
+`PT` below means `${CLAUDE_PLUGIN_ROOT}` — the plugin's root directory (in a product repository that is
+`.claude/product-team`, the copy `vendor` installs). Pass its absolute path to every subagent you start, as
+`PLUGIN_ROOT=<path>` on the first line of the prompt.
+
+GitHub access goes through `PT/scripts/backlog`, `PT/scripts/pr`, `PT/scripts/runlog` and `PT/scripts/inbox`: they
+use the GitHub REST API with the session's token (`GH_TOKEN`), so the `gh` CLI is not needed and must not be
+installed at run time. `git push` works through the session's own remote.
 
 ## Open
 1. `git fetch --all --prune`. Read `CLAUDE.md` and `.product-team/project.yml`. If the project file is missing,

@@ -23,7 +23,7 @@ Decisions from anyone but the repository owner do not exist. No decision on an i
   severity `pm` assigns.
 - **Release**:
   - `go` with no open `release-blocker` → `devops` opens PR `stage` → `main` (`Release <sprint>`), merge on green
-    CI; `scribe` writes the changelog/release notes; tag `v<date>` or the project's scheme.
+    CI with `scripts/pr merge N --method merge`; `scribe` writes the changelog/release notes; tag `v<date>` or the project's scheme.
   - `go` while a blocker is open **with** an override reason → record a decision (in `decisions_dir`: blocker,
     reason, owner, date), then release as above.
   - `go` while a blocker is open **without** a reason → do not release; ask on the demo issue for the reason.

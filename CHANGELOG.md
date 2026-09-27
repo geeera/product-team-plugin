@@ -1,8 +1,21 @@
 # Changelog
 
-Products pin a release tag in `.claude/settings.json` (`"ref": "vX.Y.Z"`); `devops` bumps it through a PR after
-reading the entries in between. Breaking changes (a renamed label, a changed script contract, a new required
+Products follow the `stable` channel (or a pinned tag, `team.plugin_ref` in `.product-team/project.yml`): the
+first `slot-pm` of the day runs `vendor self-update` and opens a PR with the entries in between. Breaking changes (a renamed label, a changed script contract, a new required
 `project.yml` key) are marked **Breaking** with the migration step.
+
+## 0.3.0
+
+- **Cloud runs load the team from the product repository.** `scripts/vendor install` copies agents, skills,
+  scripts and references into the product's `.claude/`; cloud sessions load project agents and skills from the
+  clone but never install plugins listed in `.claude/settings.json`. `vendor self-update` (first `slot-pm` of the
+  day) opens a PR when the `stable` channel moves, so products pick up releases by themselves.
+- **No `gh` CLI needed.** Scripts talk to the GitHub REST API with `GH_TOKEN`; new `scripts/pr` covers create,
+  view, checks, diff, review, update-branch and merge (merge refuses unless CI passes).
+- **Breaking** — in products the skills are `/slot-pm`, `/slot-dev`, `/slot-qa` (project skills), not
+  `/product-team:…`. Migration: run `vendor install .` in the product, delete the `product-team` entries from its
+  `.claude/settings.json`, point each routine at the product repository only with the new command.
+- **Breaking** — `templates/claude-settings.json` is gone (it never worked for cloud runs).
 
 ## 0.2.0
 

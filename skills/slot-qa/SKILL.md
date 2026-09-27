@@ -8,7 +8,7 @@ disable-model-invocation: true
 # Slot: QA + fixes + morning summary
 
 Follow `${CLAUDE_PLUGIN_ROOT}/reference/run-protocol.md` with slot name `slot-qa`. `B` =
-`${CLAUDE_PLUGIN_ROOT}/scripts/backlog`.
+`${CLAUDE_PLUGIN_ROOT}/scripts/backlog`, `PR` = `${CLAUDE_PLUGIN_ROOT}/scripts/pr`.
 
 ## 1. Freeze
 If `mode == freeze`, run the `qa-regression` skill first (it covers `fix/*` PRs to `stage`), then continue with
@@ -16,15 +16,15 @@ step 2 for any PRs to `dev` that are still open.
 
 ## 2. Review PRs (`status:qa` issues)
 For each linked open PR, oldest first:
-1. **Current with its base?** `gh pr view <pr> --json mergeable,mergeStateStatus`. Behind or conflicting →
-   the PR's developer agent merges the base into the branch (no force-push; generated files are regenerated,
-   not hand-merged) and pushes; CI then runs again — review it in a later slot.
-2. `gh pr checks <pr>` — pending: skip (next slot); red: comment the failing job on the PR,
+1. **Current with its base?** `PR view <pr>` → `merge_state`. `behind` → `PR update-branch <pr>` (GitHub merges
+   the base in; CI runs again — review it in a later slot). `dirty` (conflicts) → the developer agent merges the
+   base into the branch locally (no force-push; generated files are regenerated, not hand-merged) and pushes.
+2. `PR checks <pr>` — pending: skip (next slot); red: comment the failing job on the PR,
    `B move N in-progress --reason "CI red: <job>"`, `B label N +qa:changes-requested`.
 3. Green → start the **`qa` agent** with only: `PLUGIN_ROOT=<path>`, repo, PR number, issue number. Never pass
    the developer's summary or transcript. Independent reviews may run in parallel (up to 3).
 4. Verdict:
-   - `QA: APPROVED` → `gh pr merge <pr> --squash --delete-branch`, `B label N -qa:changes-requested`,
+   - `QA: APPROVED` → `PR merge <pr> --method squash --delete-branch` (it refuses unless CI passes), `B label N -qa:changes-requested`,
      `B move N done`.
    - `QA: CHANGES REQUESTED` → `B move N in-progress`, `B label N +qa:changes-requested` (this is what puts it
      in the next `B next` plan). If the changes are small and the issue is P0/P1, dispatch the developer now on

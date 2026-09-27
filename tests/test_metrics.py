@@ -48,5 +48,17 @@ class SummaryTest(unittest.TestCase):
                          (3, 1, 1, 2.0))
 
 
+class TierMetricsTest(unittest.TestCase):
+    def test_counts_per_tier(self):
+        issues = [
+            {"number": 1, "state": "closed", "closed_at": "2026-09-04T00:00:00Z", "labels": ["kind:feature", "status:done", "tier:light"]},
+            {"number": 2, "state": "open", "closed_at": None, "labels": ["kind:bug", "tier:light", "tier-up"]},
+            {"number": 3, "state": "open", "closed_at": None, "labels": ["kind:chore"]},
+        ]
+        by_tier = metrics.sprint_summary(issues, {}, {})["by_tier"]
+        self.assertEqual(by_tier["light"], {"planned": 2, "shipped": 1, "raised": 1})
+        self.assertEqual(by_tier["unsized"], {"planned": 1, "shipped": 0, "raised": 0})
+
+
 if __name__ == "__main__":
     unittest.main()

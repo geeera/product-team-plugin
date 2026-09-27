@@ -4,6 +4,15 @@ Products follow the `stable` channel (or a pinned tag, `team.plugin_ref` in `.pr
 first `slot-pm` of the day runs `vendor self-update` and opens a PR with the entries in between. Breaking changes (a renamed label, a changed script contract, a new required
 `project.yml` key) are marked **Breaking** with the migration step.
 
+## 0.5.0
+
+- **Tiers**: the architect sizes every approved issue (`tier:light|standard|heavy`) in `slot-pm`; `backlog next`
+  sends it to `fullstack-dev-light` (Sonnet 5), `fullstack-dev` (Opus 5.5) or `fullstack-dev-heavy` (Fable 5.1).
+  Guard rails in code: default `standard`; no `light` in the burn window or hotfixes; two failed review rounds
+  raise the tier; security-labelled work never on Fable; product specialists keep their own model.
+- `sprint-metrics` reports planned, shipped and raised issues per tier.
+- New labels `tier:light`, `tier:standard`, `tier:heavy`, `review-failed`, `tier-up`. Run `backlog init` once.
+
 ## 0.4.0
 
 - **Team**: `ux-designer` and `ui-designer` replace `designer`; new `reviewer` (code quality, Sonnet) and

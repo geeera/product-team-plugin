@@ -49,6 +49,8 @@ directly from a slot skill — the adapter is what lets another tracker replace 
 - **Flags**: `complexity:high` (architect note first), `architect-note` (the note is on the issue),
   `needs-design`, `design:awaiting-approval`, `design:approved`, `qa:changes-requested`, `foundation`,
   `security`, `ux-blocker`, `release-blocker`, `in-production`, `signature-moment`.
+- **Tier** (set by the architect; picks the developer's model): `tier:light`, `tier:standard`, `tier:heavy`;
+  `review-failed` and `tier-up` record failed review rounds (see `reference/schedule-and-models.md` → Tiers).
 - **Agent**: `agent:<name>` sends the issue to a project-specific agent in `.claude/agents/<name>.md` (e.g. a
   Flutter developer) instead of `fullstack-dev`. The project owns those agents; `vendor` never touches them.
 - **Design stages**: `ux-spec` (the UX spec and wireframe are on the issue) → `design:awaiting-approval` →

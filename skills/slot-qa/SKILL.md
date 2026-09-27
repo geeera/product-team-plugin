@@ -31,7 +31,8 @@ For each linked open PR, oldest first:
    - `passed: true` → `PR merge <pr> --method squash --delete-branch` (it re-checks the gate: CI plus every
      required verdict, approved on the current head), `B label N -qa:changes-requested`, `B move N done`.
    - any `CHANGES REQUESTED` → `B move N in-progress`, `B label N +qa:changes-requested` (the label stands for
-     any reviewer; it puts the issue in the next `B next` plan). If the changes are small and the issue is P0/P1,
+     any reviewer; it puts the issue in the next `B next` plan). First failed round: `B label N +review-failed`;
+     a second one: `B label N +tier-up` — the rework then goes to the next tier's developer. If the changes are small and the issue is P0/P1,
      dispatch the developer now on the same branch, then one more round of the reviewers that asked.
    - a verdict missing (a reviewer failed) → run that reviewer again next slot; never merge around it.
 5. Findings the reviewer filed outside the PR's scope stay in the backlog with their severity.

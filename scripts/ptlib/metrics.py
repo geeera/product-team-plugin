@@ -44,7 +44,15 @@ def sprint_summary(issues: List[dict], events: Dict[int, List[dict]], reviews_by
     work = [i for i in issues if WORK_KINDS & set(i["labels"])]
     shipped = [i for i in work if i["state"] == "closed" and "status:done" in i["labels"]]
     cycles = [c for c in (cycle_days(i.get("closed_at"), events.get(i["number"], [])) for i in shipped) if c is not None]
+    by_tier: Dict[str, dict] = {}
+    for i in work:
+        tier = next((l[5:] for l in i["labels"] if l.startswith("tier:")), "unsized")
+        row = by_tier.setdefault(tier, {"planned": 0, "shipped": 0, "raised": 0})
+        row["planned"] += 1
+        row["shipped"] += i in shipped
+        row["raised"] += "tier-up" in i["labels"]
     return {
+        "by_tier": by_tier,
         "planned": len(work),
         "shipped": len(shipped),
         "carried_over": sum(1 for i in work if i["state"] == "open"),

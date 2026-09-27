@@ -6,6 +6,8 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional
 
+from . import tiers
+
 # Roles that review, plan or design; development never goes to them even when an issue asks for it.
 NON_DEVELOPERS = {"pm", "architect", "ux-designer", "ui-designer", "reviewer", "qa", "qa-runner", "security",
                   "devops", "analyst", "scribe"}
@@ -39,6 +41,8 @@ def agent_for(issue: dict, known_agents: Optional[set] = None) -> tuple:
     if len(requested) > 1:
         return None, f"several agent labels: {', '.join(requested)}"
     name = requested[0]
+    if name in ("fullstack-dev", "fullstack-dev-light", "fullstack-dev-heavy"):
+        return None, f"agent:{name} — size the issue with a tier:* label instead"
     if name in NON_DEVELOPERS:
         return None, f"agent:{name} cannot develop"
     if known_agents is not None and name not in known_agents:
@@ -123,6 +127,8 @@ def is_hotfix(issue: dict) -> bool:
 
 def _entry(issue: dict, ctx: dict, freeze: bool, reason: str) -> dict:
     hotfix = is_hotfix(issue)
+    specialist = agent_for(issue)[0]
+    tier, tier_notes = tiers.effective(_labels(issue), burn=bool(ctx.get("is_burn")), hotfix=hotfix)
     if issue.get("status") == "in-progress":
         # Rework continues on the open PR: its branch and base come from the PR, not from today's mode.
         base, prefix = None, None
@@ -135,7 +141,10 @@ def _entry(issue: dict, ctx: dict, freeze: bool, reason: str) -> dict:
     return {
         "number": issue["number"],
         "title": issue["title"],
-        "agent": agent_for(issue)[0],
+        # A product specialist keeps its own pinned model; everyone else gets the tier's developer.
+        "agent": specialist if specialist != "fullstack-dev" else tiers.AGENTS[tier],
+        "tier": None if specialist != "fullstack-dev" else tier,
+        "tier_notes": tier_notes if specialist == "fullstack-dev" else [],
         "base": base,
         "branch_prefix": prefix,
         "reason": reason,

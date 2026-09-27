@@ -24,13 +24,27 @@ mode, so a run that fires an hour off still behaves correctly.
 
 | Mode | Dev tasks per run | Parallel dev subagents | Dev model |
 | ---- | ----------------- | ---------------------- | --------- |
-| normal (Mon–Thu) | 2 | 2 | `fullstack-dev` (Opus 5.5) |
-| burn (Fri 23:00 – Sun 19:00) | 5 | 3 | `fullstack-dev` (Opus 5.5) |
-| freeze | 0 features, fixes only | 1 | `fullstack-dev` (Opus 5.5) |
+| normal (Mon–Thu) | 2 | 2 | by tier |
+| burn (Fri 23:00 – Sun 19:00) | 5 | 3 | by tier, `light` raised to `standard` |
+| freeze | 0 features, fixes only | 1 | by tier |
 
-Development runs on Opus in every mode (owner's decision, 2026-09-27). The weekday caps stay conservative so the
-weekly quota still lasts until the burn window; watch `runlog stats` and lower `caps` in `project.yml` if runs start
-failing on the usage limit mid-week.
+The weekday caps stay conservative so the weekly quota lasts until the burn window; watch `runlog stats` and
+lower `caps` in `project.yml` if runs start failing on the usage limit mid-week.
+
+## Tiers — which developer builds an issue
+
+The `architect` sizes every approved issue in `slot-pm`; `backlog next` turns the tier into the agent.
+
+| Tier | Agent | Model | Typical work |
+| ---- | ----- | ----- | ------------ |
+| `tier:light` | `fullstack-dev-light` | Sonnet 5 | one module, an existing pattern to copy, clear criteria: copy, config, a small UI tweak, a bug with a reproduction, a test gap |
+| `tier:standard` (default) | `fullstack-dev` | Opus 5.5 | a feature slice across layers, new tests, a new component on the kit |
+| `tier:heavy` | `fullstack-dev-heavy` | Fable 5.1 | cross-cutting or architectural: a new data model or migration, concurrency, performance, hard algorithms, a refactor across modules, unclear edges |
+
+Guard rails, in code (`scripts/ptlib/tiers.py`): no label → `standard`; the burn window and hotfixes have no
+`light` work; two failed review rounds (`review-failed`, then `tier-up`) raise the tier one step; security-
+labelled work is never built on Fable (it runs on `standard`). Product specialists (`agent:<name>`) keep their own
+model. `sprint-metrics` reports shipped and raised issues per tier — if `light` keeps getting raised, size stricter.
 
 P0/P1 bugs and release blockers do not count against the cap. The plan itself comes from `scripts/backlog next`
 (`scripts/ptlib/picker.py`): the order and the caps are code with tests, not a judgement call per run.
@@ -39,9 +53,9 @@ P0/P1 bugs and release blockers do not count against the cap. The plan itself co
 
 | Model | ID | Used by |
 | ----- | -- | ------- |
-| Fable 5.1 | `claude-fable-5-1` | `architect`; `kickoff`, `foundation`, ADRs |
+| Fable 5.1 | `claude-fable-5-1` | `architect`; `kickoff`, `foundation`, ADRs; `fullstack-dev-heavy` |
 | Opus 5.5 | `claude-opus-5-5` | orchestrator (`slot-*`, `adopt`, `demo-*`), `pm`, `ux-designer`, `ui-designer`, `qa`, `security`, `fullstack-dev` |
-| Sonnet 5 | `claude-sonnet-5` | `reviewer`, `devops`, `analyst`, `qa-runner` (regression) |
+| Sonnet 5 | `claude-sonnet-5` | `fullstack-dev-light`, `reviewer`, `devops`, `analyst`, `qa-runner` (regression) |
 | Haiku 4.5 | `claude-haiku-4-5-20251001` | `scribe`: labels, changelog, summary formatting |
 
 Security reviews are never delegated to Fable (its extra cyber safeguards cause refusals) — they go to

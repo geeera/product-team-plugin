@@ -134,6 +134,10 @@ class SelfUpdateVerificationTest(unittest.TestCase):
             {"status": "M", "path": ".claude/agents/qa.md", "mode": "100644", "blob": "bbb"},
             {"status": "D", "path": ".claude/old.md", "mode": "000000", "blob": "0000"}])
 
+    def test_unparseable_diff_tree_fails_closed(self):
+        with self.assertRaises(ValueError):
+            vendoring.parse_diff_tree(b":100644 100644 aaa bbb M\0a\0garbage\0more\0")
+
     def test_blob_sha_matches_git(self):
         import subprocess
         out = subprocess.run(["git", "hash-object", "--stdin"], input=b"hello\n", capture_output=True).stdout.decode().strip()

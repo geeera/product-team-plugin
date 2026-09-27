@@ -101,6 +101,8 @@ def parse_diff_tree(raw: bytes) -> List[dict]:
         out.append({"status": status[0], "path": fields[i + 1].decode("utf-8", "surrogateescape"),
                     "mode": new_mode, "blob": new_blob})
         i += 2
+    if any(fields[i:]):  # an unparsed record would otherwise go unchecked
+        raise ValueError(f"unexpected git diff-tree output near field {i}")
     return out
 
 

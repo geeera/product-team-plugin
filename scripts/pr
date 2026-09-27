@@ -144,11 +144,25 @@ def show_json(rev: str, path: str) -> dict:
         return {}
 
 
-def release_tag_commit(version: str) -> str:
-    """The commit the plugin's tag v<version> points at ('' when there is no such tag)."""
-    out = git("ls-remote", "--tags", vendoring.PLUGIN_REPO, f"refs/tags/v{version}", f"refs/tags/v{version}^{{}}").decode()
-    refs = dict(reversed(line.split("\t")) for line in out.splitlines() if "\t" in line)
-    return refs.get(f"refs/tags/v{version}^{{}}") or refs.get(f"refs/tags/v{version}", "")
+def release_versions() -> dict:
+    """{commit: version} for every v<X.Y.Z> tag of the plugin (annotated tags resolved to their commit)."""
+    out = git("ls-remote", "--tags", vendoring.PLUGIN_REPO, "refs/tags/v*").decode()
+    direct, peeled = {}, {}
+    for line in out.splitlines():
+        sha, _, ref = line.partition("\t")
+        name = ref[len("refs/tags/v"):]
+        if name.endswith("^{}"):
+            peeled[name[:-3]] = sha
+        else:
+            direct[name] = sha
+    commits = {}
+    for version, sha in direct.items():
+        try:
+            vendoring.parse_version(version)
+        except ValueError:
+            continue
+        commits[peeled.get(version, sha)] = version
+    return commits
 
 
 def verify_self_update(repo: str, n: int, info: dict) -> list:
@@ -165,26 +179,34 @@ def verify_self_update(repo: str, n: int, info: dict) -> list:
     entries = vendoring.parse_diff_tree(git("diff-tree", "-r", "--no-renames", "-z", base, head))
 
     claimed = show_json(head, vendoring.MANIFEST)
-    installed = show_json(base, vendoring.MANIFEST)
-    commit = claimed.get("commit", "")
+    installed = show_json(f"refs/pt/base-{n}", vendoring.MANIFEST)  # what the base branch has now
+    if installed and not show_json(base, vendoring.MANIFEST):
+        return ["the PR branches off before the team was installed; recreate it from the current base"]
+    commit = str(claimed.get("commit", ""))
+    if not re.fullmatch(r"[0-9a-f]{40}", commit):
+        return ["the manifest's commit is not a full commit id"]
+    version = release_versions().get(commit)
+    if not version:
+        return [f"plugin commit {commit[:12]} is not a tagged release"]
+    if claimed.get("version") != version:
+        return [f"manifest says {claimed.get('version')!r}, release {commit[:12]} is {version}"]
+    try:
+        if installed and vendoring.parse_version(version) <= vendoring.parse_version(str(installed.get("version", ""))):
+            return [f"{version} is not newer than the installed {installed.get('version')}"]
+    except ValueError as exc:
+        return [str(exc)]
     with tempfile.TemporaryDirectory() as tmp:
         try:
             git("init", "-q", cwd=tmp)
             git("fetch", "-q", "--depth", "1", vendoring.PLUGIN_REPO, commit, cwd=tmp)
             git("checkout", "-q", "FETCH_HEAD", cwd=tmp)
         except gh.GhError:
-            return [f"cannot fetch plugin commit {commit[:12] or '(none)'}"]
-        # The version comes from the release itself, never from the product's manifest.
-        version = json.loads((Path(tmp) / ".claude-plugin" / "plugin.json").read_text())["version"]
-        if release_tag_commit(version) != commit:
-            return [f"plugin commit {commit[:12]} is not the release tag v{version}"]
-        if claimed.get("version") != version:
-            return [f"manifest says {claimed.get('version')!r}, the release is {version}"]
-        try:
-            if installed and vendoring.parse_version(version) <= vendoring.parse_version(installed.get("version", "")):
-                return [f"{version} is not newer than the installed {installed.get('version')}"]
-        except ValueError as exc:
-            return [str(exc)]
+            return [f"cannot fetch plugin release {version}"]
+        meta = Path(tmp) / ".claude-plugin" / "plugin.json"
+        if meta.is_symlink() or not meta.is_file():
+            return [f"release {version} has no regular plugin.json"]
+        if json.loads(meta.read_text()).get("version") != version:
+            return [f"release {version}'s plugin.json names another version"]
         pinned = project.plugin_ref()
         if pinned.startswith("v") and pinned != f"v{version}":
             return [f"the product pins {pinned}, this is v{version}"]
@@ -274,7 +296,7 @@ def main() -> None:
             query = f"state={args.state}&per_page=100" + (f"&base={quote(args.base)}" if args.base else "")
             out([{"number": x["number"], "title": x["title"], "base": x["base"]["ref"], "head": x["head"]["ref"],
                   "url": x["html_url"]} for x in gh.api_list(f"repos/{repo}/pulls?{query}")])
-    except gh.GhError as exc:
+    except (gh.GhError, ValueError) as exc:
         sys.exit(str(exc))
 
 

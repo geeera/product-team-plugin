@@ -4,6 +4,15 @@ Products follow the `stable` channel (or a pinned tag, `team.plugin_ref` in `.pr
 first `slot-pm` of the day runs `vendor self-update` and opens a PR with the entries in between. Breaking changes (a renamed label, a changed script contract, a new required
 `project.yml` key) are marked **Breaking** with the migration step.
 
+## 0.7.0
+
+- **Pause and resume by asking.** `pause` (the owner says "pause development") switches off this repository's
+  routines and scheduled workflows (e.g. Renovate), labels the run log `team:paused` and records exactly what was
+  switched off; `resume` ("продолжим") switches that back on, re-creates a routine deleted meanwhile, proposes a
+  new sprint when every sprint is in the past, and lifts the pause. Routines are disabled, not deleted — the API
+  cannot delete them, and disabled routines use no quota.
+- `runlog pause | pause-record | resume`, `scripts/workflows list | disable | enable`.
+
 ## 0.6.0
 
 Fixes from the storify security review (geeera/storify#89–#92) and two REVIEW findings.

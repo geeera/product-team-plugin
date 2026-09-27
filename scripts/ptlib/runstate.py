@@ -9,6 +9,8 @@ from typing import Dict, Iterable, List, Optional
 
 MARKER = re.compile(r"<!-- pt-run id=(\S+) slot=(\S+) state=(\S+) -->")
 PAUSE_MARKER = "<!-- pt-paused -->"
+OWNER_PAUSE = re.compile(r"<!-- pt-owner-pause (\{.*?\}) -->", re.DOTALL)
+OWNER_RESUME = "<!-- pt-owner-resume -->"
 METRICS = re.compile(r"<!-- pt-metrics (\{.*?\}) -->")
 FAILURE_LIMIT = 3
 OVERLAP_WINDOW = timedelta(hours=3)
@@ -118,3 +120,26 @@ def stats(runs: List[dict], now: datetime, since: datetime) -> Dict[str, dict]:
         mins = slot.pop("minutes")
         slot["median_minutes"] = median(mins) if mins else None
     return per_slot
+
+
+def owner_pause_marker(record: Dict[str, object]) -> str:
+    """A pause the owner asked for, with what was switched off so resume can switch exactly that back on."""
+    return f"<!-- pt-owner-pause {json.dumps(record, sort_keys=True)} -->"
+
+
+def active_owner_pause(comments: List[dict]) -> Optional[dict]:
+    """The latest owner pause record that has not been resumed since, or None."""
+    latest, latest_at, resumed_at = None, "", ""
+    for c in comments:
+        body, at = c.get("body") or "", c.get("created_at") or ""
+        m = OWNER_PAUSE.search(body)
+        if m and at >= latest_at:
+            try:
+                latest, latest_at = json.loads(m.group(1)), at
+            except ValueError:
+                continue
+        if OWNER_RESUME in body and at > resumed_at:
+            resumed_at = at
+    if latest is None or resumed_at > latest_at:
+        return None
+    return dict(latest, paused_at=latest_at)

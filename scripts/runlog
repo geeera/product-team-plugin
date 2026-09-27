@@ -9,6 +9,10 @@
   runlog stats [--days 14] → per slot: runs, failures, median minutes, summed metrics (for the demo)
   runlog status            → recent runs and pause state
   runlog url               → the run-log issue URL (for owner notifications)
+  runlog pause --record-file F [--reason TEXT]   the owner's pause: label team:paused and store what was switched
+                                                 off (JSON in F: routines, workflows) for resume
+  runlog pause-record      → the active owner pause record, or null
+  runlog resume            lift the pause (label off, resume marker); prints the record that was active
 
 Exit code is 0 for proceed and finish, 3 for any decision that means "do no work".
 """
@@ -62,7 +66,8 @@ def cmd_start(repo: str, args) -> int:
     now = datetime.now(timezone.utc)
     labels = {l["name"] for l in issue["labels"]}
     owner_cmds = commands.parse(comments, gh.owner_login(repo))
-    paused_since = pause_at(team_comments(issue, comments))
+    team = team_comments(issue, comments)
+    paused_since = max([pause_at(team)] + [c["created_at"] for c in team if runstate.OWNER_RESUME in (c.get("body") or "")])
     paused = PAUSED in labels
     if paused and runstate.resumed_after_pause(paused_since, owner_cmds):
         gh.api(f"repos/{repo}/issues/{issue['number']}/labels/{quote(PAUSED, safe='')}", "DELETE")
@@ -136,6 +141,41 @@ def cmd_stats(repo: str, args) -> int:
     return 0
 
 
+def cmd_pause(repo: str, args) -> int:
+    issue, _ = load(repo)
+    with open(args.record_file, encoding="utf-8") as f:
+        record = json.load(f)
+    if not isinstance(record, dict):
+        sys.exit("the pause record must be a JSON object")
+    now = datetime.now(timezone.utc).isoformat(timespec="minutes")
+    record["reason"] = args.reason or record.get("reason", "")
+    gh.api(f"repos/{repo}/issues/{issue['number']}/labels", "POST", {"labels": [PAUSED]})
+    gh.api(f"repos/{repo}/issues/{issue['number']}/comments", "POST", {"body": (
+        f"{runstate.PAUSE_MARKER}\n{runstate.owner_pause_marker(record)}\n"
+        f"**Development paused by the owner** {now}. {record['reason']}\n\n"
+        "Scheduled runs do no work until the owner resumes (say so in the project chat, or comment `/resume`).")})
+    print(json.dumps({"paused": True, "log_url": issue["html_url"], "record": record}, indent=2))
+    return 0
+
+
+def cmd_pause_record(repo: str, _args) -> int:
+    issue, comments = load(repo)
+    print(json.dumps(runstate.active_owner_pause(team_comments(issue, comments)), indent=2))
+    return 0
+
+
+def cmd_resume(repo: str, _args) -> int:
+    issue, comments = load(repo)
+    record = runstate.active_owner_pause(team_comments(issue, comments))
+    if PAUSED in {l["name"] for l in issue["labels"]}:
+        gh.api(f"repos/{repo}/issues/{issue['number']}/labels/{quote(PAUSED, safe='')}", "DELETE")
+    now = datetime.now(timezone.utc).isoformat(timespec="minutes")
+    gh.api(f"repos/{repo}/issues/{issue['number']}/comments", "POST", {"body": (
+        f"{runstate.OWNER_RESUME}\n**Development resumed** {now}.")})
+    print(json.dumps({"resumed": True, "record": record, "log_url": issue["html_url"]}, indent=2))
+    return 0
+
+
 def cmd_url(repo: str, _args) -> int:
     print(log_issue(repo)["html_url"])
     return 0
@@ -149,8 +189,11 @@ def main() -> None:
     fi.add_argument("--metric", action="append")
     sub.add_parser("status"); sub.add_parser("url")
     stt = sub.add_parser("stats"); stt.add_argument("--days", type=int, default=14)
+    pa = sub.add_parser("pause"); pa.add_argument("--record-file", required=True); pa.add_argument("--reason")
+    sub.add_parser("pause-record"); sub.add_parser("resume")
     args = p.parse_args()
-    handlers = {"start": cmd_start, "finish": cmd_finish, "status": cmd_status, "url": cmd_url, "stats": cmd_stats}
+    handlers = {"start": cmd_start, "finish": cmd_finish, "status": cmd_status, "url": cmd_url, "stats": cmd_stats,
+                "pause": cmd_pause, "pause-record": cmd_pause_record, "resume": cmd_resume}
     try:
         sys.exit(handlers[args.cmd](gh.repo(), args))
     except gh.GhError as exc:

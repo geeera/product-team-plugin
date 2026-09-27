@@ -76,5 +76,33 @@ class ResumeTest(unittest.TestCase):
         self.assertFalse(runstate.resumed_after_pause("2026-09-26T09:00:00Z", cmds))
 
 
+class MetricsTest(unittest.TestCase):
+    def test_run_id_carries_its_start_time(self):
+        self.assertEqual(runstate.started_at("20260926T201300Z-slot-dev"), datetime(2026, 9, 26, 20, 13, tzinfo=timezone.utc))
+
+    def test_metrics_parse_numbers_and_text(self):
+        self.assertEqual(runstate.parse_metrics(["prs=2", "note=cap hit"]), {"prs": 2, "note": "cap hit"})
+
+    def test_malformed_metric_is_rejected(self):
+        with self.assertRaises(ValueError):
+            runstate.parse_metrics(["prs"])
+
+    def test_metrics_round_trip_through_the_comment(self):
+        body = "<!-- pt-run id=a slot=slot-dev state=finished -->\n" + runstate.metrics_marker({"minutes": 42, "prs": 2})
+        run = runstate.parse_runs([{"id": 1, "created_at": "2026-09-26T20:00:00Z", "body": body}])[0]
+        self.assertEqual(run["metrics"], {"minutes": 42, "prs": 2})
+
+    def test_stats_per_slot(self):
+        runs = [
+            dict(run("finished", "2026-09-25T20:00:00Z"), metrics={"minutes": 40, "prs": 2}),
+            dict(run("finished", "2026-09-24T20:00:00Z"), metrics={"minutes": 60, "prs": 1}),
+            dict(run("started", "2026-09-23T20:00:00Z"), metrics={}),
+            dict(run("finished", "2026-08-01T20:00:00Z"), metrics={"minutes": 5, "prs": 9}),
+        ]
+        since = datetime(2026, 9, 12, tzinfo=timezone.utc)
+        self.assertEqual(runstate.stats(runs, NOW, since),
+                         {"slot-dev": {"runs": 3, "failed": 1, "totals": {"prs": 3}, "median_minutes": 50}})
+
+
 if __name__ == "__main__":
     unittest.main()

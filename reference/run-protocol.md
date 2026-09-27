@@ -25,10 +25,12 @@ subagent you start, as `PLUGIN_ROOT=<path>` on the first line of the prompt.
   reason, open a `kind:question` issue for the owner, move on.
 
 ## Close
+0. `PT/scripts/inbox update` — rewrite the owner's pinned "Needs you" issue from the backlog.
 1. Write the run summary to a temp file: what changed (issue/PR links), what is blocked on the owner, anything
    that failed. Owner-facing, short, in the owner's language from `project.yml`.
-2. `PT/scripts/runlog finish <run_id> finished --summary-file <file>` (or `failed` if the run could not do its
-   job — a crash of one subtask that was handled is still `finished`).
+2. `PT/scripts/runlog finish <run_id> finished --summary-file <file> [--metric key=value]...` (or `failed` if
+   the run could not do its job — a crash of one subtask that was handled is still `finished`). Duration is
+   recorded automatically; add the counts the slot skill names (PRs opened, merged, blocked…).
 3. Print the same summary as the session's final message.
 
 ## Notify

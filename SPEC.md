@@ -69,13 +69,16 @@ Communication is from the phone.
 - **One inbox**: a pinned "Needs you" issue rewritten by every run is the owner's only to-do list.
 - **Measured runs**: every run records its duration and counts; `runlog stats` and `sprint-metrics` (plan vs
   shipped, cycle time, QA first-pass rate) feed the demo.
-- **Versioned plugin**: products pin a release tag; upgrades arrive as a PR with the changelog.
+- **How the team reaches the cloud**: cloud sessions never install plugins a repository enables, but they load
+  project agents and skills from the clone. `vendor` installs the plugin into the product's `.claude/` (generated
+  files with a manifest), and a daily self-update PR follows the `stable` channel or a pinned tag — products update
+  themselves, through the same PR flow as everything else. Routines use one repository each (project agents and
+  skills load only in single-repository sessions).
+- **No `gh` dependency**: cloud images may lack the CLI; scripts use the REST API with the session token.
 
 ## To verify before building on it
 
 - How scheduled tasks attach a repository in code mode, and whether a scheduled task can fire into a
   project's persistent chat (decision 17) rather than a fresh session.
-- Whether `gh` is authenticated in scheduled cloud sessions (the scripts depend on it) and whether the
-  Artifact / ArtifactData tools exist there (`demo-prep` falls back to the demo issue when they do not).
-- Whether `${CLAUDE_PLUGIN_ROOT}` is expanded inside agent prompts; skills pass `PLUGIN_ROOT` explicitly in case
-  it is not.
+- Whether the Artifact / ArtifactData tools exist in cloud runs (`demo-prep` falls back to the demo issue).
+- Whether subagents started from a routine honour their pinned `model` (checked by the first smoke run).

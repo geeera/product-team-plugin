@@ -46,6 +46,6 @@ Full schedule, caps and model pinning: [reference/schedule-and-models.md](refere
 python3 -m unittest discover -s tests -t .
 ```
 
-## Pilot
+## License
 
-`geeera/storify` — next step is `/product-team:adopt` on it.
+[MIT](LICENSE)

@@ -1,8 +1,8 @@
 # .product-team/project.yml — the stack-agnostic contract (reference/stack-contract.md).
 # Skills read commands and URLs from here and never guess them.
-name: storify
-repo: geeera/storify
-mode: adopted            # new | adopted
+name: my-product
+repo: owner/my-product
+mode: new                # new | adopted
 stack: "TODO: summary — see decision record"
 decisions_dir: docs/decisions
 

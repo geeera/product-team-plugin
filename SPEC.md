@@ -68,10 +68,3 @@ Communication is from the phone.
   Artifact / ArtifactData tools exist there (`demo-prep` falls back to the demo issue when they do not).
 - Whether `${CLAUDE_PLUGIN_ROOT}` is expanded inside agent prompts; skills pass `PLUGIN_ROOT` explicitly in case
   it is not.
-
-## Projects
-
-| Project | Repository | Status |
-| ------- | ---------- | ------ |
-| storify | `geeera/storify` (moved from GitLab 2026-09-26) | CI on GitHub Actions (PR #1 merged), `dev`/`stage` cut from `main`, `RENOVATE_TOKEN` set; `main` is red only on stale generated contract schemas (fixed in `wip/craft-i18n`); GitLab project still to archive; adopt not yet run |
-| sheltrix | GitLab | Moves after storify is settled |

@@ -140,12 +140,18 @@ def review_token() -> Optional[str]:
     return os.environ.get("PT_REVIEW_TOKEN") or None
 
 
-def token_login() -> str:
-    """The account the agents act as ('' when unknown, e.g. an app token without /user access)."""
+def token_login() -> Optional[str]:
+    """The account the agents act as; None when it cannot be told (e.g. an app token without /user access)."""
     try:
-        return (api("user") or {}).get("login", "")
+        return (api("user") or {}).get("login") or None
     except GhError:
-        return ""
+        return None
+
+
+def acts_as_owner(repo_name: str) -> bool:
+    """True when the agents act as the owner's account — or when that cannot be ruled out (fail closed)."""
+    login = token_login()
+    return login is None or login.lower() == owner_login(repo_name).lower()
 
 
 def owner_login(repo_name: str) -> str:

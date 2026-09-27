@@ -38,7 +38,11 @@ def reviewer_logins(path: str = PROJECT_FILE) -> list:
             if not item:
                 break
             items.append(item.group(1))
-    return [x.strip().strip("'\"") for x in items if x.strip().strip("'\"")]
+    logins = [x.strip().strip("'\"") for x in items if x.strip().strip("'\"")]
+    if not logins and inline.replace(" ", "") != "[]":
+        # Present but unreadable: an empty list would silently accept every account's verdict.
+        raise ValueError("team.reviewer_logins is set but could not be read; use `[a, b]` or `- a` lines")
+    return logins
 
 
 def freeze_days(path: str = PROJECT_FILE) -> int:

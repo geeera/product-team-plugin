@@ -59,6 +59,13 @@ def render(src: Path, version: str) -> Dict[str, bytes]:
     return out
 
 
+def modes(src: Path) -> Dict[str, str]:
+    """The git file mode each generated file gets (the manifest is a plain file)."""
+    out = {rel: git_mode(source) for rel, (source, _) in plan(src).items()}
+    out[MANIFEST] = "100644"
+    return out
+
+
 def manifest_bytes(version: str, commit: str, files: Dict[str, bytes]) -> bytes:
     manifest = {"version": version, "commit": commit,
                 "files": {rel: hashlib.sha256(data).hexdigest() for rel, data in sorted(files.items())}}
@@ -66,18 +73,59 @@ def manifest_bytes(version: str, commit: str, files: Dict[str, bytes]) -> bytes:
 
 
 # The self-update PR may touch these and nothing else; settings (hooks, permissions) never.
-NEVER_VENDORED = re.compile(r"^\.claude/settings[^/]*\.json$")
+NEVER_VENDORED = re.compile(r"(^|/)\.claude/settings[^/]*\.json$")
 
 
-def self_update_violations(changes: List[dict], allowed: set) -> List[str]:
-    """changes: PR files ({filename, status}); allowed: paths the verified manifest owns (old or new)."""
+def git_blob_sha(data: bytes) -> str:
+    """The object id git gives these bytes, so a tree entry can be compared without trusting any API."""
+    return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
+
+
+def git_mode(source: Path) -> str:
+    return "100755" if source.stat().st_mode & 0o111 else "100644"
+
+
+def parse_version(text: str) -> tuple:
+    parts = text.strip().split(".")
+    if len(parts) != 3 or not all(p.isdigit() for p in parts):
+        raise ValueError(f"not a release version: {text!r}")
+    return tuple(int(p) for p in parts)
+
+
+def parse_diff_tree(raw: bytes) -> List[dict]:
+    """`git diff-tree -r --no-renames -z A B` → [{status, path, mode, blob}] (mode/blob of the new side)."""
+    fields = raw.split(b"\0")
+    out, i = [], 0
+    while i + 1 < len(fields) and fields[i].startswith(b":"):
+        _old_mode, new_mode, _old_blob, new_blob, status = fields[i][1:].decode().split(" ")
+        out.append({"status": status[0], "path": fields[i + 1].decode("utf-8", "surrogateescape"),
+                    "mode": new_mode, "blob": new_blob})
+        i += 2
+    return out
+
+
+def verify_tree(entries: List[dict], expected: Dict[str, bytes], modes: Dict[str, str], before: set) -> List[str]:
+    """entries: the PR's own changes from `git diff-tree -r --no-renames` (status, path, mode, blob).
+
+    A change is accepted only when it is exactly what the release generates: same blob, same mode, a regular
+    file (no symlinks), never settings. Paths only the old install had may only be deleted.
+    """
     problems = []
-    for change in changes:
-        path = change["filename"]
-        if NEVER_VENDORED.match(path):
+    for e in entries:
+        path = e["path"]
+        if NEVER_VENDORED.search(path):
             problems.append(f"{path}: settings are never part of a plugin update")
-        elif path != MANIFEST and path not in allowed:
-            problems.append(f"{path}: not a generated plugin file")
+        elif e["status"] == "D":
+            if path in expected:
+                problems.append(f"{path}: deleted, but the release ships it")
+            elif path not in before:
+                problems.append(f"{path}: deletes a file the plugin never installed")
+        elif path not in expected:
+            problems.append(f"{path}: not a file this release generates")
+        elif e["mode"] != modes[path]:
+            problems.append(f"{path}: mode {e['mode']}, the release has {modes[path]}")
+        elif e["blob"] != git_blob_sha(expected[path]):
+            problems.append(f"{path}: content differs from the release")
     return problems
 
 

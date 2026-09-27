@@ -93,21 +93,56 @@ class SelfUpdateVerificationTest(unittest.TestCase):
             for rel, data in files.items():
                 self.assertEqual((target / rel).read_bytes(), data, rel)
 
-    def test_only_generated_files_may_change(self):
-        allowed = {".claude/agents/qa.md"}
-        changes = [{"filename": ".claude/agents/qa.md", "status": "modified"},
-                   {"filename": vendoring.MANIFEST, "status": "modified"},
-                   {"filename": ".claude/settings.json", "status": "modified"},
-                   {"filename": ".claude/agents/evil.md", "status": "added"},
-                   {"filename": ".product-team/project.yml", "status": "modified"}]
-        problems = vendoring.self_update_violations(changes, allowed)
-        self.assertEqual(len(problems), 3)
-        self.assertTrue(any("settings" in p for p in problems))
+    def setUp(self):
+        self.expected = {".claude/agents/qa.md": b"qa v2", vendoring.MANIFEST: b"{}"}
+        self.modes = {".claude/agents/qa.md": "100644", vendoring.MANIFEST: "100644"}
 
-    def test_settings_are_refused_even_if_listed(self):
-        problems = vendoring.self_update_violations([{"filename": ".claude/settings.local.json", "status": "added"}],
-                                                    {".claude/settings.local.json"})
-        self.assertEqual(len(problems), 1)
+    def entry(self, path, data=b"qa v2", status="M", mode="100644"):
+        return {"status": status, "path": path, "mode": mode, "blob": vendoring.git_blob_sha(data)}
+
+    def verify(self, *entries, before=()):
+        return vendoring.verify_tree(list(entries), self.expected, self.modes, set(before))
+
+    def test_exact_release_content_passes(self):
+        self.assertEqual(self.verify(self.entry(".claude/agents/qa.md"), self.entry(vendoring.MANIFEST, b"{}")), [])
+
+    def test_modified_content_is_refused(self):
+        self.assertTrue(self.verify(self.entry(".claude/agents/qa.md", b"qa v2 + injected")))
+
+    def test_files_only_the_old_install_had_may_only_be_deleted(self):
+        before = [".claude/product-team/scripts/ptlib/tiers.py"]
+        self.assertTrue(self.verify(self.entry(before[0], b"evil"), before=before))
+        self.assertEqual(self.verify(self.entry(before[0], status="D", mode="000000"), before=before), [])
+
+    def test_symlinks_and_mode_changes_are_refused(self):
+        self.assertTrue(self.verify(self.entry(".claude/agents/qa.md", mode="120000")))
+        self.assertTrue(self.verify(self.entry(".claude/agents/qa.md", mode="100755")))
+
+    def test_settings_are_refused_even_if_generated(self):
+        self.expected[".claude/settings.json"] = b"{}"
+        self.modes[".claude/settings.json"] = "100644"
+        self.assertTrue(self.verify(self.entry(".claude/settings.json", b"{}")))
+        self.assertTrue(self.verify(self.entry("apps/web/.claude/settings.local.json", b"{}", status="A")))
+
+    def test_other_files_are_refused(self):
+        self.assertTrue(self.verify(self.entry(".product-team/project.yml", b"x")))
+
+    def test_diff_tree_parsing(self):
+        raw = (b":100644 100644 aaa bbb M\0.claude/agents/qa.md\0"
+               b":100644 000000 ccc 0000 D\0.claude/old.md\0")
+        self.assertEqual(vendoring.parse_diff_tree(raw), [
+            {"status": "M", "path": ".claude/agents/qa.md", "mode": "100644", "blob": "bbb"},
+            {"status": "D", "path": ".claude/old.md", "mode": "000000", "blob": "0000"}])
+
+    def test_blob_sha_matches_git(self):
+        import subprocess
+        out = subprocess.run(["git", "hash-object", "--stdin"], input=b"hello\n", capture_output=True).stdout.decode().strip()
+        self.assertEqual(vendoring.git_blob_sha(b"hello\n"), out)
+
+    def test_versions_must_be_releases(self):
+        self.assertLess(vendoring.parse_version("0.4.0"), vendoring.parse_version("0.10.0"))
+        with self.assertRaises(ValueError):
+            vendoring.parse_version("0.5.0 -->\n<!--")
 
 
 class PluginRefTest(unittest.TestCase):
@@ -124,6 +159,15 @@ class PluginRefTest(unittest.TestCase):
                 with self.subTest(text=text):
                     path.write_text(text)
                     self.assertEqual(project.reviewer_logins(str(path)), expected)
+
+    def test_unreadable_reviewer_logins_fail_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "project.yml"
+            for text in ("team:\n  reviewer_logins: [\n    a,\n    b]\n", "team:\n  reviewer_logins:\n- a\n"):
+                with self.subTest(text=text):
+                    path.write_text(text)
+                    with self.assertRaises(ValueError):
+                        project.reviewer_logins(str(path))
 
     def test_defaults_to_stable_and_reads_a_pin(self):
         with tempfile.TemporaryDirectory() as tmp:

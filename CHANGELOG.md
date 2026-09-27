@@ -8,13 +8,18 @@ first `slot-pm` of the day runs `vendor self-update` and opens a PR with the ent
 
 Fixes from the storify security review (geeera/storify#89–#92) and two REVIEW findings.
 
-- **Self-update is verified byte for byte.** `pr merge --ci-only` on a `chore/product-team-*` PR requires the head
-  branch in this repository, the manifest's commit to be a tagged plugin release, every changed file to be one the
-  release generates, and the content to equal a fresh render of that release. `.claude/settings*.json` is never
-  accepted. Branch operations also require the head branch to live in this repository.
-- **`security-check` covers agent tooling and gate config**: `.claude/**`, `.product-team/project.yml`, `.mcp.json`,
-  `CLAUDE.md`, `AGENTS.md`, `CODEOWNERS`.
-- **`reviewer_logins` accepts YAML block lists** (`- login`); before, they parsed as empty.
+- **Self-update is verified against git, not trusted.** `pr merge --ci-only` on a `chore/product-team-*` PR fetches
+  the PR head (it must equal the sha being merged), diffs its tree from the merge base, fetches the plugin commit
+  named in the manifest, reads the version from that release's `plugin.json`, requires the tag `v<version>` to
+  point at it, requires it to be newer than the installed version (and equal to a pinned `plugin_ref`), and then
+  requires every changed path to be a regular file with exactly the release's blob and mode. Files only the old
+  install had may only be deleted; `.claude/settings*.json` anywhere is never accepted. Branch operations also
+  require the head branch to live in this repository.
+- **`security-check` covers agent tooling and gate config**: any `.claude/` directory, `.product-team/project.yml`,
+  `.mcp.json`, `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `CODEOWNERS`.
+- **`reviewer_logins` accepts YAML block lists** (`- login`); a value that cannot be read now fails the gate
+  instead of silently accepting every account.
+- When the agents' account cannot be identified, the team assumes it is the owner's (same-account mode).
 - **Same-account mode is visible**: `backlog answers` and `pr gate` report it, the inbox keeps a "Security setup"
   item, and a release **go** is then taken only from the demo page or a comment older than the run.
 - **Reviewer token**: `pr review` posts as `PT_REVIEW_TOKEN` when present; the owner checklist describes the

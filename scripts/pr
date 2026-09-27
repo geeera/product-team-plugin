@@ -114,10 +114,14 @@ def gate(repo: str, n: int) -> dict:
     info = view(repo, n)
     reasons = security_check(repo, n)
     reviews = gh.api_list(f"repos/{repo}/pulls/{n}/reviews?per_page=100")
-    result = review.gate(reviews, info["head_sha"], bool(reasons), project.reviewer_logins())
+    try:
+        logins = project.reviewer_logins()
+    except ValueError as exc:
+        return {"passed": False, "missing": [str(exc)], "required": [], "verdicts": {}, "ci": {}, "security_reasons": []}
+    result = review.gate(reviews, info["head_sha"], bool(reasons), logins)
     result["ci"] = ci(repo, info["head_sha"])
     result["security_reasons"] = reasons[:10]
-    if not project.reviewer_logins():
+    if not logins:
         result["warning"] = ("same-account mode: any agent can post a verdict; set team.reviewer_logins to a "
                              "separate reviewing account (owner checklist)")
     if result["ci"]["state"] != "pass":
@@ -126,48 +130,68 @@ def gate(repo: str, n: int) -> dict:
     return result
 
 
-def file_at(repo: str, path: str, ref: str) -> bytes:
-    return gh.raw(f"repos/{repo}/contents/{quote(path, safe='/')}?ref={ref}", "application/vnd.github.raw").encode("utf-8")
+def git(*args: str, cwd: str = ".") -> bytes:
+    proc = subprocess.run(["git", "-C", cwd, *args], capture_output=True, check=False)
+    if proc.returncode != 0:
+        raise gh.GhError(f"git {' '.join(args)}: {proc.stderr.decode(errors='replace').strip()[:200]}")
+    return proc.stdout
 
 
-def release_commits() -> set:
-    """Commits of the plugin's release tags (a self-update must land on one of them)."""
-    proc = subprocess.run(["git", "ls-remote", "--tags", vendoring.PLUGIN_REPO], capture_output=True, text=True, check=False)
-    return {line.split()[0] for line in proc.stdout.splitlines() if "refs/tags/v" in line}
+def show_json(rev: str, path: str) -> dict:
+    try:
+        return json.loads(git("show", f"{rev}:{path}"))
+    except (gh.GhError, ValueError):
+        return {}
+
+
+def release_tag_commit(version: str) -> str:
+    """The commit the plugin's tag v<version> points at ('' when there is no such tag)."""
+    out = git("ls-remote", "--tags", vendoring.PLUGIN_REPO, f"refs/tags/v{version}", f"refs/tags/v{version}^{{}}").decode()
+    refs = dict(reversed(line.split("\t")) for line in out.splitlines() if "\t" in line)
+    return refs.get(f"refs/tags/v{version}^{{}}") or refs.get(f"refs/tags/v{version}", "")
 
 
 def verify_self_update(repo: str, n: int, info: dict) -> list:
-    """Problems with a self-update PR; [] only when it is byte for byte the plugin release it claims to be."""
-    base_sha = gh.api(f"repos/{repo}/pulls/{n}")["base"]["sha"]
-    changes = [{"filename": f["filename"], "status": f["status"]}
-               for f in gh.api_list(f"repos/{repo}/pulls/{n}/files?per_page=100")]
-    try:
-        claimed = json.loads(file_at(repo, vendoring.MANIFEST, info["head_sha"]))
-    except (gh.GhError, ValueError) as exc:
-        return [f"cannot read the PR's {vendoring.MANIFEST}: {exc}"]
-    commit, version = claimed.get("commit", ""), claimed.get("version", "")
-    if commit not in release_commits():
-        return [f"manifest commit {commit[:12]} is not a tagged plugin release"]
-    try:
-        before = set(json.loads(file_at(repo, vendoring.MANIFEST, base_sha)).get("files", {}))
-    except (gh.GhError, ValueError):
-        before = set()
+    """Problems with a self-update PR; [] only when its own changes are exactly a newer tagged plugin release.
+
+    Works on git objects, not API views: the PR head is fetched and must equal the sha that will be merged; the
+    changes are the tree diff from the merge base (so symlinks, modes, renames and large PRs are all visible).
+    """
+    head = info["head_sha"]
+    git("fetch", "-q", "origin", f"+refs/pull/{n}/head:refs/pt/pr-{n}", f"+refs/heads/{info['base']}:refs/pt/base-{n}")
+    if git("rev-parse", f"refs/pt/pr-{n}").decode().strip() != head:
+        return ["the PR moved while it was being verified; try again"]
+    base = git("merge-base", f"refs/pt/base-{n}", head).decode().strip()
+    entries = vendoring.parse_diff_tree(git("diff-tree", "-r", "--no-renames", "-z", base, head))
+
+    claimed = show_json(head, vendoring.MANIFEST)
+    installed = show_json(base, vendoring.MANIFEST)
+    commit = claimed.get("commit", "")
     with tempfile.TemporaryDirectory() as tmp:
-        for cmd in (["git", "init", "-q", tmp], ["git", "-C", tmp, "fetch", "-q", "--depth", "1", vendoring.PLUGIN_REPO, commit],
-                    ["git", "-C", tmp, "checkout", "-q", "FETCH_HEAD"]):
-            if subprocess.run(cmd, capture_output=True, text=True, check=False).returncode != 0:
-                return [f"cannot fetch plugin commit {commit[:12]}"]
+        try:
+            git("init", "-q", cwd=tmp)
+            git("fetch", "-q", "--depth", "1", vendoring.PLUGIN_REPO, commit, cwd=tmp)
+            git("checkout", "-q", "FETCH_HEAD", cwd=tmp)
+        except gh.GhError:
+            return [f"cannot fetch plugin commit {commit[:12] or '(none)'}"]
+        # The version comes from the release itself, never from the product's manifest.
+        version = json.loads((Path(tmp) / ".claude-plugin" / "plugin.json").read_text())["version"]
+        if release_tag_commit(version) != commit:
+            return [f"plugin commit {commit[:12]} is not the release tag v{version}"]
+        if claimed.get("version") != version:
+            return [f"manifest says {claimed.get('version')!r}, the release is {version}"]
+        try:
+            if installed and vendoring.parse_version(version) <= vendoring.parse_version(installed.get("version", "")):
+                return [f"{version} is not newer than the installed {installed.get('version')}"]
+        except ValueError as exc:
+            return [str(exc)]
+        pinned = project.plugin_ref()
+        if pinned.startswith("v") and pinned != f"v{version}":
+            return [f"the product pins {pinned}, this is v{version}"]
         expected = vendoring.render(Path(tmp), version)
+        modes = vendoring.modes(Path(tmp))
     expected[vendoring.MANIFEST] = vendoring.manifest_bytes(version, commit, expected)
-    problems = vendoring.self_update_violations(changes, set(expected) | before)
-    for change in changes:
-        path = change["filename"]
-        if change["status"] == "removed":
-            if path in expected:
-                problems.append(f"{path}: removed, but release {version} still ships it")
-        elif path in expected and file_at(repo, path, info["head_sha"]) != expected[path]:
-            problems.append(f"{path}: differs from release {version}")
-    return problems
+    return vendoring.verify_tree(entries, expected, modes, set(installed.get("files", {})))
 
 
 def main() -> None:

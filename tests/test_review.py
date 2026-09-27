@@ -54,7 +54,8 @@ class AgentToolingTest(unittest.TestCase):
     def test_files_that_steer_agents_or_the_gate_need_security(self):
         for path in (".claude/settings.json", ".claude/agents/qa.md", ".claude/product-team/scripts/pr",
                      ".claude/product-team/scripts/ptlib/review.py", ".product-team/project.yml", ".mcp.json",
-                     "CLAUDE.md", "AGENTS.md", ".github/CODEOWNERS"):
+                     "CLAUDE.md", "AGENTS.md", ".github/CODEOWNERS", "apps/web/.claude/settings.json",
+                     "apps/web/.claude/agents/x.md", "CLAUDE.local.md", "apps/api/CLAUDE.md"):
             with self.subTest(path=path):
                 self.assertTrue(review.security_reasons([path]))
 

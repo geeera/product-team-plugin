@@ -205,7 +205,7 @@ def cmd_answers(repo: str, args) -> None:
     owner = gh.owner_login(repo)
     comments = gh.api_list(f"repos/{repo}/issues/{args.number}/comments?per_page=100")
     # When the agents act as the owner's account, an agent can write a comment that looks like the owner's.
-    same_account = gh.token_login().lower() == owner.lower()
+    same_account = gh.acts_as_owner(repo)
     out({"owner": owner, "same_account": same_account, "commands": commands.parse(comments, owner)})
 
 

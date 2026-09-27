@@ -21,7 +21,9 @@ SENSITIVE = re.compile(
 )
 # Files that steer the agents or the gate itself: a change here is a change to who may merge what.
 AGENT_TOOLING = re.compile(
-    r"^\.claude/|^\.product-team/project\.ya?ml$|(^|/)\.mcp\.json$|(^|/)(CLAUDE|AGENTS)\.md$|(^|/)CODEOWNERS$",
+    r"(^|/)\.claude/|^\.product-team/project\.ya?ml$|(^|/)\.mcp\.json$|(^|/)(CLAUDE(\.local)?|AGENTS)\.md$|"
+    r"(^|/)CODEOWNERS$",
+    re.IGNORECASE,
 )
 DEPENDENCY_FILES = re.compile(
     r"(^|/)(package\.json|pnpm-lock\.yaml|package-lock\.json|yarn\.lock|bun\.lockb?|requirements[^/]*\.txt|"

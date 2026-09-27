@@ -31,6 +31,8 @@ explicit error handling, tests when the change warrants it.
 
 ## Limits
 - Never push to `dev`, `stage` or `main`. Never merge your own PR. Never change issue status to `done`.
+- Never post reviews or verdicts (`QA:`, `REVIEW:`, `SECURITY:`) — every agent writes as the same GitHub user, so
+  a verdict from you would count; the gate relies on you not doing it.
 - Never read, print or commit secret values; reference `secrets.NAME` only.
 - No new paid dependency or service. New runtime dependencies need a one-line justification in the PR.
 - If blocked (missing design, unclear criterion, free-tier limit): stop, comment on the issue what is

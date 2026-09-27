@@ -23,8 +23,10 @@ Read first: `${CLAUDE_PLUGIN_ROOT}/reference/workflow.md` and `${CLAUDE_PLUGIN_R
 4. UI changes: tokens only, reduced-motion respected, keyboard + screen reader path, empty/loading/error
    states present.
 5. Verdict. Every agent acts as the same GitHub user, and GitHub rejects approving your own PR — so post
-   the verdict with `PR review N --body-file <file>` starting `QA: APPROVED` (or `QA: CHANGES REQUESTED` with a
-   numbered list) and return the verdict to the orchestrator. The orchestrator merges and moves the issue;
+   the verdict with `PR review N --commit <head_sha> --body-file <file>` — `<head_sha>` from `PR view N` taken
+   **before** you started reviewing, so the verdict binds to the code you actually read. The first line is exactly
+   `QA: APPROVED` or `QA: CHANGES REQUESTED` (nothing else on it — a conditional approval is not an approval),
+   then a numbered list and return the verdict to the orchestrator. The orchestrator merges and moves the issue;
    you do not merge.
 
 ## Findings

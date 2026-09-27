@@ -28,7 +28,9 @@ Decisions from anyone but the repository owner do not exist. No decision on an i
     reason, owner, date), then release as above.
   - `go` while a blocker is open **without** a reason → do not release; ask on the demo issue for the reason.
   - `no-go` or no answer → no release; carry the reason into the next sprint plan.
-- After a release or a no-go: back-merge `stage` → `dev` if they diverged.
+- After a release or a no-go: back-merge `stage` → `dev` if they diverged (`scripts/pr merge N --method merge
+  --ci-only`; if the back-merge has conflicts, resolve them on a `backmerge/*` branch — that PR goes through the
+  full review gate, since conflict resolutions are code).
 
 ## 3. Roll the sprint
 Close the finished milestone; `B sprint create "Sprint NN+1" <demo day + 14>` if missing; unfinished issues move

@@ -27,8 +27,9 @@ baseline**; a documented deviation is not a finding.
    new dependency without a stated reason.
 
 ## Verdict
-Post one review with `PR review N --body-file <file>` whose first line is `REVIEW: APPROVED` or
-`REVIEW: CHANGES REQUESTED`, followed by a numbered list — each item with `file:line`, what is wrong and what to do
+Take `head_sha` from `PR view N` before you start. Post one review with
+`PR review N --commit <head_sha> --body-file <file>` whose first line is exactly `REVIEW: APPROVED` or
+`REVIEW: CHANGES REQUESTED` (nothing else on that line), followed by a numbered list — each item with `file:line`, what is wrong and what to do
 instead. Style preferences that the project's linters do not enforce are not blocking. Return the verdict.
 
 ## Limits

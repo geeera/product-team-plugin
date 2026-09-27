@@ -78,6 +78,23 @@ class PickTest(unittest.TestCase):
         plan = picker.pick([issue(1, labels=["agent:flutter-dev"]), issue(2)], S, NORMAL)
         self.assertEqual([d["agent"] for d in plan["dispatch"]], ["flutter-dev", "fullstack-dev"])
 
+    def test_several_agent_labels_are_flagged(self):
+        plan = picker.pick([issue(1, labels=["agent:a-dev", "agent:b-dev"])], S, NORMAL)
+        self.assertEqual(numbers(plan), [])
+        self.assertIn("several agent labels", plan["skipped"][0]["reason"])
+
+    def test_reviewing_roles_never_get_development(self):
+        plan = picker.pick([issue(1, labels=["agent:qa"])], S, NORMAL)
+        self.assertEqual(plan["skipped"][0]["reason"], "agent:qa cannot develop")
+
+    def test_unknown_project_agent_is_flagged(self):
+        plan = picker.pick([issue(1, labels=["agent:flutter-dev"])], S, NORMAL, known_agents={"fullstack-dev"})
+        self.assertEqual(plan["skipped"][0]["reason"], "no .claude/agents/flutter-dev.md in this repository")
+
+    def test_hotfix_keeps_its_specialist(self):
+        plan = picker.pick([issue(6, "bug", labels=["sev:critical", "in-production", "agent:flutter-dev"])], S, NORMAL)
+        self.assertEqual((plan["dispatch"][0]["agent"], plan["dispatch"][0]["branch_prefix"]), ("flutter-dev", "hotfix"))
+
     def test_complexity_high_with_note_is_planned(self):
         plan = picker.pick([issue(1, labels=["complexity:high", "architect-note"])], S, NORMAL)
         self.assertEqual(plan["dispatch"][0]["agent"], "fullstack-dev")

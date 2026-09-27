@@ -16,7 +16,8 @@ Runs inside the calling slot's run protocol. `B` = `${CLAUDE_PLUGIN_ROOT}/script
    payment paths changed this sprint. Security Critical/High and UX blockers get `release-blocker`.
 3. **Fix blockers only** — for each `release-blocker` (and P0/P1 bug) in the sprint: dev agent on
    `fix/<issue>-<slug>` from `stage`, PR to `stage`, the usual review gate (`PR gate`), merge with `PR merge --method squash`. Then
-   `devops` opens the back-merge PR `stage` → `dev` and merges it when green. No other changes enter `stage`.
+   `devops` opens the back-merge PR `stage` → `dev` and merges it with
+   `PR merge --method merge --ci-only` when green. No other changes enter `stage`.
 4. **Release status** — comment on the sprint's `team:demo` issue: open blockers (links), findings by severity,
    the team's recommendation. Any open `release-blocker` = automatic no-go (the owner may override at the demo
    with a written reason).

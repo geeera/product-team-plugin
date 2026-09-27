@@ -4,7 +4,7 @@ Products follow the `stable` channel (or a pinned tag, `team.plugin_ref` in `.pr
 first `slot-pm` of the day runs `vendor self-update` and opens a PR with the entries in between. Breaking changes (a renamed label, a changed script contract, a new required
 `project.yml` key) are marked **Breaking** with the migration step.
 
-## Unreleased
+## 0.4.0
 
 - **Team**: `ux-designer` and `ui-designer` replace `designer`; new `reviewer` (code quality, Sonnet) and
   `security` (OWASP, threat models, deep audit, Opus); `qa` keeps acceptance, accessibility and polish.
@@ -13,6 +13,9 @@ first `slot-pm` of the day runs `vendor self-update` and opens a PR with the ent
   label. Branch operations and the self-update PR use `pr merge --ci-only`.
 - **Product specialists**: `agent:<name>` routes an issue to the project's own `.claude/agents/<name>.md`.
 - New label `ux-spec`. Run `backlog init` once in each product.
+- **Migration** — if the product has its own `.claude/agents/` files named `ux-designer`, `ui-designer`,
+  `reviewer` or `security`, self-update stops and asks the owner (nothing is overwritten); rename them first.
+- Optional `team.reviewer_logins` in `project.yml`: with a separate reviewing account, only its verdicts count.
 - **Breaking** — `designer` is gone; self-update removes it. Open issues waiting on a design keep working (the
   next `slot-pm` starts them at the UX step).
 - `fullstack-dev` runs on Opus 5.5 in every mode; `fullstack-dev-senior` is removed (self-update deletes it from

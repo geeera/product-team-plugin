@@ -17,7 +17,8 @@ radius (who is affected, is data being damaged).
 - Otherwise fix forward (steps 2–3).
 
 ## 2. Fix
-`B move N in-progress`. `fullstack-dev` on `hotfix/<issue>-<slug>` from `main`, PR to `main`.
+`B move N in-progress`. The issue's developer (`fullstack-dev`, or the product agent its `agent:<name>` label
+names) on `hotfix/<issue>-<slug>` from `main`, PR to `main`.
 The PR contains the smallest change that removes the defect plus a regression test that fails without it —
 no refactors, no drive-by fixes.
 
@@ -28,7 +29,8 @@ no refactors, no drive-by fixes.
   confirms the deploy finished and the defect is gone on production (e2e smoke or the reproduction steps).
 - Tag the release with the project's scheme plus a hotfix suffix (e.g. `v2026.10.02-hotfix.1`).
 - Back-merge: PR `main` → `stage`, then `stage` → `dev` (or `main` → `dev` outside a freeze); merge each on
-  green CI with `--method merge --ci-only` (never squash long-lived branches into each other). Conflicts are resolved in the back-merge PR, never by pushing to the branches.
+  green CI with `--method merge --ci-only` (never squash long-lived branches into each other). Conflicts are resolved on a `backmerge/*` branch whose PR goes through the full review gate, never by pushing
+  to the branches.
 - `B move N done`.
 
 ## 4. Roll back

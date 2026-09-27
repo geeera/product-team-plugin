@@ -35,18 +35,13 @@ class DeleteBranchTest(unittest.TestCase):
         self.assertIn("deleted fork", self.check("feature/7-x", head_repo=None))
 
 
-class CiOnlyTest(unittest.TestCase):
-    def test_only_branch_operations_and_self_update_skip_the_verdicts(self):
-        self.assertTrue(pr.ci_only_allowed({"head": "dev", "base": "stage"}))
-        self.assertTrue(pr.ci_only_allowed({"head": "stage", "base": "main"}))
-        self.assertTrue(pr.ci_only_allowed({"head": "chore/product-team-0.4.0", "base": "dev"}))
-        self.assertFalse(pr.ci_only_allowed({"head": "feature/7-x", "base": "dev"}))
-        self.assertFalse(pr.ci_only_allowed({"head": "hotfix/9-y", "base": "main"}))
-
-
 class MergeMethodTest(unittest.TestCase):
     def test_method_is_required(self):
         with mock.patch.object(sys, "argv", ["pr", "merge", "5"]), self.assertRaises(SystemExit):
+            pr.main()
+
+    def test_review_must_name_the_reviewed_commit(self):
+        with mock.patch.object(sys, "argv", ["pr", "review", "5", "--body", "QA: APPROVED"]), self.assertRaises(SystemExit):
             pr.main()
 
 

@@ -36,6 +36,36 @@ class SecurityRelevanceTest(unittest.TestCase):
         self.assertEqual(review.security_reasons([], ["security"]), ["issue labelled security"])
 
 
+class MorePathsTest(unittest.TestCase):
+    def test_paths_the_review_found_missing(self):
+        for path in (".github/actions/setup/action.yml", ".gitleaksignore", ".env.example", "apps/api/drizzle/0007_x.sql",
+                     "apps/api/src/sheets/internal-sheet-images.controller.ts", "apps/reader/ios/Podfile.lock",
+                     "apps/reader/android/app/build.gradle.kts", "firestore.rules", "bun.lockb"):
+            with self.subTest(path=path):
+                self.assertTrue(review.security_reasons([path]))
+
+    def test_false_positives_the_review_found(self):
+        for path in (".cspell.json", "docs/authors.md", "apps/backoffice/src/favicon.ico", "apps/backoffice/src/styles.scss"):
+            with self.subTest(path=path):
+                self.assertEqual(review.security_reasons([path]), [])
+
+
+class CiOnlyTest(unittest.TestCase):
+    def test_release_flow_operations_are_allowed(self):
+        for head, base in (("dev", "stage"), ("stage", "main"), ("stage", "dev"), ("main", "stage"), ("main", "dev")):
+            with self.subTest(pair=(head, base)):
+                self.assertEqual(review.ci_only_allowed(head, base, ["x"]), "")
+
+    def test_skipping_stage_or_arbitrary_branches_is_refused(self):
+        self.assertTrue(review.ci_only_allowed("dev", "main", []))
+        self.assertTrue(review.ci_only_allowed("feature/7-x", "dev", []))
+
+    def test_self_update_only_into_dev_and_only_under_claude(self):
+        self.assertEqual(review.ci_only_allowed("chore/product-team-0.4.0", "dev", [".claude/agents/qa.md"]), "")
+        self.assertTrue(review.ci_only_allowed("chore/product-team-0.4.0", "main", [".claude/agents/qa.md"]))
+        self.assertTrue(review.ci_only_allowed("chore/product-team-x", "dev", [".claude/a.md", "apps/api/src/app.ts"]))
+
+
 class GateTest(unittest.TestCase):
     def test_passes_with_current_approvals(self):
         result = review.gate([rv("QA: APPROVED"), rv("REVIEW: APPROVED")], HEAD, security_required=False)
@@ -55,9 +85,22 @@ class GateTest(unittest.TestCase):
                    rv("QA: APPROVED")]
         self.assertEqual(review.gate(reviews, HEAD, False)["missing"], ["REVIEW: changes requested"])
 
-    def test_verdict_must_open_the_review(self):
+    def test_verdict_must_be_the_whole_first_line(self):
         self.assertIsNone(review.verdict("Looks fine. QA: APPROVED"))
-        self.assertEqual(review.verdict("qa: approved — all criteria met"), ("QA", "APPROVED"))
+        self.assertIsNone(review.verdict("QA: APPROVED (conditional on CI): do not merge until"))
+        self.assertEqual(review.verdict("qa: approved"), ("QA", "APPROVED"))
+
+    def test_conditional_approval_does_not_pass_the_gate(self):
+        reviews = [rv("QA: APPROVED (conditional on CI)\nwait for e2e"), rv("REVIEW: APPROVED")]
+        self.assertEqual(review.gate(reviews, HEAD, False)["missing"], ["QA: no verdict"])
+
+    def test_pending_draft_reviews_do_not_count(self):
+        reviews = [dict(rv("QA: APPROVED"), state="PENDING"), rv("REVIEW: APPROVED")]
+        self.assertEqual(review.gate(reviews, HEAD, False)["missing"], ["QA: no verdict"])
+
+    def test_only_configured_reviewer_logins_count(self):
+        reviews = [dict(rv("QA: APPROVED"), user={"login": "owner"}), dict(rv("REVIEW: APPROVED"), user={"login": "team-bot"})]
+        self.assertEqual(review.gate(reviews, HEAD, False, ["team-bot"])["missing"], ["QA: no verdict"])
 
 
 if __name__ == "__main__":

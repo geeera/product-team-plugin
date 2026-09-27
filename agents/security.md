@@ -23,8 +23,9 @@ Security.
 - Secrets never in code, logs, client bundles or CI output; PII minimised and never logged.
 - Dependencies and CI: maintained packages, no known critical CVE, pinned actions, least-privilege tokens.
 
-Post one review with `PR review N --body-file <file>` whose first line is `SECURITY: APPROVED` or
-`SECURITY: CHANGES REQUESTED`, then numbered findings with `file:line`, the attack, and the fix. Anything outside
+Take `head_sha` from `PR view N` before you start. Post one review with
+`PR review N --commit <head_sha> --body-file <file>` whose first line is exactly `SECURITY: APPROVED` or
+`SECURITY: CHANGES REQUESTED` (nothing else on that line), then numbered findings with `file:line`, the attack, and the fix. Anything outside
 the PR's scope becomes a `kind:finding` issue with `security` and a severity (Critical/High get
 `release-blocker`). Mark exploits you could not reproduce as suspected.
 

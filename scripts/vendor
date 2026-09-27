@@ -32,6 +32,13 @@ sys.path.insert(0, str(HERE))
 from ptlib import project, vendoring  # noqa: E402
 
 PLUGIN_REPO = "https://github.com/geeera/product-team-plugin"
+CONFLICT_EXIT = 4
+
+
+class Conflict(Exception):
+    def __init__(self, paths):
+        super().__init__(", ".join(paths))
+        self.paths = paths
 
 
 def source_version(root: Path) -> dict:
@@ -54,7 +61,7 @@ def install(src: Path, target: Path) -> dict:
     installed = vendoring.read_manifest(target)
     conflicts = vendoring.conflicts(target, plan, installed)
     if conflicts:
-        sys.exit("refusing to overwrite files the plugin does not own: " + ", ".join(conflicts))
+        raise Conflict(conflicts)
     edited = vendoring.local_edits(target, installed)
     written, removed = [], []
     for rel, (source, rewrite) in sorted(plan.items()):
@@ -90,6 +97,16 @@ def main() -> None:
     args = p.parse_args()
     src = HERE.parent
 
+    try:
+        run(args, src)
+    except Conflict as exc:
+        # The product owns files with the plugin's names (e.g. its own reviewer.md): a person must decide.
+        print(json.dumps({"updated": False, "conflicts": exc.paths,
+                          "action": "rename the product's own files, or tell the plugin maintainer"}, indent=2))
+        sys.exit(CONFLICT_EXIT)
+
+
+def run(args, src: Path) -> None:
     if args.cmd == "install":
         print(json.dumps(install(src, Path(args.target).resolve()), indent=2))
     elif args.cmd == "status":

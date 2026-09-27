@@ -6,6 +6,9 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional
 
+# Roles that review, plan or design; development never goes to them even when an issue asks for it.
+NON_DEVELOPERS = {"pm", "architect", "ux-designer", "ui-designer", "reviewer", "qa", "qa-runner", "security",
+                  "devops", "analyst", "scribe"}
 SKIP_ALWAYS = {"needs:local": "needs a local machine", "needs:owner": "waits for the owner"}
 SEV_RANK = {"critical": 0, "high": 1}
 
@@ -28,8 +31,23 @@ def is_urgent(issue: dict) -> bool:
     return issue.get("kind") == "bug" and _severity(issue) in SEV_RANK
 
 
-def pick(issues: List[dict], sprint: Optional[str], ctx: dict) -> Dict[str, list]:
-    """ctx: slot-context output (`mode`, `is_burn`, `caps`)."""
+def agent_for(issue: dict, known_agents: Optional[set] = None) -> tuple:
+    """(agent, problem): the developer an issue goes to, or why it cannot be routed."""
+    requested = sorted(l[len("agent:"):] for l in _labels(issue) if l.startswith("agent:"))
+    if not requested:
+        return "fullstack-dev", ""
+    if len(requested) > 1:
+        return None, f"several agent labels: {', '.join(requested)}"
+    name = requested[0]
+    if name in NON_DEVELOPERS:
+        return None, f"agent:{name} cannot develop"
+    if known_agents is not None and name not in known_agents:
+        return None, f"no .claude/agents/{name}.md in this repository"
+    return name, ""
+
+
+def pick(issues: List[dict], sprint: Optional[str], ctx: dict, known_agents: Optional[set] = None) -> Dict[str, list]:
+    """ctx: slot-context output (`mode`, `is_burn`, `caps`). known_agents: project agent names, when known."""
     caps = ctx["caps"]
     freeze = ctx["mode"] == "freeze"
     urgent, rework, planned, skipped, needs_note = [], [], [], [], []
@@ -42,6 +60,7 @@ def pick(issues: List[dict], sprint: Optional[str], ctx: dict) -> Dict[str, list
         if issue.get("kind") == "question":
             continue  # answered by the owner, never built
         blocker = next((why for label, why in SKIP_ALWAYS.items() if label in labels), None)
+        blocker = blocker or agent_for(issue, known_agents)[1]
         if blocker:
             skipped.append({"number": issue["number"], "reason": blocker})
             continue
@@ -103,7 +122,6 @@ def is_hotfix(issue: dict) -> bool:
 
 
 def _entry(issue: dict, ctx: dict, freeze: bool, reason: str) -> dict:
-    labels = _labels(issue)
     hotfix = is_hotfix(issue)
     if issue.get("status") == "in-progress":
         # Rework continues on the open PR: its branch and base come from the PR, not from today's mode.
@@ -117,7 +135,7 @@ def _entry(issue: dict, ctx: dict, freeze: bool, reason: str) -> dict:
     return {
         "number": issue["number"],
         "title": issue["title"],
-        "agent": next((l[len("agent:"):] for l in sorted(labels) if l.startswith("agent:")), "fullstack-dev"),
+        "agent": agent_for(issue)[0],
         "base": base,
         "branch_prefix": prefix,
         "reason": reason,

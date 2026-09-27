@@ -46,8 +46,9 @@ class InstallTest(unittest.TestCase):
             target = Path(tmp)
             (target / ".claude/agents").mkdir(parents=True)
             (target / ".claude/agents/qa.md").write_text("the project's own qa agent")
-            with self.assertRaises(SystemExit):
+            with self.assertRaises(vendor.Conflict) as caught:
                 vendor.install(ROOT, target)  # never overwrite what the plugin did not write
+            self.assertEqual(caught.exception.paths, [".claude/agents/qa.md"])
 
             (target / ".claude/agents/qa.md").unlink()
             first = vendor.install(ROOT, target)

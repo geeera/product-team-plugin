@@ -23,6 +23,9 @@ Skip if `.claude/product-team/MANIFEST.json` does not exist. `PR` = `${CLAUDE_PL
    `chore: product team <version>` with the CHANGELOG entries between the two versions as the body. Do the
    migration step of every **Breaking** entry in the same PR. List `overwrote_local_edits` in the body — those
    fixes belong in the plugin, not here. The PR merges on a later run (step 1); the new team takes effect after.
+   Exit code 4 with `conflicts` means the product has its own files with the plugin's names (e.g. its own
+   `reviewer.md`): nothing was changed. Open one `kind:question` + `needs:owner` issue titled
+   `Product team update blocked` (only if none is open) listing the files, and stop step 0.
 
 ## 1. Owner answers
 - **Designs**: for each issue labelled `design:awaiting-approval`, `B answers N` (only commands newer than the

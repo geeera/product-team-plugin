@@ -27,9 +27,13 @@ Delegate in parallel, each returning a written report:
   records and their format, stack and free-tier limits in use.
 - `devops`: CI/CD as it is (jobs, triggers, secrets referenced by name, minutes usage), environments and
   deploy path, containerisation, missing contract pieces.
-- `qa`: test inventory (unit/integration/e2e, coverage if measurable, flaky tests), security posture (secret
-  scan of history, dependency audit, obvious OWASP issues), a11y of key flows if a deployed URL exists.
-- `designer` (only if there is a UI): tokens or their absence, component library, Storybook, visual debt.
+- `qa`: test inventory (unit/integration/e2e, coverage if measurable, flaky tests), a11y of key flows if a
+  deployed URL exists.
+- `ui-designer` (only if there is a UI): tokens or their absence, component library, Storybook, visual debt.
+- `ux-designer` (only if there is a UI): key flows, states, copy, accessibility of the flows.
+- `security`: secret scan of history, dependency audit, OWASP pass over auth, data and payment paths.
+- Stack specialists the product needs (e.g. a Flutter or iOS developer): propose project agents in
+  `.claude/agents/` and label their work `agent:<name>` (`reference/workflow.md`).
 Also run the owner's `engineering-baseline:conformance-audit` if installed, to record baseline deviations.
 
 ## 3. Write the contract (one PR to `dev`, branch `feature/adopt-contract`)

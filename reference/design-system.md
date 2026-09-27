@@ -28,7 +28,7 @@ equivalent): button, icon button, link, input, textarea, select, checkbox, radio
 
 ## Wow
 
-- At kickoff the owner gives 3–5 references → the designer offers 2–3 visual directions → the owner picks one
+- At kickoff the owner gives 3–5 references → the `ui-designer` offers 2–3 visual directions → the owner picks one
   (recorded as a decision).
 - 1–3 **signature moments** per product (e.g. onboarding reveal, the core action's success state), each built
   as an interactive prototype for approval before implementation.

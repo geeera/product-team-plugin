@@ -40,11 +40,12 @@ P0/P1 bugs and release blockers do not count against the cap. The plan itself co
 | Model | ID | Used by |
 | ----- | -- | ------- |
 | Fable 5.1 | `claude-fable-5-1` | `architect`; `kickoff`, `foundation`, ADRs |
-| Opus 5.5 | `claude-opus-5-5` | orchestrator (`slot-*`, `adopt`, `demo-*`), `pm`, `designer`, `qa`, `fullstack-dev` |
-| Sonnet 5 | `claude-sonnet-5` | `devops`, `analyst`, `qa-runner` (regression) |
+| Opus 5.5 | `claude-opus-5-5` | orchestrator (`slot-*`, `adopt`, `demo-*`), `pm`, `ux-designer`, `ui-designer`, `qa`, `security`, `fullstack-dev` |
+| Sonnet 5 | `claude-sonnet-5` | `reviewer`, `devops`, `analyst`, `qa-runner` (regression) |
 | Haiku 4.5 | `claude-haiku-4-5-20251001` | `scribe`: labels, changelog, summary formatting |
 
-Security reviews are never delegated to Fable (its extra cyber safeguards cause refusals) — they go to `qa`.
+Security reviews are never delegated to Fable (its extra cyber safeguards cause refusals) — they go to
+`security` on Opus. Project-specific agents (`agent:<name>` issues) use whatever model their own file pins.
 
 Role variants exist only to pin a second model to the same role: `qa-runner` is `qa` on Sonnet for mechanical
 regression runs, `scribe` is the Haiku formatter.

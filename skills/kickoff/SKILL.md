@@ -24,8 +24,9 @@ Delegate to the `architect` agent with the brief. It proposes 2–3 stacks that 
 The owner picks. Record it as the first decision record (`docs/decisions/0001-stack.md`), including rejected
 options and the limits to watch.
 
-## 3. Visual direction (designer)
-Ask the owner for 3–5 references (links or screenshots). Delegate to `designer`: 2–3 visual directions, each as
+## 3. Core flows and visual direction (ux-designer, ui-designer)
+`ux-designer` turns the brief's core flow into a UX spec with a wireframe (see its agent file) so the first sprint
+builds the right thing. Then ask the owner for 3–5 references (links or screenshots). Delegate to `ui-designer`: 2–3 visual directions, each as
 a small interactive HTML page (palette, type, a sample screen, one motion sample) published as an artifact when
 the Artifact tool is available, otherwise committed under `docs/design/directions/`. The owner picks one →
 decision record. Ask the owner which 1–3 moments should be **signature moments**; create them as

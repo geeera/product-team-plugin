@@ -9,7 +9,7 @@ model: claude-opus-5-5
 `B` = `${CLAUDE_PLUGIN_ROOT}/scripts/backlog`. The page is `${CLAUDE_PLUGIN_ROOT}/templates/demo-page.html`
 filled with this sprint's data; never hand-edit its markup per sprint.
 
-## 1. Collect (delegate the text to `pm`, numbers to `analyst`, wow ideas to `designer`)
+## 1. Collect (delegate the text to `pm`, numbers to `analyst`, wow ideas to `ui-designer`)
 Write `demo.json` (schema = the example data inside the template):
 - `product`, `repo`, `sprint`, `demo_date`, `stage_url`, `demo_issue` (`team:demo` issue; create it if missing).
 - `shipped`: issues moved to `done` this sprint and present on `stage` — `id` = `issue-<n>`, one-sentence

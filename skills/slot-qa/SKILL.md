@@ -21,14 +21,18 @@ For each linked open PR, oldest first:
    base into the branch locally (no force-push; generated files are regenerated, not hand-merged) and pushes.
 2. `PR checks <pr>` — pending: skip (next slot); red: comment the failing job on the PR,
    `B move N in-progress --reason "CI red: <job>"`, `B label N +qa:changes-requested`.
-3. Green → start the **`qa` agent** with only: `PLUGIN_ROOT=<path>`, repo, PR number, issue number. Never pass
-   the developer's summary or transcript. Independent reviews may run in parallel (up to 3).
-4. Verdict:
-   - `QA: APPROVED` → `PR merge <pr> --method squash --delete-branch` (it refuses unless CI passes), `B label N -qa:changes-requested`,
-     `B move N done`.
-   - `QA: CHANGES REQUESTED` → `B move N in-progress`, `B label N +qa:changes-requested` (this is what puts it
-     in the next `B next` plan). If the changes are small and the issue is P0/P1, dispatch the developer now on
-     the same branch, then one more `qa` pass.
+3. Green → start the independent reviewers **in parallel**, each with only `PLUGIN_ROOT=<path>`, repo, PR
+   number, issue number — never the developer's summary or transcript:
+   - `qa` — acceptance, accessibility, polish;
+   - `reviewer` — code quality against the project's conventions;
+   - `security` — only when `PR security-check <pr>` says `required: true`.
+4. Verdicts — `PR gate <pr>` sums them up:
+   - `passed: true` → `PR merge <pr> --method squash --delete-branch` (it re-checks the gate: CI plus every
+     required verdict, approved on the current head), `B label N -qa:changes-requested`, `B move N done`.
+   - any `CHANGES REQUESTED` → `B move N in-progress`, `B label N +qa:changes-requested` (the label stands for
+     any reviewer; it puts the issue in the next `B next` plan). If the changes are small and the issue is P0/P1,
+     dispatch the developer now on the same branch, then one more round of the reviewers that asked.
+   - a verdict missing (a reviewer failed) → run that reviewer again next slot; never merge around it.
 5. Findings the reviewer filed outside the PR's scope stay in the backlog with their severity.
 
 ## 3. Triage
@@ -41,9 +45,11 @@ gets `needs:local` / `needs:owner`.
 ## 4. Deep audit — Saturday burn slot only
 When `slot-context` is `burn` on a Saturday and no deep audit ran this sprint (look for a run-log summary with
 "deep audit" in the current sprint), run in parallel:
-- `qa`: security audit of the whole `dev` branch (OWASP, dependency audit, secrets in history, authz paths).
-- `designer`: UX walkthrough of the key flows on `stage` (or `dev` before the cut) per
-  `reference/qa-checklists.md`.
+- `security`: deep audit of the whole `dev` branch (OWASP, dependency audit, secrets in history, authz paths,
+  headers on the deployed environments).
+- `ux-designer`: UX walkthrough of the key flows on `stage` (or `dev` before the cut); `ui-designer` the visual
+  review alongside it.
+- `reviewer`: a sweep of code merged this sprint for drift from the conventions.
 - `analyst`: sprint metrics for the demo (`scripts/sprint-metrics`, `scripts/runlog stats`).
 - `architect` is **not** used for the security part (Fable refusals); it may review debt and structure.
 All output becomes findings through `B create`.

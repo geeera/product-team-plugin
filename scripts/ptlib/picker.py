@@ -103,6 +103,7 @@ def is_hotfix(issue: dict) -> bool:
 
 
 def _entry(issue: dict, ctx: dict, freeze: bool, reason: str) -> dict:
+    labels = _labels(issue)
     hotfix = is_hotfix(issue)
     if issue.get("status") == "in-progress":
         # Rework continues on the open PR: its branch and base come from the PR, not from today's mode.
@@ -116,7 +117,7 @@ def _entry(issue: dict, ctx: dict, freeze: bool, reason: str) -> dict:
     return {
         "number": issue["number"],
         "title": issue["title"],
-        "agent": "fullstack-dev",
+        "agent": next((l[len("agent:"):] for l in sorted(labels) if l.startswith("agent:")), "fullstack-dev"),
         "base": base,
         "branch_prefix": prefix,
         "reason": reason,

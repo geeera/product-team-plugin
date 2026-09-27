@@ -74,6 +74,10 @@ class PickTest(unittest.TestCase):
         issues = [issue(n) for n in range(1, 8)]
         self.assertEqual(numbers(picker.pick(issues, S, BURN)), [1, 2, 3, 4, 5])
 
+    def test_agent_label_routes_to_a_project_agent(self):
+        plan = picker.pick([issue(1, labels=["agent:flutter-dev"]), issue(2)], S, NORMAL)
+        self.assertEqual([d["agent"] for d in plan["dispatch"]], ["flutter-dev", "fullstack-dev"])
+
     def test_complexity_high_with_note_is_planned(self):
         plan = picker.pick([issue(1, labels=["complexity:high", "architect-note"])], S, NORMAL)
         self.assertEqual(plan["dispatch"][0]["agent"], "fullstack-dev")

@@ -26,14 +26,16 @@ For each linked open PR, oldest first:
    number, issue number — never the developer's summary or transcript:
    - `qa` — acceptance, accessibility, polish;
    - `reviewer` — code quality against the project's conventions;
-   - `security` — only when `PR security-check <pr>` says `required: true`.
+   - `security` — only when `PR security-check <pr>` says `required: true`; then also `B label N +security`, so
+     any rework of this issue stays off Fable.
 4. Verdicts — `PR gate <pr>` sums them up:
    - `passed: true` → `PR merge <pr> --method squash --delete-branch` (it re-checks the gate: CI plus every
      required verdict, approved on the current head), `B label N -qa:changes-requested`, `B move N done`.
    - any `CHANGES REQUESTED` → `B move N in-progress`, `B label N +qa:changes-requested` (the label stands for
      any reviewer; it puts the issue in the next `B next` plan). First failed round: `B label N +review-failed`;
-     a second one: `B label N +tier-up` — the rework then goes to the next tier's developer. If the changes are small and the issue is P0/P1,
-     dispatch the developer now on the same branch, then one more round of the reviewers that asked.
+     a second one: `B label N +tier-up` — the rework then goes to the next tier's developer.
+     Whoever does rework is always the `agent` of the issue's entry in `B next`, never a developer picked by hand. If the changes are small and the issue is P0/P1,
+     dispatch the `agent` from the issue's `B next` entry now on the same branch, then one more round of the reviewers that asked.
    - a verdict missing (a reviewer failed) → run that reviewer again next slot; never merge around it.
 5. Findings the reviewer filed outside the PR's scope stay in the backlog with their severity.
 

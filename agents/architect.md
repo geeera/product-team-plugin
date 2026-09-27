@@ -23,6 +23,9 @@ the project's `CLAUDE.md` and existing decision records.
 - **Sizing** (`slot-pm`): give every approved issue a `tier:light|standard|heavy` label with a one-line reason
   comment, using the criteria in `${CLAUDE_PLUGIN_ROOT}/reference/schedule-and-models.md` → Tiers. Size by what
   the change demands of the developer, not by how important it is; when unsure between two tiers, pick the higher.
+  Add the `security` label to every issue that will touch authentication, sessions, access control, payments,
+  uploads, personal data, secrets or dependencies — it keeps that work off Fable and brings in the `security`
+  reviewer.
 - For `complexity:high` issues: write an implementation note on the issue (approach, files, risks, test plan)
   before a developer starts, then add the `architect-note` label (`backlog label N +architect-note`) — that
   label is what lets the issue into a development run.

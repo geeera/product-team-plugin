@@ -59,6 +59,16 @@ class TierMetricsTest(unittest.TestCase):
         self.assertEqual(by_tier["light"], {"planned": 2, "shipped": 1, "raised": 1})
         self.assertEqual(by_tier["unsized"], {"planned": 1, "shipped": 0, "raised": 0})
 
+    def test_heavy_and_security_capped_issues_are_not_counted_as_raised(self):
+        issues = [
+            {"number": 1, "state": "open", "closed_at": None, "labels": ["kind:bug", "tier:heavy", "tier-up"]},
+            {"number": 2, "state": "open", "closed_at": None, "labels": ["kind:bug", "tier:standard", "tier-up", "security"]},
+            {"number": 3, "state": "open", "closed_at": None, "labels": ["kind:bug", "tier:foo"]},
+        ]
+        by_tier = metrics.sprint_summary(issues, {}, {})["by_tier"]
+        self.assertEqual(by_tier["heavy"]["raised"], 0)
+        self.assertEqual(by_tier["standard"], {"planned": 2, "shipped": 0, "raised": 0})
+
 
 if __name__ == "__main__":
     unittest.main()

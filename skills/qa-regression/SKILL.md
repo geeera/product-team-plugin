@@ -14,8 +14,10 @@ Runs inside the calling slot's run protocol. `B` = `${CLAUDE_PLUGIN_ROOT}/script
 2. **Judgement pass** — `qa` agent: failures from step 1 triaged into findings with severity; polish checklist
    (`reference/qa-checklists.md`) on the flows changed this sprint. `security` spot-checks the auth, data and
    payment paths changed this sprint. Security Critical/High and UX blockers get `release-blocker`.
-3. **Fix blockers only** — for each `release-blocker` (and P0/P1 bug) in the sprint: dev agent on
-   `fix/<issue>-<slug>` from `stage`, PR to `stage`, the usual review gate (`PR gate`), merge with `PR merge --method squash`. Then
+3. **Fix blockers only** — for each `release-blocker` (and P0/P1 bug) in the sprint: the `agent`
+   from the issue's `B next` entry (freeze mode: base `stage`, prefix `fix`) on `fix/<issue>-<slug>`, PR to
+   `stage`, the usual review gate (`PR gate`; failed rounds labelled as in `slot-qa`: `review-failed`, then
+   `tier-up`; `+security` when `PR security-check` requires it), merge with `PR merge --method squash`. Then
    `devops` opens the back-merge PR `stage` → `dev` and merges it with
    `PR merge --method merge --ci-only` when green. No other changes enter `stage`.
 4. **Release status** — comment on the sprint's `team:demo` issue: open blockers (links), findings by severity,

@@ -17,14 +17,15 @@ radius (who is affected, is data being damaged).
 - Otherwise fix forward (steps 2–3).
 
 ## 2. Fix
-`B move N in-progress`. The issue's developer (`fullstack-dev`, or the product agent its `agent:<name>` label
-names) on `hotfix/<issue>-<slug>` from `main`, PR to `main`.
+`B move N in-progress`. The developer is the `agent` of this issue's entry in `B next` (tier rules apply: never
+`light` for a hotfix, never Fable for security work; a product specialist if the issue names one), on `hotfix/<issue>-<slug>` from `main`, PR to `main`.
 The PR contains the smallest change that removes the defect plus a regression test that fails without it —
 no refactors, no drive-by fixes.
 
 ## 3. Gate and release
 - The same gate as every PR: CI green, `qa` and `reviewer` approved, `security` too when
-  `PR security-check` requires it (`PR gate <pr>`). Run the reviewers in parallel to keep the hotfix fast.
+  `PR security-check` requires it (`PR gate <pr>`; then also `B label N +security`). Run the reviewers in parallel
+  to keep the hotfix fast. A failed round follows `slot-qa`: `review-failed`, then `tier-up`.
 - Merge the PR into `main` (`${CLAUDE_PLUGIN_ROOT}/scripts/pr merge <pr> --method squash --delete-branch`); production deploys from `main` through Actions. `devops`
   confirms the deploy finished and the defect is gone on production (e2e smoke or the reproduction steps).
 - Tag the release with the project's scheme plus a hotfix suffix (e.g. `v2026.10.02-hotfix.1`).

@@ -5,6 +5,8 @@ from datetime import datetime
 from statistics import median
 from typing import Dict, List, Optional
 
+from . import tiers
+
 WORK_KINDS = {"kind:feature", "kind:bug", "kind:chore", "kind:finding"}
 
 
@@ -46,11 +48,16 @@ def sprint_summary(issues: List[dict], events: Dict[int, List[dict]], reviews_by
     cycles = [c for c in (cycle_days(i.get("closed_at"), events.get(i["number"], [])) for i in shipped) if c is not None]
     by_tier: Dict[str, dict] = {}
     for i in work:
-        tier = next((l[5:] for l in i["labels"] if l.startswith("tier:")), "unsized")
+        sized = any(l.startswith("tier:") for l in i["labels"])
+        tier = tiers.declared(i["labels"]) if sized else "unsized"
         row = by_tier.setdefault(tier, {"planned": 0, "shipped": 0, "raised": 0})
         row["planned"] += 1
         row["shipped"] += i in shipped
-        row["raised"] += "tier-up" in i["labels"]
+        # Raised = built one tier higher than sized; a heavy or security-capped issue cannot be.
+        if sized and "tier-up" in i["labels"]:
+            built, _ = tiers.effective(i["labels"], burn=False, hotfix=False)
+            without, _ = tiers.effective([l for l in i["labels"] if l != "tier-up"], burn=False, hotfix=False)
+            row["raised"] += built != without
     return {
         "by_tier": by_tier,
         "planned": len(work),

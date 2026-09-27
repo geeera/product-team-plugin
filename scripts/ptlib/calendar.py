@@ -17,9 +17,9 @@ BURN_START = (4, 23)  # (weekday Mon=0, hour)
 BURN_END = (6, 19)
 
 DEFAULT_CAPS = {
-    "normal": {"dev_tasks": 2, "parallel_devs": 2, "dev_agent": "fullstack-dev"},
-    "burn": {"dev_tasks": 5, "parallel_devs": 3, "dev_agent": "fullstack-dev"},
-    "freeze": {"dev_tasks": 0, "parallel_devs": 1, "dev_agent": "fullstack-dev"},
+    "normal": {"dev_tasks": 2, "parallel_devs": 2},
+    "burn": {"dev_tasks": 5, "parallel_devs": 3},
+    "freeze": {"dev_tasks": 0, "parallel_devs": 1},
 }
 
 

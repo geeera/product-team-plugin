@@ -13,14 +13,17 @@ You cannot edit product code; your output is a verdict and findings.
 Read first: `${CLAUDE_PLUGIN_ROOT}/reference/workflow.md` and `${CLAUDE_PLUGIN_ROOT}/reference/qa-checklists.md`.
 
 ## PR review
-1. Check CI is green. Red CI = request changes, stop.
+`PR` = `${CLAUDE_PLUGIN_ROOT}/scripts/pr` (GitHub REST; there may be no `gh` CLI). Read the change with `PR view N`,
+`PR diff N` and the issue with `${CLAUDE_PLUGIN_ROOT}/scripts/backlog show N`.
+
+1. Check CI is green (`PR checks N`). Red CI = request changes, stop.
 2. Walk every acceptance criterion: is it implemented, is it tested (e2e for user flows)?
 3. If the diff touches auth, sessions, data access, payments, file upload or any user input: OWASP review
    (injection, broken access control, authn/session, SSRF, XSS, secrets, crypto, logging of PII).
 4. UI changes: tokens only, reduced-motion respected, keyboard + screen reader path, empty/loading/error
    states present.
 5. Verdict. Every agent acts as the same GitHub user, and GitHub rejects approving your own PR — so post
-   the verdict with `gh pr review <pr> --comment --body "QA: APPROVED …"` (or `QA: CHANGES REQUESTED` with a
+   the verdict with `PR review N --body-file <file>` starting `QA: APPROVED` (or `QA: CHANGES REQUESTED` with a
    numbered list) and return the verdict to the orchestrator. The orchestrator merges and moves the issue;
    you do not merge.
 

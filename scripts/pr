@@ -1,0 +1,112 @@
+#!/usr/bin/env python3
+"""Pull requests over the GitHub REST API (no `gh` CLI needed; cloud sessions may not have it).
+
+  pr create --base B --head H --title T (--body B | --body-file F)
+  pr view N            state, branches, mergeable, merge state, head sha
+  pr checks N          CI of the head commit: {"state": "pass"|"fail"|"pending", "failing": [...], ...}
+  pr diff N            the unified diff (for review)
+  pr review N (--body B | --body-file F)      a review comment (QA verdicts: "QA: APPROVED" / "QA: CHANGES REQUESTED")
+  pr reviews N         review bodies, oldest first
+  pr update-branch N   merge the base into the PR branch on GitHub (no force-push); fails on conflicts
+  pr merge N [--method squash|merge|rebase] [--delete-branch]   refuses unless CI passes
+  pr list [--base B] [--state open|closed|all]
+
+Output is JSON (the diff is plain text).
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+from urllib.parse import quote
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from ptlib import checks, gh  # noqa: E402
+
+
+def out(data) -> None:
+    json.dump(data, sys.stdout, indent=2, ensure_ascii=False)
+    sys.stdout.write("\n")
+
+
+def body_arg(args) -> str:
+    if getattr(args, "body_file", None):
+        with open(args.body_file, encoding="utf-8") as f:
+            return f.read()
+    if args.body is None:
+        sys.exit("--body or --body-file is required")
+    return args.body
+
+
+def view(repo: str, n: int) -> dict:
+    pr = gh.api(f"repos/{repo}/pulls/{n}")
+    return {
+        "number": pr["number"], "title": pr["title"], "url": pr["html_url"], "state": pr["state"],
+        "merged": pr.get("merged", False), "draft": pr.get("draft", False),
+        "base": pr["base"]["ref"], "head": pr["head"]["ref"], "head_sha": pr["head"]["sha"],
+        # GitHub computes mergeability lazily: null means "ask again in a moment".
+        "mergeable": pr.get("mergeable"), "merge_state": pr.get("mergeable_state"),
+    }
+
+
+def ci(repo: str, sha: str) -> dict:
+    runs = gh.api_list(f"repos/{repo}/commits/{sha}/check-runs?per_page=100")
+    statuses = gh.api_list(f"repos/{repo}/commits/{sha}/statuses?per_page=100")
+    return checks.summarise(runs, statuses)
+
+
+def main() -> None:
+    p = argparse.ArgumentParser(prog="pr", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = p.add_subparsers(dest="cmd", required=True)
+    c = sub.add_parser("create"); c.add_argument("--base", required=True); c.add_argument("--head", required=True)
+    c.add_argument("--title", required=True); c.add_argument("--body"); c.add_argument("--body-file")
+    for name in ("view", "checks", "diff", "reviews", "update-branch"):
+        sub.add_parser(name).add_argument("number", type=int)
+    r = sub.add_parser("review"); r.add_argument("number", type=int); r.add_argument("--body"); r.add_argument("--body-file")
+    m = sub.add_parser("merge"); m.add_argument("number", type=int)
+    m.add_argument("--method", default="squash", choices=["squash", "merge", "rebase"]); m.add_argument("--delete-branch", action="store_true")
+    ls = sub.add_parser("list"); ls.add_argument("--base"); ls.add_argument("--state", default="open", choices=["open", "closed", "all"])
+    args = p.parse_args()
+
+    try:
+        repo = gh.repo()
+        if args.cmd == "create":
+            pr = gh.api(f"repos/{repo}/pulls", "POST",
+                        {"base": args.base, "head": args.head, "title": args.title, "body": body_arg(args)})
+            out({"number": pr["number"], "url": pr["html_url"]})
+        elif args.cmd == "view":
+            out(view(repo, args.number))
+        elif args.cmd == "checks":
+            out(ci(repo, view(repo, args.number)["head_sha"]))
+        elif args.cmd == "diff":
+            sys.stdout.write(gh.raw(f"repos/{repo}/pulls/{args.number}", "application/vnd.github.diff"))
+        elif args.cmd == "review":
+            rv = gh.api(f"repos/{repo}/pulls/{args.number}/reviews", "POST", {"event": "COMMENT", "body": body_arg(args)})
+            out({"id": rv["id"], "url": rv.get("html_url")})
+        elif args.cmd == "reviews":
+            out([{"author": (r.get("user") or {}).get("login"), "at": r.get("submitted_at"), "body": r.get("body") or ""}
+                 for r in gh.api_list(f"repos/{repo}/pulls/{args.number}/reviews?per_page=100")])
+        elif args.cmd == "update-branch":
+            head = view(repo, args.number)["head_sha"]
+            out(gh.api(f"repos/{repo}/pulls/{args.number}/update-branch", "PUT", {"expected_head_sha": head}))
+        elif args.cmd == "merge":
+            info = view(repo, args.number)
+            state = ci(repo, info["head_sha"])
+            if state["state"] != "pass":
+                sys.exit(f"refusing to merge #{args.number}: CI is {state['state']} {state['failing'] or state['pending']}")
+            res = gh.api(f"repos/{repo}/pulls/{args.number}/merge", "PUT",
+                         {"merge_method": args.method, "sha": info["head_sha"]})
+            if args.delete_branch:
+                gh.api(f"repos/{repo}/git/refs/heads/{quote(info['head'], safe='/')}", "DELETE")
+            out({"merged": res.get("merged"), "sha": res.get("sha"), "branch_deleted": args.delete_branch})
+        else:
+            query = f"state={args.state}&per_page=100" + (f"&base={quote(args.base)}" if args.base else "")
+            out([{"number": x["number"], "title": x["title"], "base": x["base"]["ref"], "head": x["head"]["ref"],
+                  "url": x["html_url"]} for x in gh.api_list(f"repos/{repo}/pulls?{query}")])
+    except gh.GhError as exc:
+        sys.exit(str(exc))
+
+
+if __name__ == "__main__":
+    main()

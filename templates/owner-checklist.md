@@ -13,6 +13,10 @@ workflows. Tick an item by editing this file in a PR, or comment `/approve` on t
 | ------ | -------- | ------------------ | ---- |
 <!-- rows added by devops; one row per secret -->
 
+## Optional hardening
+- [ ] A separate GitHub machine account for the team (one free machine account is allowed) with write access
+      but no admin: then its token cannot bypass the process and QA approvals become real PR reviews.
+
 ## Claude
 - [ ] Scheduled routines created for `slot-pm`, `slot-dev`, `slot-qa` (see the plugin README)
 - [ ] Project chat created for owner ↔ team conversation

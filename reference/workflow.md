@@ -7,6 +7,7 @@ Every role and skill follows this. Source: SPEC decisions 1, 4, 5, 14, 16.
 ```
 feature/<issue>-<slug> ──PR──▶ dev ──cut 2 days before demo──▶ stage ──owner go at demo──▶ main
                                           fix/<issue>-<slug> ──PR──▶ stage (freeze only)
+                                                             hotfix/<issue>-<slug> ──PR──▶ main (P0/P1 in production)
 ```
 
 - Every change arrives as a PR. **Never push directly to `dev`, `stage` or `main`** — private repos on the
@@ -17,6 +18,15 @@ feature/<issue>-<slug> ──PR──▶ dev ──cut 2 days before demo──�
 - `stage` is cut from `dev` two days before the sprint milestone's due date (the demo). After the cut only
   `fix/*` PRs targeting `stage` are allowed; each fix is back-merged `stage` → `dev` by a PR.
 - `stage` → `main` only after the owner answered **go** on the demo page. The merge PR links the demo issue.
+- **Hotfix**: a P0/P1 defect live in production (`in-production`) goes `hotfix/*` from `main` → PR to `main`,
+  released without waiting for the demo, then back-merged to `stage` and `dev` (the `hotfix` skill). Rolling back
+  is also a PR. The owner is told at once and may override.
+- **Stay current before review**: a PR that is behind its base or has conflicts is brought up to date by merging
+  the base into the PR branch (no force-push) and re-running CI before QA looks at it. Conflicts in generated
+  files are resolved by re-running the generator, never by hand.
+- **Branch guard**: `templates/workflows/branch-guard.yml` opens a `sev:critical` issue for the owner whenever
+  `dev`, `stage` or `main` moves without a merged PR or is force-pushed — the after-the-fact substitute for
+  branch protection.
 - Deploys happen only from GitHub Actions: `dev` → dev environment, `stage` → stage environment, `main` →
   production. Agents never call provider CLIs or SSH.
 - Forge is GitHub. GitLab-hosted projects are local-mode only (the cloud network cannot reach gitlab.com).
@@ -33,8 +43,13 @@ directly from a slot skill — the adapter is what lets another tracker replace 
 - **Kind**: `kind:feature`, `kind:bug`, `kind:chore`, `kind:finding`, `kind:wow`, `kind:question`.
 - **Severity** (bugs and findings): `sev:critical`, `sev:high`, `sev:medium`, `sev:low`.
   P0 = `sev:critical`, P1 = `sev:high`.
-- **Flags**: `complexity:high` (dev on the senior model), `needs-design`, `design:awaiting-approval`,
-  `design:approved`, `foundation`, `security`, `ux-blocker`, `release-blocker`, `signature-moment`.
+- **Flags**: `complexity:high` (dev on the senior model), `architect-note` (the note is on the issue),
+  `needs-design`, `design:awaiting-approval`, `design:approved`, `qa:changes-requested`, `foundation`,
+  `security`, `ux-blocker`, `release-blocker`, `in-production`, `signature-moment`.
+- **Needs** (cloud runs never pick these up; they go to the owner's inbox): `needs:local` — needs a local
+  machine such as a Mac; `needs:owner` — a payment, an account, a legal or product decision.
+- **Team**: `team:inbox` (the owner's pinned to-do list), `team:run-log`, `team:paused`, `team:demo`,
+  `team:guard`.
 
 Status labels are prefixed (`status:*`) so they never collide with labels an adopted repository already uses.
 
@@ -45,7 +60,7 @@ Status labels are prefixed (`status:*`) so they never collide with labels an ado
 | Design of a task | Comment `/approve` or `/reject <why>` on the issue (link sent to the phone) | Stays `status:blocked`; **never auto-approved**. Blocks only that task. |
 | Scope (which features exist) | Demo page | Proposed features stay `status:proposed` |
 | Release go / no-go | Demo page | No-go |
-| P0/P1 bug | No approval needed — fixed immediately | — |
+| P0/P1 bug | No approval needed — fixed immediately; in production via `hotfix` | — |
 | Any cost (paid plan, upgrade, domain) | Comment `/approve` on the `kind:question` issue | Work that needs it stops |
 | Override of a release blocker | Written reason on the demo issue → recorded as a decision | Blocker stands |
 

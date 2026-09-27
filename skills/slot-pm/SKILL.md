@@ -34,7 +34,10 @@ Delegate to `pm` with the sprint state (`B list --milestone current`, `B list --
 - For approved `needs-design` issues without an approved design (at most 2 per run, 4 in burn): `designer`
   produces the design and sends it for approval — link comment on the issue, `+design:awaiting-approval`,
   `B move N blocked --reason "waiting for design approval"`.
-- For `complexity:high` issues without an architect note: `architect` writes the note on the issue.
+- For `complexity:high` issues without an architect note (`B next` lists them): `architect` writes the note on
+  the issue and adds the `architect-note` label.
+- Label work that cloud runs cannot do: `needs:local` (needs a local machine, e.g. a Mac build or device test),
+  `needs:owner` (payment, account, legal or product decision). They leave the dev plan and enter the inbox.
 - `analyst`: success metric and tracking tasks for newly approved features.
 
 ## 4. Stage cut (only when `slot-context` says `is_cut_day`)

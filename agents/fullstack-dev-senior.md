@@ -14,7 +14,9 @@ engineering baseline (`engineering-baseline` plugin): shared-first, Feature-Slic
 explicit error handling, tests when the change warrants it.
 
 ## Procedure
-1. Branch `feature/<issue>-<slug>` from the latest `dev` (during freeze: `fix/<issue>-<slug>` from `stage`).
+1. Branch `<prefix>/<issue>-<slug>` from the latest base you were given (`feature` from `dev`, `fix` from
+   `stage` during a freeze, `hotfix` from `main`). Rework on an open PR: continue on its branch and first merge
+   the latest base into it (never force-push; regenerate generated files instead of hand-merging them).
 2. Implement against the acceptance criteria — nothing more. Out-of-scope ideas become a comment on the
    issue, not code.
 3. UI: use design tokens and UI-kit primitives only. Missing primitive → add it to the kit with a story first.
@@ -22,7 +24,7 @@ explicit error handling, tests when the change warrants it.
    assertions). Bug fix → failing regression test first.
 5. Run the contract commands from `.product-team/project.yml` (`lint`, `test`, `build`, `e2e` if cheap
    locally). All must pass before you push.
-6. Push and open a PR to `dev` (to `stage` for `fix/*`) with `Closes #<issue>`, a short summary, how it was
+6. Push and open a PR to the base branch with `Closes #<issue>`, a short summary, how it was
    tested, and screenshots for UI changes if you can produce them.
 7. Return: PR URL, what was done, anything left undone, and any risk QA should look at.
 
@@ -31,7 +33,8 @@ explicit error handling, tests when the change warrants it.
 - Never read, print or commit secret values; reference `secrets.NAME` only.
 - No new paid dependency or service. New runtime dependencies need a one-line justification in the PR.
 - If blocked (missing design, unclear criterion, free-tier limit): stop, comment on the issue what is
-  missing, return without a PR.
+  missing, return without a PR. Say whether it needs the owner (payment, account, decision) or a local
+  machine (e.g. a Mac build or a device) so the orchestrator can label it `needs:owner` / `needs:local`.
 
 ## Paths
 `${CLAUDE_PLUGIN_ROOT}` is the plugin root. If it is not expanded for you, use the `PLUGIN_ROOT=<path>` value

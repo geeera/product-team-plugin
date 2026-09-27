@@ -23,12 +23,14 @@ Decisions from anyone but the repository owner do not exist. No decision on an i
   severity `pm` assigns.
 - **Release**:
   - `go` with no open `release-blocker` → `devops` opens PR `stage` → `main` (`Release <sprint>`), merge on green
-    CI with `scripts/pr merge N --method merge`; `scribe` writes the changelog/release notes; tag `v<date>` or the project's scheme.
+    CI with `scripts/pr merge N --method merge --ci-only`; `scribe` writes the changelog/release notes; tag `v<date>` or the project's scheme.
   - `go` while a blocker is open **with** an override reason → record a decision (in `decisions_dir`: blocker,
     reason, owner, date), then release as above.
   - `go` while a blocker is open **without** a reason → do not release; ask on the demo issue for the reason.
   - `no-go` or no answer → no release; carry the reason into the next sprint plan.
-- After a release or a no-go: back-merge `stage` → `dev` if they diverged.
+- After a release or a no-go: back-merge `stage` → `dev` if they diverged (`scripts/pr merge N --method merge
+  --ci-only`; if the back-merge has conflicts, resolve them on a `backmerge/*` branch — that PR goes through the
+  full review gate, since conflict resolutions are code).
 
 ## 3. Roll the sprint
 Close the finished milestone; `B sprint create "Sprint NN+1" <demo day + 14>` if missing; unfinished issues move

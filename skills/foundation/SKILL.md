@@ -18,17 +18,18 @@ Parallelise only where marked.
 2. **CI + security** (`devops`, parallel with 3): `ci.yml`, `security.yml` and `branch-guard.yml` from
    `${CLAUDE_PLUGIN_ROOT}/templates/workflows/` filled for the stack; `Dockerfile`; commands written into
    `.product-team/project.yml`.
-3. **Tokens** (`designer`, parallel with 2): the complete token set from `design-system.md` for the chosen visual
+3. **Tokens** (`ui-designer`, parallel with 2): the complete token set from `design-system.md` for the chosen visual
    direction — colour (light + dark), type, spacing, radii, shadows, z-index, breakpoints, motion with
    reduced-motion fallbacks. A lint rule against raw values where the stack allows.
-4. **UI kit + Storybook** (`designer` for look, `fullstack-dev` for behaviour): primitives on the headless
+4. **UI kit + Storybook** (`ui-designer` for look, `ux-designer` for states and accessibility, `fullstack-dev`
+   for behaviour): primitives on the headless
    library, each with stories for variants, states, both themes and reduced motion. Storybook deploys with `dev`.
 5. **Deploy** (`devops`): dev / stage / production from Actions on the chosen free tiers
    (`reference/deploy-recipes.md`, `templates/workflows/deploy.yml`); URLs into `project.yml`; a rollback
    rehearsal (manual deploy of the previous ref to `stage`) before the first release. Missing accounts or secrets → owner checklist + `kind:question`, and the issue waits.
 6. **E2E harness** (`fullstack-dev`): runs against `BASE_URL`, a11y assertions built in (axe or the stack's
    equivalent), one smoke test on the hello slice. Wired into CI with a paths filter.
-7. **Signature-moment prototypes** (`designer`): interactive prototypes for the `signature-moment` issues, sent for
+7. **Signature-moment prototypes** (`ux-designer` for the flow, then `ui-designer`): interactive prototypes for the `signature-moment` issues, sent for
    approval (`design:awaiting-approval`, `status:blocked`).
 
 Foundation is done when every contract item in `stack-contract.md` holds on `dev`. Features start in the next

@@ -40,6 +40,10 @@ class MergeMethodTest(unittest.TestCase):
         with mock.patch.object(sys, "argv", ["pr", "merge", "5"]), self.assertRaises(SystemExit):
             pr.main()
 
+    def test_review_must_name_the_reviewed_commit(self):
+        with mock.patch.object(sys, "argv", ["pr", "review", "5", "--body", "QA: APPROVED"]), self.assertRaises(SystemExit):
+            pr.main()
+
 
 if __name__ == "__main__":
     unittest.main()

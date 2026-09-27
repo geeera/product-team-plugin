@@ -51,7 +51,15 @@ Communication is from the phone.
   `started` older than 3 h counts as failed. Three failed runs in a row pause the team until the owner comments
   `/resume`. A run of the same slot still in progress makes the next one exit (overlap guard).
 - **Model pinning** (decision 13): plugin agents accept full model IDs in `model:`. Where one role needs two
-  models, a variant agent pins the second one (`fullstack-dev-senior`, `qa-runner`, `scribe`).
+  models, a variant agent pins the second one (`qa-runner`, `scribe`).
+- **Team extended** (amends decisions 2 and 10, 2026-09-27): `designer` is split into `ux-designer` (flow, states,
+  copy, wireframe — first) and `ui-designer` (visuals on top; the owner still approves one final design);
+  `reviewer` reviews code quality on every PR; `security` takes OWASP reviews, threat models and the deep audit
+  from `qa`. Merge requires a review gate enforced in code: CI plus current-head approvals from `qa` and
+  `reviewer`, and from `security` when the changed paths or labels call for it. Products add stack specialists
+  as their own agents, routed with `agent:<name>`.
+- **Development on Opus** (amends decision 13, 2026-09-27): `fullstack-dev` runs on Opus 5.5 in every mode; the
+  separate senior variant is gone. Weekday caps stay conservative to keep the weekly quota.
 - **Demo write-back** (decision 9): decisions are stored in the demo artifact's database (only the artifact's
   owner may write) and read by `demo-apply` via ArtifactData. Fallbacks that work without the Artifact tool:
   a `/demo-decisions` block pasted on the demo issue, or `/approve`, `/reject`, `/go`, `/no-go` comments on the

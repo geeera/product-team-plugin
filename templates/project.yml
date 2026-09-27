@@ -36,6 +36,9 @@ caps: {}
 team:
   # Release channel the daily self-update follows: `stable` (every release) or a tag such as v0.3.0 (pinned).
   plugin_ref: stable
+  # With a separate GitHub account for the reviewing agents, list its login here: only its verdicts then count
+  # in the merge gate, so a developer agent cannot approve its own work. Empty = any account (same-user setup).
+  reviewer_logins: []
 
 owner:
   timezone: Europe/Kyiv

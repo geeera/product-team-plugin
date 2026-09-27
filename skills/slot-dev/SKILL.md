@@ -43,9 +43,10 @@ Each agent returns a PR URL or a blocked reason:
 Kit-first: if two dispatched tasks need the same missing UI primitive, run the primitive first as its own
 `kind:chore` issue and hold the dependants for the next run.
 
-## 3. Quick QA when time allows
-If CI of a new PR finishes during this run, you may run the `qa` agent on it (see `slot-qa` step 2) — the 04:00
-slot catches the rest. Never merge without a `QA: APPROVED` verdict and green CI.
+## 3. Quick review when time allows
+If CI of a new PR finishes during this run, you may run its reviewers now exactly as `slot-qa` step 2 does
+(`qa`, `reviewer`, and `security` when `PR security-check` requires it) and merge only when `PR gate` passes.
+The 04:00 slot catches the rest.
 
 ## 4. Close
 Summary: PRs opened (links), issues blocked and why, what `slot-qa` will review. Metrics for the run log:

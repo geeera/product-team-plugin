@@ -4,6 +4,23 @@ Products follow the `stable` channel (or a pinned tag, `team.plugin_ref` in `.pr
 first `slot-pm` of the day runs `vendor self-update` and opens a PR with the entries in between. Breaking changes (a renamed label, a changed script contract, a new required
 `project.yml` key) are marked **Breaking** with the migration step.
 
+## 0.4.0
+
+- **Team**: `ux-designer` and `ui-designer` replace `designer`; new `reviewer` (code quality, Sonnet) and
+  `security` (OWASP, threat models, deep audit, Opus); `qa` keeps acceptance, accessibility and polish.
+- **Review gate in code**: `pr gate` / `pr merge` require CI plus `QA:` and `REVIEW:` approvals on the current
+  head, and `SECURITY:` when `pr security-check` finds sensitive paths, dependency or CI changes, or a `security`
+  label. Branch operations and the self-update PR use `pr merge --ci-only`.
+- **Product specialists**: `agent:<name>` routes an issue to the project's own `.claude/agents/<name>.md`.
+- New label `ux-spec`. Run `backlog init` once in each product.
+- **Migration** — if the product has its own `.claude/agents/` files named `ux-designer`, `ui-designer`,
+  `reviewer` or `security`, self-update stops and asks the owner (nothing is overwritten); rename them first.
+- Optional `team.reviewer_logins` in `project.yml`: with a separate reviewing account, only its verdicts count.
+- **Breaking** — `designer` is gone; self-update removes it. Open issues waiting on a design keep working (the
+  next `slot-pm` starts them at the UX step).
+- `fullstack-dev` runs on Opus 5.5 in every mode; `fullstack-dev-senior` is removed (self-update deletes it from
+  products). `backlog next` always names `fullstack-dev`.
+
 ## 0.3.0
 
 - **Cloud runs load the team from the product repository.** `scripts/vendor install` copies agents, skills,

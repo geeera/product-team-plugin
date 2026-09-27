@@ -70,11 +70,14 @@ class FrontmatterTest(unittest.TestCase):
         for path in sorted((ROOT / "skills").glob("*/SKILL.md")):
             self.assertEqual(frontmatter(path)["name"], path.parent.name)
 
-    def test_qa_agents_cannot_edit(self):
-        for name in ("qa", "qa-runner"):
+    def test_reviewing_agents_cannot_edit(self):
+        for name in ("qa", "qa-runner", "reviewer", "security"):
             disallowed = frontmatter(ROOT / "agents" / f"{name}.md").get("disallowedTools", "")
             for tool in ("Edit", "Write"):
                 self.assertIn(tool, disallowed, name)
+
+    def test_security_never_runs_on_fable(self):
+        self.assertNotIn("fable", frontmatter(ROOT / "agents" / "security.md")["model"])
 
     def test_referenced_plugin_files_exist(self):
         # ${CLAUDE_PLUGIN_ROOT}/path references in docs must point at real files.

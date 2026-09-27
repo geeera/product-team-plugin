@@ -12,9 +12,12 @@ feature/<issue>-<slug> ──PR──▶ dev ──cut 2 days before demo──�
 
 - Every change arrives as a PR. **Never push directly to `dev`, `stage` or `main`** — private repos on the
   free plan have no branch protection, so this rule is enforced by you, not by GitHub.
-- `feature/*` → `dev`: merge only after CI is green **and** the independent `qa` agent posted
-  `QA: APPROVED` on the PR. The orchestrator merges (squash) and moves the issue `status:qa` → `status:done`;
-  the developer who wrote it never does.
+- `feature/*` → `dev`: merge only through the **review gate** (`scripts/pr gate`, enforced by `scripts/pr merge`):
+  CI green, `QA: APPROVED` from `qa`, `REVIEW: APPROVED` from `reviewer`, and `SECURITY: APPROVED` from
+  `security` when `scripts/pr security-check` finds auth, data, payment, upload, secret, dependency or CI changes.
+  Every verdict must be on the current head commit. The orchestrator merges (squash) and moves the issue
+  `status:qa` → `status:done`; the developer who wrote it never does. Branch operations (stage cut, release,
+  back-merges) and the self-update PR merge with `--ci-only`.
 - `stage` is cut from `dev` two days before the sprint milestone's due date (the demo). After the cut only
   `fix/*` PRs targeting `stage` are allowed; each fix is back-merged `stage` → `dev` by a PR.
 - `stage` → `main` only after the owner answered **go** on the demo page. The merge PR links the demo issue.
@@ -43,9 +46,13 @@ directly from a slot skill — the adapter is what lets another tracker replace 
 - **Kind**: `kind:feature`, `kind:bug`, `kind:chore`, `kind:finding`, `kind:wow`, `kind:question`.
 - **Severity** (bugs and findings): `sev:critical`, `sev:high`, `sev:medium`, `sev:low`.
   P0 = `sev:critical`, P1 = `sev:high`.
-- **Flags**: `complexity:high` (dev on the senior model), `architect-note` (the note is on the issue),
+- **Flags**: `complexity:high` (architect note first), `architect-note` (the note is on the issue),
   `needs-design`, `design:awaiting-approval`, `design:approved`, `qa:changes-requested`, `foundation`,
   `security`, `ux-blocker`, `release-blocker`, `in-production`, `signature-moment`.
+- **Agent**: `agent:<name>` sends the issue to a project-specific agent in `.claude/agents/<name>.md` (e.g. a
+  Flutter developer) instead of `fullstack-dev`. The project owns those agents; `vendor` never touches them.
+- **Design stages**: `ux-spec` (the UX spec and wireframe are on the issue) → `design:awaiting-approval` →
+  `design:approved`.
 - **Needs** (cloud runs never pick these up; they go to the owner's inbox): `needs:local` — needs a local
   machine such as a Mac; `needs:owner` — a payment, an account, a legal or product decision.
 - **Team**: `team:inbox` (the owner's pinned to-do list), `team:run-log`, `team:paused`, `team:demo`,

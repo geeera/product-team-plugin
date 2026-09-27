@@ -17,23 +17,25 @@ radius (who is affected, is data being damaged).
 - Otherwise fix forward (steps 2–3).
 
 ## 2. Fix
-`B move N in-progress`. Dev agent (`fullstack-dev-senior`) on `hotfix/<issue>-<slug>` from `main`, PR to `main`.
+`B move N in-progress`. The issue's developer (`fullstack-dev`, or the product agent its `agent:<name>` label
+names) on `hotfix/<issue>-<slug>` from `main`, PR to `main`.
 The PR contains the smallest change that removes the defect plus a regression test that fails without it —
 no refactors, no drive-by fixes.
 
 ## 3. Gate and release
-- CI green **and** `qa` verdict `QA: APPROVED` (independent review, as always; OWASP pass if the defect is
-  security-relevant).
+- The same gate as every PR: CI green, `qa` and `reviewer` approved, `security` too when
+  `PR security-check` requires it (`PR gate <pr>`). Run the reviewers in parallel to keep the hotfix fast.
 - Merge the PR into `main` (`${CLAUDE_PLUGIN_ROOT}/scripts/pr merge <pr> --method squash --delete-branch`); production deploys from `main` through Actions. `devops`
   confirms the deploy finished and the defect is gone on production (e2e smoke or the reproduction steps).
 - Tag the release with the project's scheme plus a hotfix suffix (e.g. `v2026.10.02-hotfix.1`).
 - Back-merge: PR `main` → `stage`, then `stage` → `dev` (or `main` → `dev` outside a freeze); merge each on
-  green CI with `--method merge` (never squash long-lived branches into each other). Conflicts are resolved in the back-merge PR, never by pushing to the branches.
+  green CI with `--method merge --ci-only` (never squash long-lived branches into each other). Conflicts are resolved on a `backmerge/*` branch whose PR goes through the full review gate, never by pushing
+  to the branches.
 - `B move N done`.
 
 ## 4. Roll back
 `devops` opens a PR to `main` that reverts the offending merge (`git revert -m 1 <merge sha>` on a branch) or
-redeploys the previous tag through the deploy workflow's manual trigger. Same gates: green CI, `qa` verdict.
+redeploys the previous tag through the deploy workflow's manual trigger. Same gate (`PR gate`).
 Record what was rolled back on the issue; the fix then follows steps 2–3.
 
 ## 5. Tell the owner

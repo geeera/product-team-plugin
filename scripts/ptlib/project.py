@@ -16,6 +16,16 @@ def plugin_ref(path: str = PROJECT_FILE) -> str:
     return m.group(1) if m else "stable"
 
 
+def reviewer_logins(path: str = PROJECT_FILE) -> list:
+    """`team.reviewer_logins: a, b` — GitHub logins whose verdicts count (a separate reviewing account)."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            m = re.search(r"^\s*reviewer_logins:\s*\[?([^\]\n#]*)", f.read(), re.MULTILINE)
+    except FileNotFoundError:
+        return []
+    return [x.strip().strip("'\"") for x in (m.group(1) if m else "").split(",") if x.strip()]
+
+
 def freeze_days(path: str = PROJECT_FILE) -> int:
     try:
         with open(path, encoding="utf-8") as f:

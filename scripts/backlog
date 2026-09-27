@@ -215,7 +215,10 @@ def cmd_next(repo: str, args) -> None:
     demo = date.fromisoformat(sprint["due_on"][:10]) if sprint else None
     ctx = compute(now, sprint["title"] if sprint else None, demo, project.freeze_days()).to_dict()
     issues = [slim(i) for i in gh.api_list(f"repos/{repo}/issues?state=open&per_page=100") if "pull_request" not in i]
-    plan = picker.pick(issues, ctx["sprint"], ctx)
+    agents_dir = os.path.join(os.getcwd(), ".claude", "agents")
+    known = ({f[:-3] for f in os.listdir(agents_dir) if f.endswith(".md")} | {"fullstack-dev"}
+             if os.path.isdir(agents_dir) else None)
+    plan = picker.pick(issues, ctx["sprint"], ctx, known)
     plan["context"] = ctx
     out(plan)
 

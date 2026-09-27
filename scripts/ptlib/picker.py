@@ -46,17 +46,23 @@ def pick(issues: List[dict], sprint: Optional[str], ctx: dict) -> Dict[str, list
             skipped.append({"number": issue["number"], "reason": blocker})
             continue
         if status == "in-progress":
-            if "qa:changes-requested" in labels:
+            if "qa:changes-requested" not in labels:
+                continue  # in progress without a QA verdict: someone else's open PR
+            if is_urgent(issue):
+                urgent.append(issue)  # a failed urgent fix stays urgent: outside the cap, also in a freeze
+            elif freeze:
+                skipped.append({"number": issue["number"], "reason": "freeze: fixes only"})
+            else:
                 rework.append(issue)
-            continue  # in progress without a QA verdict: someone else's open PR
+            continue
         if is_urgent(issue):
             urgent.append(issue)
             continue
         if freeze:
             skipped.append({"number": issue["number"], "reason": "freeze: fixes only"})
             continue
-        if issue.get("milestone") != sprint:
-            continue
+        if sprint is None or issue.get("milestone") != sprint:
+            continue  # no dated sprint milestone means no planned work, only urgent fixes
         if "needs-design" in labels and "design:approved" not in labels:
             skipped.append({"number": issue["number"], "reason": "design not approved"})
             continue
@@ -69,7 +75,7 @@ def pick(issues: List[dict], sprint: Optional[str], ctx: dict) -> Dict[str, list
             continue
         planned.append(issue)
 
-    urgent.sort(key=lambda i: (0 if "in-production" in _labels(i) else 1,
+    urgent.sort(key=lambda i: (0 if is_hotfix(i) else 1,
                                SEV_RANK.get(_severity(i) or "", 2), i["number"]))
     rework.sort(key=lambda i: i["number"])
     planned.sort(key=lambda i: i["number"])
@@ -77,7 +83,8 @@ def pick(issues: List[dict], sprint: Optional[str], ctx: dict) -> Dict[str, list
     budget = caps["dev_tasks"]
     dispatch = []
     for issue in urgent:
-        dispatch.append(_entry(issue, ctx, freeze, "urgent (outside the cap)"))
+        reason = "urgent rework (outside the cap)" if issue.get("status") == "in-progress" else "urgent (outside the cap)"
+        dispatch.append(_entry(issue, ctx, freeze, reason))
     for reason, group in (("QA asked for changes", rework), ("planned", planned)):
         for issue in group:
             if budget <= 0:
@@ -90,10 +97,19 @@ def pick(issues: List[dict], sprint: Optional[str], ctx: dict) -> Dict[str, list
             "parallel": caps["parallel_devs"]}
 
 
+def is_hotfix(issue: dict) -> bool:
+    """Only P0/P1 bugs live in production take the hotfix path (skills/hotfix)."""
+    return "in-production" in _labels(issue) and issue.get("kind") == "bug" and _severity(issue) in SEV_RANK
+
+
 def _entry(issue: dict, ctx: dict, freeze: bool, reason: str) -> dict:
     labels = _labels(issue)
-    senior = ctx.get("is_burn") or "complexity:high" in labels or "in-production" in labels
-    if "in-production" in labels:
+    hotfix = is_hotfix(issue)
+    senior = ctx.get("is_burn") or "complexity:high" in labels or hotfix
+    if issue.get("status") == "in-progress":
+        # Rework continues on the open PR: its branch and base come from the PR, not from today's mode.
+        base, prefix = None, None
+    elif hotfix:
         base, prefix = "main", "hotfix"
     elif freeze:
         base, prefix = "stage", "fix"

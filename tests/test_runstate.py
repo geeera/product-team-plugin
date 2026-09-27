@@ -92,6 +92,14 @@ class MetricsTest(unittest.TestCase):
         run = runstate.parse_runs([{"id": 1, "created_at": "2026-09-26T20:00:00Z", "body": body}])[0]
         self.assertEqual(run["metrics"], {"minutes": 42, "prs": 2})
 
+    def test_malformed_metrics_block_is_ignored(self):
+        body = "<!-- pt-run id=a slot=slot-dev state=finished -->\n<!-- pt-metrics {bad} -->"
+        self.assertEqual(runstate.parse_runs([{"id": 1, "created_at": "2026-09-26T20:00:00Z", "body": body}])[0]["metrics"], {})
+
+    def test_metric_cannot_close_the_marker(self):
+        with self.assertRaises(ValueError):
+            runstate.parse_metrics(["note=x} -->"])
+
     def test_stats_per_slot(self):
         runs = [
             dict(run("finished", "2026-09-25T20:00:00Z"), metrics={"minutes": 40, "prs": 2}),

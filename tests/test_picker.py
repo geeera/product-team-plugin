@@ -79,5 +79,27 @@ class PickTest(unittest.TestCase):
         self.assertEqual(plan["dispatch"][0]["agent"], "fullstack-dev-senior")
 
 
+class ReviewRegressionTest(unittest.TestCase):
+    def test_urgent_rework_bypasses_the_zero_freeze_cap(self):
+        plan = picker.pick([issue(9, "bug", status="in-progress", labels=["sev:critical", "qa:changes-requested"])], S, FREEZE)
+        self.assertEqual(numbers(plan), [9])
+        self.assertEqual(plan["dispatch"][0]["reason"], "urgent rework (outside the cap)")
+
+    def test_ordinary_rework_waits_during_a_freeze(self):
+        plan = picker.pick([issue(4, status="in-progress", labels=["qa:changes-requested"])], S, FREEZE)
+        self.assertEqual(numbers(plan), [])
+
+    def test_rework_keeps_the_pr_base_instead_of_the_mode(self):
+        entry = picker.pick([issue(4, status="in-progress", labels=["qa:changes-requested"])], S, NORMAL)["dispatch"][0]
+        self.assertEqual((entry["base"], entry["branch_prefix"]), (None, None))
+
+    def test_no_sprint_means_no_planned_work(self):
+        self.assertEqual(numbers(picker.pick([issue(1, milestone=None)], None, NORMAL)), [])
+
+    def test_non_urgent_production_defect_is_not_a_hotfix(self):
+        plan = picker.pick([issue(3, "bug", labels=["sev:medium", "in-production"])], S, NORMAL)
+        self.assertEqual((plan["dispatch"][0]["base"], plan["dispatch"][0]["agent"]), ("dev", "fullstack-dev"))
+
+
 if __name__ == "__main__":
     unittest.main()

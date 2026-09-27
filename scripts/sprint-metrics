@@ -44,6 +44,8 @@ def main() -> None:
                    "labels": [l["name"] for l in i["labels"]]} for i in raw]
         events = {i["number"]: gh.api_list(f"repos/{repo}/issues/{i['number']}/events?per_page=100")
                   for i in issues if i["state"] == "closed"}
+        if not ms.get("due_on"):
+            sys.exit(f"milestone {ms['title']!r} has no due date; set the demo day on it first")
         start = (date.fromisoformat(ms["due_on"][:10]) - timedelta(days=args.length_days)).isoformat()
         prs = [pr for pr in gh.api_list(f"repos/{repo}/pulls?state=all&sort=updated&direction=desc&per_page=100")
                if pr["updated_at"][:10] >= start]

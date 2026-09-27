@@ -31,7 +31,8 @@ the backlog labels instead.
 - The rest: `B move N in-progress`, then start the named agent — **in parallel up to `parallel`** (several
   Agent calls in one message). Prompt: `PLUGIN_ROOT=<path>` line, repo, issue number, base branch, branch
   prefix, and the instruction to read the issue itself. Nothing else — especially no other issue's context.
-- Rework entries: the agent continues on the PR's existing branch and removes `qa:changes-requested` only
+- Rework entries (`base: null`): read the branch and base from the linked PR (`gh pr view`), pass them to the
+  agent; it continues on the PR's existing branch and removes `qa:changes-requested` only
   through the orchestrator (`B label N -qa:changes-requested`) once the new commits are pushed.
 
 Each agent returns a PR URL or a blocked reason:

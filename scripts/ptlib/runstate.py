@@ -19,7 +19,6 @@ def parse_runs(comments: List[dict]) -> List[dict]:
     for c in comments:
         m = MARKER.search(c.get("body") or "")
         if m:
-            metrics = METRICS.search(c.get("body") or "")
             runs.append(
                 {
                     "id": m.group(1),
@@ -27,7 +26,7 @@ def parse_runs(comments: List[dict]) -> List[dict]:
                     "state": m.group(3),
                     "at": c.get("created_at"),
                     "comment_id": c.get("id"),
-                    "metrics": json.loads(metrics.group(1)) if metrics else {},
+                    "metrics": _metrics_of(c.get("body") or ""),
                 }
             )
     runs.sort(key=lambda r: r["at"] or "")
@@ -65,6 +64,18 @@ def resumed_after_pause(pause_at: Optional[str], owner_commands: List[dict]) -> 
     return any(c["command"] == "resume" and (c["at"] or "") > pause_at for c in owner_commands)
 
 
+def _metrics_of(body: str) -> dict:
+    # The run log is a public comment thread: a malformed block must not stop every future run.
+    m = METRICS.search(body)
+    if not m:
+        return {}
+    try:
+        value = json.loads(m.group(1))
+    except ValueError:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
 def started_at(run_id: str) -> datetime:
     """Run ids start with the UTC start time, e.g. 20260927T201300Z-slot-dev."""
     return datetime.strptime(run_id.split("-", 1)[0], "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
@@ -77,6 +88,8 @@ def parse_metrics(pairs: Iterable[str]) -> Dict[str, object]:
         if not sep or not key.strip():
             raise ValueError(f"metric must look like key=value, got {pair!r}")
         value = value.strip()
+        if "-->" in pair or "<!--" in pair:
+            raise ValueError(f"metric must not contain HTML comment markers: {pair!r}")
         out[key.strip()] = int(value) if value.lstrip("-").isdigit() else value
     return out
 

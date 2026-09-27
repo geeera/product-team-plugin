@@ -41,9 +41,15 @@ def log_issue(repo: str) -> dict:
 
 
 def load(repo: str):
+    """Comments by anyone other than the account that opened the log (the team's) are ignored as run entries."""
     issue = log_issue(repo)
     comments = gh.api_list(f"repos/{repo}/issues/{issue['number']}/comments?per_page=100")
     return issue, comments
+
+
+def team_comments(issue: dict, comments: list) -> list:
+    author = (issue.get("user") or {}).get("login", "")
+    return [c for c in comments if (c.get("user") or {}).get("login", "") == author]
 
 
 def pause_at(comments: list) -> str:
@@ -56,14 +62,14 @@ def cmd_start(repo: str, args) -> int:
     now = datetime.now(timezone.utc)
     labels = {l["name"] for l in issue["labels"]}
     owner_cmds = commands.parse(comments, gh.owner_login(repo))
-    paused_since = pause_at(comments)
+    paused_since = pause_at(team_comments(issue, comments))
     paused = PAUSED in labels
     if paused and runstate.resumed_after_pause(paused_since, owner_cmds):
         gh.api(f"repos/{repo}/issues/{issue['number']}/labels/{quote(PAUSED, safe='')}", "DELETE")
         paused = False
     resume = commands.latest(owner_cmds, ["resume"])
     reset_at = max(resume.get("at") or "", paused_since)
-    decision = runstate.decide(runstate.parse_runs(comments), args.slot, now, paused, reset_at)
+    decision = runstate.decide(runstate.parse_runs(team_comments(issue, comments)), args.slot, now, paused, reset_at)
 
     if decision["decision"] == "pause":
         gh.api(f"repos/{repo}/issues/{issue['number']}/labels", "POST", {"labels": [PAUSED]})
@@ -85,7 +91,7 @@ def cmd_finish(repo: str, args) -> int:
     if args.state not in ("finished", "failed"):
         sys.exit("state must be finished or failed")
     issue, comments = load(repo)
-    target = next((r for r in runstate.parse_runs(comments) if r["id"] == args.run_id), None)
+    target = next((r for r in runstate.parse_runs(team_comments(issue, comments)) if r["id"] == args.run_id), None)
     if not target:
         sys.exit(f"run {args.run_id} not found in the run log")
     summary = ""
@@ -113,7 +119,7 @@ def cmd_finish(repo: str, args) -> int:
 def cmd_status(repo: str, _args) -> int:
     issue, comments = load(repo)
     now = datetime.now(timezone.utc)
-    runs = runstate.parse_runs(comments)[-10:]
+    runs = runstate.parse_runs(team_comments(issue, comments))[-10:]
     print(json.dumps({
         "paused": PAUSED in {l["name"] for l in issue["labels"]},
         "log_url": issue["html_url"],
@@ -123,9 +129,9 @@ def cmd_status(repo: str, _args) -> int:
 
 
 def cmd_stats(repo: str, args) -> int:
-    _issue, comments = load(repo)
+    issue, comments = load(repo)
     now = datetime.now(timezone.utc)
-    result = runstate.stats(runstate.parse_runs(comments), now, now - timedelta(days=args.days))
+    result = runstate.stats(runstate.parse_runs(team_comments(issue, comments)), now, now - timedelta(days=args.days))
     print(json.dumps({"days": args.days, "slots": result}, indent=2))
     return 0
 

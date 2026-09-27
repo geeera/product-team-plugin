@@ -18,7 +18,7 @@ on:
 
 concurrency:
   # One deploy per environment at a time; a newer push waits instead of cancelling a running deploy.
-  group: deploy-${{ github.event.inputs.environment || github.ref_name }}
+  group: deploy-${{ github.event.inputs.environment || (github.ref_name == 'main' && 'production' || github.ref_name) }}
   cancel-in-progress: false
 
 permissions:

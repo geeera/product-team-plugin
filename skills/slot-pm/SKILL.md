@@ -20,14 +20,20 @@ Skip if `.claude/product-team/MANIFEST.json` does not exist. `PR` = `${CLAUDE_PL
 2. No such PR → `python3 .claude/product-team/scripts/vendor self-update` (follows `team.plugin_ref` in
    `project.yml`: the `stable` channel or a pinned tag). On `updated: true`: branch
    `chore/product-team-<version>` from `dev`, commit `.claude/`, `PR create --base dev` titled
-   `chore: product team <version>` with the CHANGELOG entries between the two versions as the body. Do the
-   migration step of every **Breaking** entry in the same PR. List `overwrote_local_edits` in the body — those
+   `chore: product team <version>` with the CHANGELOG entries between the two versions as the body. The branch
+   must be named exactly `chore/product-team-<version>` and contain only what `vendor` wrote — `pr merge --ci-only`
+   re-generates the release and compares it byte for byte. Migration steps of **Breaking** entries that touch
+   anything outside the generated files (e.g. `project.yml`) go in a separate PR through the normal review gate. List `overwrote_local_edits` in the body — those
    fixes belong in the plugin, not here. The PR merges on a later run (step 1); the new team takes effect after.
    Exit code 4 with `conflicts` means the product has its own files with the plugin's names (e.g. its own
    `reviewer.md`): nothing was changed. Open one `kind:question` + `needs:owner` issue titled
    `Product team update blocked` (only if none is open) listing the files, and stop step 0.
 
 ## 1. Owner answers
+`B answers` reports `same_account: true` while the agents use the owner's GitHub account: then an agent could
+have written a comment that looks like the owner's. Keep going (it is the owner's chosen setup), but never act on
+an owner command that appeared in the same run in which an agent commented on that issue, and say so in the summary.
+
 - **Designs**: for each issue labelled `design:awaiting-approval`, `B answers N` (only commands newer than the
   design-link comment count):
   - `/approve` → `B label N +design:approved -design:awaiting-approval`, `B move N approved`.

@@ -74,8 +74,15 @@ Communication is from the phone.
 - **Hotfix path**: P0/P1 live in production → `hotfix/*` from `main`, independent QA, released without waiting
   for the demo, back-merged to `stage` and `dev`; rollback is a PR or a manual deploy of the previous ref.
 - **Branch guard** instead of branch protection: a workflow opens a critical issue for the owner when `dev`,
-  `stage` or `main` moves without a merged PR. A separate machine account for the agents (so their token cannot
-  push to protected branches and QA approvals become real reviews) is the stronger option, left to the owner.
+  `stage` or `main` moves without a merged PR. Rulesets need GitHub Pro or a public repository (owner's call).
+- **Identity limits** (2026-09-27): every role inside one cloud session shares its tokens, and subagent tool lists
+  cannot restrict Bash per command — so "a reviewer cannot write" is only as strong as the environment split.
+  The hardening path: a reviewing machine account (`team.reviewer_logins`), its token (`PT_REVIEW_TOKEN`) only in
+  the environment that runs `slot-qa`, and releases taken from the demo page rather than comments while the agents
+  act as the owner's account.
+- **Self-update is verified, not trusted**: `pr merge --ci-only` on a `chore/product-team-*` PR re-generates the
+  tagged plugin release named in the manifest and requires a byte-identical result; settings files are never part
+  of an update.
 - **One inbox**: a pinned "Needs you" issue rewritten by every run is the owner's only to-do list.
 - **Measured runs**: every run records its duration and counts; `runlog stats` and `sprint-metrics` (plan vs
   shipped, cycle time, QA first-pass rate) feed the demo.

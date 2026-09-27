@@ -34,7 +34,11 @@ from urllib.parse import quote
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import re  # noqa: E402
 
-from ptlib import checks, gh, project, review  # noqa: E402
+import subprocess  # noqa: E402
+import tempfile  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+from ptlib import checks, gh, project, review, vendoring  # noqa: E402
 
 
 def out(data) -> None:
@@ -113,10 +117,57 @@ def gate(repo: str, n: int) -> dict:
     result = review.gate(reviews, info["head_sha"], bool(reasons), project.reviewer_logins())
     result["ci"] = ci(repo, info["head_sha"])
     result["security_reasons"] = reasons[:10]
+    if not project.reviewer_logins():
+        result["warning"] = ("same-account mode: any agent can post a verdict; set team.reviewer_logins to a "
+                             "separate reviewing account (owner checklist)")
     if result["ci"]["state"] != "pass":
         result["missing"].insert(0, f"CI: {result['ci']['state']}")
         result["passed"] = False
     return result
+
+
+def file_at(repo: str, path: str, ref: str) -> bytes:
+    return gh.raw(f"repos/{repo}/contents/{quote(path, safe='/')}?ref={ref}", "application/vnd.github.raw").encode("utf-8")
+
+
+def release_commits() -> set:
+    """Commits of the plugin's release tags (a self-update must land on one of them)."""
+    proc = subprocess.run(["git", "ls-remote", "--tags", vendoring.PLUGIN_REPO], capture_output=True, text=True, check=False)
+    return {line.split()[0] for line in proc.stdout.splitlines() if "refs/tags/v" in line}
+
+
+def verify_self_update(repo: str, n: int, info: dict) -> list:
+    """Problems with a self-update PR; [] only when it is byte for byte the plugin release it claims to be."""
+    base_sha = gh.api(f"repos/{repo}/pulls/{n}")["base"]["sha"]
+    changes = [{"filename": f["filename"], "status": f["status"]}
+               for f in gh.api_list(f"repos/{repo}/pulls/{n}/files?per_page=100")]
+    try:
+        claimed = json.loads(file_at(repo, vendoring.MANIFEST, info["head_sha"]))
+    except (gh.GhError, ValueError) as exc:
+        return [f"cannot read the PR's {vendoring.MANIFEST}: {exc}"]
+    commit, version = claimed.get("commit", ""), claimed.get("version", "")
+    if commit not in release_commits():
+        return [f"manifest commit {commit[:12]} is not a tagged plugin release"]
+    try:
+        before = set(json.loads(file_at(repo, vendoring.MANIFEST, base_sha)).get("files", {}))
+    except (gh.GhError, ValueError):
+        before = set()
+    with tempfile.TemporaryDirectory() as tmp:
+        for cmd in (["git", "init", "-q", tmp], ["git", "-C", tmp, "fetch", "-q", "--depth", "1", vendoring.PLUGIN_REPO, commit],
+                    ["git", "-C", tmp, "checkout", "-q", "FETCH_HEAD"]):
+            if subprocess.run(cmd, capture_output=True, text=True, check=False).returncode != 0:
+                return [f"cannot fetch plugin commit {commit[:12]}"]
+        expected = vendoring.render(Path(tmp), version)
+    expected[vendoring.MANIFEST] = vendoring.manifest_bytes(version, commit, expected)
+    problems = vendoring.self_update_violations(changes, set(expected) | before)
+    for change in changes:
+        path = change["filename"]
+        if change["status"] == "removed":
+            if path in expected:
+                problems.append(f"{path}: removed, but release {version} still ships it")
+        elif path in expected and file_at(repo, path, info["head_sha"]) != expected[path]:
+            problems.append(f"{path}: differs from release {version}")
+    return problems
 
 
 def main() -> None:
@@ -147,8 +198,9 @@ def main() -> None:
         elif args.cmd == "diff":
             sys.stdout.write(gh.raw(f"repos/{repo}/pulls/{args.number}", "application/vnd.github.diff"))
         elif args.cmd == "review":
+            # Verdicts go out as the reviewing account when its token is present (see the owner checklist).
             rv = gh.api(f"repos/{repo}/pulls/{args.number}/reviews", "POST",
-                        {"event": "COMMENT", "body": body_arg(args), "commit_id": args.commit})
+                        {"event": "COMMENT", "body": body_arg(args), "commit_id": args.commit}, auth=gh.review_token())
             out({"id": rv["id"], "url": rv.get("html_url")})
         elif args.cmd == "reviews":
             out([{"author": (r.get("user") or {}).get("login"), "at": r.get("submitted_at"), "body": r.get("body") or ""}
@@ -166,7 +218,13 @@ def main() -> None:
         elif args.cmd == "merge":
             info = view(repo, args.number)
             if args.ci_only:
+                head_repo = ((gh.api(f"repos/{repo}/pulls/{args.number}").get("head") or {}).get("repo") or {}).get("full_name")
                 refusal = review.ci_only_allowed(info["head"], info["base"], changed_files(repo, args.number))
+                if not refusal and head_repo != repo:
+                    refusal = f"the head branch lives in {head_repo or 'a deleted fork'}"
+                if not refusal and info["head"].startswith("chore/product-team-"):
+                    problems = verify_self_update(repo, args.number, info)
+                    refusal = "; ".join(problems[:5])
                 if refusal:
                     sys.exit(f"--ci-only refused: {refusal}")
             if args.ci_only:

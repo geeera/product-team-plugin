@@ -31,7 +31,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from ptlib import project, vendoring  # noqa: E402
 
-PLUGIN_REPO = "https://github.com/geeera/product-team-plugin"
+PLUGIN_REPO = vendoring.PLUGIN_REPO
 CONFLICT_EXIT = 4
 
 
@@ -64,10 +64,9 @@ def install(src: Path, target: Path) -> dict:
         raise Conflict(conflicts)
     edited = vendoring.local_edits(target, installed)
     written, removed = [], []
-    for rel, (source, rewrite) in sorted(plan.items()):
-        data = source.read_bytes()
-        if rewrite:
-            data = vendoring.rewrite(data.decode("utf-8"), rel, version["version"]).encode("utf-8")
+    rendered = vendoring.render(src, version["version"])
+    for rel, (source, _rewrite) in sorted(plan.items()):
+        data = rendered[rel]
         dest = target / rel
         dest.parent.mkdir(parents=True, exist_ok=True)
         if not dest.exists() or dest.read_bytes() != data:
@@ -79,12 +78,8 @@ def install(src: Path, target: Path) -> dict:
         if path.exists():
             path.unlink()
             removed.append(rel)
-    manifest = {
-        "version": version["version"],
-        "commit": version["commit"],
-        "files": {rel: hashlib.sha256((target / rel).read_bytes()).hexdigest() for rel in sorted(plan)},
-    }
-    vendoring.write_manifest(target, manifest)
+    (target / vendoring.MANIFEST).parent.mkdir(parents=True, exist_ok=True)
+    (target / vendoring.MANIFEST).write_bytes(vendoring.manifest_bytes(version["version"], version["commit"], rendered))
     return {"version": version, "written": written, "removed": removed, "overwrote_local_edits": edited}
 
 

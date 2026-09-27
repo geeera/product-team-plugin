@@ -19,6 +19,10 @@ SENSITIVE = re.compile(
     r"|\.controller\.[jt]s$|\.rules$|(^|/)\.env(\.|$)|(^|/)\.gitleaks(ignore|\.toml)$|\.sql$",
     re.IGNORECASE,
 )
+# Files that steer the agents or the gate itself: a change here is a change to who may merge what.
+AGENT_TOOLING = re.compile(
+    r"^\.claude/|^\.product-team/project\.ya?ml$|(^|/)\.mcp\.json$|(^|/)(CLAUDE|AGENTS)\.md$|(^|/)CODEOWNERS$",
+)
 DEPENDENCY_FILES = re.compile(
     r"(^|/)(package\.json|pnpm-lock\.yaml|package-lock\.json|yarn\.lock|bun\.lockb?|requirements[^/]*\.txt|"
     r"pyproject\.toml|uv\.lock|poetry\.lock|Pipfile(\.lock)?|go\.mod|go\.sum|Cargo\.toml|Cargo\.lock|"
@@ -34,7 +38,9 @@ def security_reasons(paths: Iterable[str], labels: Iterable[str] = ()) -> List[s
     if "security" in set(labels):
         reasons.append("issue labelled security")
     for path in paths:
-        if SENSITIVE.search(path):
+        if AGENT_TOOLING.search(path):
+            reasons.append(f"agent tooling or gate config: {path}")
+        elif SENSITIVE.search(path):
             reasons.append(f"sensitive path: {path}")
         elif DEPENDENCY_FILES.search(path):
             reasons.append(f"dependencies or CI: {path}")

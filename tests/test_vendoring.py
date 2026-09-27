@@ -82,7 +82,49 @@ class VendoredCopyTest(unittest.TestCase):
             self.assertTrue((target / ".claude/agents/qa.md").exists())
 
 
+class SelfUpdateVerificationTest(unittest.TestCase):
+    def test_installed_manifest_is_exactly_what_verification_expects(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            result = vendor.install(ROOT, target)
+            files = vendoring.render(ROOT, result["version"]["version"])
+            expected = vendoring.manifest_bytes(result["version"]["version"], result["version"]["commit"], files)
+            self.assertEqual((target / vendoring.MANIFEST).read_bytes(), expected)
+            for rel, data in files.items():
+                self.assertEqual((target / rel).read_bytes(), data, rel)
+
+    def test_only_generated_files_may_change(self):
+        allowed = {".claude/agents/qa.md"}
+        changes = [{"filename": ".claude/agents/qa.md", "status": "modified"},
+                   {"filename": vendoring.MANIFEST, "status": "modified"},
+                   {"filename": ".claude/settings.json", "status": "modified"},
+                   {"filename": ".claude/agents/evil.md", "status": "added"},
+                   {"filename": ".product-team/project.yml", "status": "modified"}]
+        problems = vendoring.self_update_violations(changes, allowed)
+        self.assertEqual(len(problems), 3)
+        self.assertTrue(any("settings" in p for p in problems))
+
+    def test_settings_are_refused_even_if_listed(self):
+        problems = vendoring.self_update_violations([{"filename": ".claude/settings.local.json", "status": "added"}],
+                                                    {".claude/settings.local.json"})
+        self.assertEqual(len(problems), 1)
+
+
 class PluginRefTest(unittest.TestCase):
+    def test_reviewer_logins_inline_and_block_lists(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "project.yml"
+            cases = {
+                "team:\n  reviewer_logins: []\n": [],
+                "team:\n  reviewer_logins: [bot-a, 'bot-b']\n": ["bot-a", "bot-b"],
+                "team:\n  reviewer_logins:\n    - bot-a\n    - \"bot-b\"  # note\n  plugin_ref: stable\n": ["bot-a", "bot-b"],
+                "team:\n  reviewer_logins:\n\n    - bot-a\nowner:\n  timezone: x\n": ["bot-a"],
+            }
+            for text, expected in cases.items():
+                with self.subTest(text=text):
+                    path.write_text(text)
+                    self.assertEqual(project.reviewer_logins(str(path)), expected)
+
     def test_defaults_to_stable_and_reads_a_pin(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "project.yml"

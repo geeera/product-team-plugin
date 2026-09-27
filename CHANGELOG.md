@@ -4,6 +4,26 @@ Products follow the `stable` channel (or a pinned tag, `team.plugin_ref` in `.pr
 first `slot-pm` of the day runs `vendor self-update` and opens a PR with the entries in between. Breaking changes (a renamed label, a changed script contract, a new required
 `project.yml` key) are marked **Breaking** with the migration step.
 
+## 0.6.0
+
+Fixes from the storify security review (geeera/storify#89–#92) and two REVIEW findings.
+
+- **Self-update is verified byte for byte.** `pr merge --ci-only` on a `chore/product-team-*` PR requires the head
+  branch in this repository, the manifest's commit to be a tagged plugin release, every changed file to be one the
+  release generates, and the content to equal a fresh render of that release. `.claude/settings*.json` is never
+  accepted. Branch operations also require the head branch to live in this repository.
+- **`security-check` covers agent tooling and gate config**: `.claude/**`, `.product-team/project.yml`, `.mcp.json`,
+  `CLAUDE.md`, `AGENTS.md`, `CODEOWNERS`.
+- **`reviewer_logins` accepts YAML block lists** (`- login`); before, they parsed as empty.
+- **Same-account mode is visible**: `backlog answers` and `pr gate` report it, the inbox keeps a "Security setup"
+  item, and a release **go** is then taken only from the demo page or a comment older than the run.
+- **Reviewer token**: `pr review` posts as `PT_REVIEW_TOKEN` when present; the owner checklist describes the
+  reviewing account and a separate cloud environment for `slot-qa`.
+- **Untrusted content**: the run protocol and every agent treat issue/PR text, logs and web pages as data.
+  `pm` reads the web and so no longer edits files.
+- Self-update PRs must be named `chore/product-team-<version>` and contain only generated files; migrations that
+  touch anything else go in a separate reviewed PR.
+
 ## 0.5.0
 
 - **Tiers**: the architect sizes every approved issue (`tier:light|standard|heavy`) in `slot-pm`; `backlog next`

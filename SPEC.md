@@ -51,7 +51,9 @@ Communication is from the phone.
   `started` older than 3 h counts as failed. Three failed runs in a row pause the team until the owner comments
   `/resume`. A run of the same slot still in progress makes the next one exit (overlap guard).
 - **Model pinning** (decision 13): plugin agents accept full model IDs in `model:`. Where one role needs two
-  models, a variant agent pins the second one (`fullstack-dev-senior`, `qa-runner`, `scribe`).
+  models, a variant agent pins the second one (`qa-runner`, `scribe`).
+- **Development on Opus** (amends decision 13, 2026-09-27): `fullstack-dev` runs on Opus 5.5 in every mode; the
+  separate senior variant is gone. Weekday caps stay conservative to keep the weekly quota.
 - **Demo write-back** (decision 9): decisions are stored in the demo artifact's database (only the artifact's
   owner may write) and read by `demo-apply` via ArtifactData. Fallbacks that work without the Artifact tool:
   a `/demo-decisions` block pasted on the demo issue, or `/approve`, `/reject`, `/go`, `/no-go` comments on the

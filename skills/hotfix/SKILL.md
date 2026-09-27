@@ -17,7 +17,7 @@ radius (who is affected, is data being damaged).
 - Otherwise fix forward (steps 2–3).
 
 ## 2. Fix
-`B move N in-progress`. Dev agent (`fullstack-dev-senior`) on `hotfix/<issue>-<slug>` from `main`, PR to `main`.
+`B move N in-progress`. `fullstack-dev` on `hotfix/<issue>-<slug>` from `main`, PR to `main`.
 The PR contains the smallest change that removes the defect plus a regression test that fails without it —
 no refactors, no drive-by fixes.
 

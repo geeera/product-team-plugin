@@ -103,9 +103,7 @@ def is_hotfix(issue: dict) -> bool:
 
 
 def _entry(issue: dict, ctx: dict, freeze: bool, reason: str) -> dict:
-    labels = _labels(issue)
     hotfix = is_hotfix(issue)
-    senior = ctx.get("is_burn") or "complexity:high" in labels or hotfix
     if issue.get("status") == "in-progress":
         # Rework continues on the open PR: its branch and base come from the PR, not from today's mode.
         base, prefix = None, None
@@ -118,7 +116,7 @@ def _entry(issue: dict, ctx: dict, freeze: bool, reason: str) -> dict:
     return {
         "number": issue["number"],
         "title": issue["title"],
-        "agent": "fullstack-dev-senior" if senior else "fullstack-dev",
+        "agent": "fullstack-dev",
         "base": base,
         "branch_prefix": prefix,
         "reason": reason,

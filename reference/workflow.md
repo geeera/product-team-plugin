@@ -43,7 +43,7 @@ directly from a slot skill — the adapter is what lets another tracker replace 
 - **Kind**: `kind:feature`, `kind:bug`, `kind:chore`, `kind:finding`, `kind:wow`, `kind:question`.
 - **Severity** (bugs and findings): `sev:critical`, `sev:high`, `sev:medium`, `sev:low`.
   P0 = `sev:critical`, P1 = `sev:high`.
-- **Flags**: `complexity:high` (dev on the senior model), `architect-note` (the note is on the issue),
+- **Flags**: `complexity:high` (architect note first), `architect-note` (the note is on the issue),
   `needs-design`, `design:awaiting-approval`, `design:approved`, `qa:changes-requested`, `foundation`,
   `security`, `ux-blocker`, `release-blocker`, `in-production`, `signature-moment`.
 - **Needs** (cloud runs never pick these up; they go to the owner's inbox): `needs:local` — needs a local

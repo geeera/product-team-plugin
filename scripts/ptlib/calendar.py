@@ -18,7 +18,7 @@ BURN_END = (6, 19)
 
 DEFAULT_CAPS = {
     "normal": {"dev_tasks": 2, "parallel_devs": 2, "dev_agent": "fullstack-dev"},
-    "burn": {"dev_tasks": 5, "parallel_devs": 3, "dev_agent": "fullstack-dev-senior"},
+    "burn": {"dev_tasks": 5, "parallel_devs": 3, "dev_agent": "fullstack-dev"},
     "freeze": {"dev_tasks": 0, "parallel_devs": 1, "dev_agent": "fullstack-dev"},
 }
 
@@ -69,8 +69,6 @@ def compute(
     # Freeze beats burn: a burn run during the freeze does regression and fixes, just with burn models.
     mode = "freeze" if freeze else ("burn" if burn else "normal")
     caps = dict(DEFAULT_CAPS[mode])
-    if freeze and burn:
-        caps["dev_agent"] = "fullstack-dev-senior"
     if caps_override and mode in caps_override:
         caps.update(caps_override[mode])
     return SlotContext(

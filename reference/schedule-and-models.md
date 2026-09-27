@@ -24,9 +24,13 @@ mode, so a run that fires an hour off still behaves correctly.
 
 | Mode | Dev tasks per run | Parallel dev subagents | Dev model |
 | ---- | ----------------- | ---------------------- | --------- |
-| normal (Mon–Thu) | 2 | 2 | `fullstack-dev` (Sonnet 5); `complexity:high` → `fullstack-dev-senior` |
-| burn (Fri 23:00 – Sun 19:00) | 5 | 3 | `fullstack-dev-senior` (Opus 5.5) |
-| freeze | 0 features, fixes only | 1 | as normal |
+| normal (Mon–Thu) | 2 | 2 | `fullstack-dev` (Opus 5.5) |
+| burn (Fri 23:00 – Sun 19:00) | 5 | 3 | `fullstack-dev` (Opus 5.5) |
+| freeze | 0 features, fixes only | 1 | `fullstack-dev` (Opus 5.5) |
+
+Development runs on Opus in every mode (owner's decision, 2026-09-27). The weekday caps stay conservative so the
+weekly quota still lasts until the burn window; watch `runlog stats` and lower `caps` in `project.yml` if runs start
+failing on the usage limit mid-week.
 
 P0/P1 bugs and release blockers do not count against the cap. The plan itself comes from `scripts/backlog next`
 (`scripts/ptlib/picker.py`): the order and the caps are code with tests, not a judgement call per run.
@@ -36,14 +40,14 @@ P0/P1 bugs and release blockers do not count against the cap. The plan itself co
 | Model | ID | Used by |
 | ----- | -- | ------- |
 | Fable 5.1 | `claude-fable-5-1` | `architect`; `kickoff`, `foundation`, ADRs |
-| Opus 5.5 | `claude-opus-5-5` | orchestrator (`slot-*`, `adopt`, `demo-*`), `pm`, `designer`, `qa`, `fullstack-dev-senior` |
-| Sonnet 5 | `claude-sonnet-5` | `fullstack-dev`, `devops`, `analyst`, `qa-runner` (regression) |
+| Opus 5.5 | `claude-opus-5-5` | orchestrator (`slot-*`, `adopt`, `demo-*`), `pm`, `designer`, `qa`, `fullstack-dev` |
+| Sonnet 5 | `claude-sonnet-5` | `devops`, `analyst`, `qa-runner` (regression) |
 | Haiku 4.5 | `claude-haiku-4-5-20251001` | `scribe`: labels, changelog, summary formatting |
 
 Security reviews are never delegated to Fable (its extra cyber safeguards cause refusals) — they go to `qa`.
 
-Role variants exist only to pin a second model to the same role: `fullstack-dev-senior` is `fullstack-dev`
-on Opus, `qa-runner` is `qa` on Sonnet for mechanical regression runs, `scribe` is the Haiku formatter.
+Role variants exist only to pin a second model to the same role: `qa-runner` is `qa` on Sonnet for mechanical
+regression runs, `scribe` is the Haiku formatter.
 
 ## Stop conditions
 

@@ -49,12 +49,12 @@ class ComputeTest(unittest.TestCase):
         ctx = compute(kyiv(2026, 10, 6, 23, 13), "Sprint 01", date(2026, 10, 9))
         self.assertFalse(ctx.is_freeze)
 
-    def test_freeze_beats_burn_but_keeps_senior_dev(self):
+    def test_freeze_beats_burn(self):
         # Demo on Monday 2026-10-12 → freeze Sat–Mon, overlapping the burn window.
         ctx = compute(kyiv(2026, 10, 10, 10, 37), "Sprint 01", date(2026, 10, 12))
         self.assertTrue(ctx.is_burn)
         self.assertEqual(ctx.mode, "freeze")
-        self.assertEqual(ctx.caps["dev_agent"], "fullstack-dev-senior")
+        self.assertEqual(ctx.caps["dev_tasks"], 0)
 
     def test_utc_input_is_evaluated_in_kyiv_time(self):
         # 20:13 UTC on Friday = 23:13 Kyiv (UTC+3 in September) → burn.

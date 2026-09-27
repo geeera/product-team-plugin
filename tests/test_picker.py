@@ -43,7 +43,6 @@ class PickTest(unittest.TestCase):
                             issue(6, "bug", labels=["sev:high", "in-production"])], S, NORMAL)
         self.assertEqual(numbers(plan), [6, 2])
         self.assertEqual((plan["dispatch"][0]["base"], plan["dispatch"][0]["branch_prefix"]), ("main", "hotfix"))
-        self.assertEqual(plan["dispatch"][0]["agent"], "fullstack-dev-senior")
 
     def test_qa_rework_comes_before_new_planned_work(self):
         plan = picker.pick([issue(1), issue(4, status="in-progress", labels=["qa:changes-requested"])], S, NORMAL)
@@ -71,12 +70,13 @@ class PickTest(unittest.TestCase):
         self.assertEqual(numbers(plan), [2])
         self.assertEqual((plan["dispatch"][0]["base"], plan["dispatch"][0]["branch_prefix"]), ("stage", "fix"))
 
-    def test_burn_uses_the_senior_developer(self):
-        self.assertEqual(picker.pick([issue(1)], S, BURN)["dispatch"][0]["agent"], "fullstack-dev-senior")
+    def test_burn_takes_more_work(self):
+        issues = [issue(n) for n in range(1, 8)]
+        self.assertEqual(numbers(picker.pick(issues, S, BURN)), [1, 2, 3, 4, 5])
 
-    def test_complexity_high_with_note_uses_the_senior_developer(self):
+    def test_complexity_high_with_note_is_planned(self):
         plan = picker.pick([issue(1, labels=["complexity:high", "architect-note"])], S, NORMAL)
-        self.assertEqual(plan["dispatch"][0]["agent"], "fullstack-dev-senior")
+        self.assertEqual(plan["dispatch"][0]["agent"], "fullstack-dev")
 
 
 class ReviewRegressionTest(unittest.TestCase):
@@ -98,7 +98,7 @@ class ReviewRegressionTest(unittest.TestCase):
 
     def test_non_urgent_production_defect_is_not_a_hotfix(self):
         plan = picker.pick([issue(3, "bug", labels=["sev:medium", "in-production"])], S, NORMAL)
-        self.assertEqual((plan["dispatch"][0]["base"], plan["dispatch"][0]["agent"]), ("dev", "fullstack-dev"))
+        self.assertEqual((plan["dispatch"][0]["base"], plan["dispatch"][0]["branch_prefix"]), ("dev", "feature"))
 
 
 if __name__ == "__main__":

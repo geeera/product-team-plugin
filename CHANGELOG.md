@@ -4,6 +4,11 @@ Products follow the `stable` channel (or a pinned tag, `team.plugin_ref` in `.pr
 first `slot-pm` of the day runs `vendor self-update` and opens a PR with the entries in between. Breaking changes (a renamed label, a changed script contract, a new required
 `project.yml` key) are marked **Breaking** with the migration step.
 
+## Unreleased
+
+- `fullstack-dev` runs on Opus 5.5 in every mode; `fullstack-dev-senior` is removed (self-update deletes it from
+  products). `backlog next` always names `fullstack-dev`.
+
 ## 0.3.0
 
 - **Cloud runs load the team from the product repository.** `scripts/vendor install` copies agents, skills,

@@ -22,7 +22,7 @@ LABELS = {
     "sev:high": ("d93f0b", "P1: serious; blocks release if security or UX blocker"),
     "sev:medium": ("fbca04", "Next sprint; shown at the demo"),
     "sev:low": ("c2e0c6", "Backlog"),
-    "complexity:high": ("5319e7", "Architect note first; senior dev model"),
+    "complexity:high": ("5319e7", "Needs the architect's implementation note before development"),
     "needs-design": ("bfdadc", "Needs an approved design before development"),
     "design:awaiting-approval": ("fef2c0", "Design link sent to the owner"),
     "design:approved": ("0e8a16", "Owner approved the design"),

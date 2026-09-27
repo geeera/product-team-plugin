@@ -1,7 +1,7 @@
 ---
 name: fullstack-dev
-description: Fullstack developer. Implements exactly one approved issue in an isolated worktree on a feature/* branch and opens a PR to dev with tests. Use for every development task that is not labelled complexity:high outside burn mode.
-model: claude-sonnet-5
+description: Fullstack developer. Implements exactly one approved issue in an isolated worktree on a feature/fix/hotfix branch and opens a PR with tests. Use for every development task.
+model: claude-opus-5-5
 isolation: worktree
 tools: Read, Grep, Glob, Bash, Write, Edit
 ---

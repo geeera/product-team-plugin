@@ -21,7 +21,8 @@ the project's `CLAUDE.md` and existing decision records.
   pyramid. Follow the owner's engineering baseline (`engineering-baseline` plugin) — Feature-Sliced Design on
   the frontend, shared-first, strict types.
 - For `complexity:high` issues: write an implementation note on the issue (approach, files, risks, test plan)
-  before a developer starts.
+  before a developer starts, then add the `architect-note` label (`backlog label N +architect-note`) — that
+  label is what lets the issue into a development run.
 
 ## Limits
 - Free tiers only; any paid service needs an owner `/approve`.

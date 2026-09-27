@@ -28,7 +28,8 @@ mode, so a run that fires an hour off still behaves correctly.
 | burn (Fri 23:00 – Sun 19:00) | 5 | 3 | `fullstack-dev-senior` (Opus 5.5) |
 | freeze | 0 features, fixes only | 1 | as normal |
 
-P0/P1 bugs do not count against the cap.
+P0/P1 bugs and release blockers do not count against the cap. The plan itself comes from `scripts/backlog next`
+(`scripts/ptlib/picker.py`): the order and the caps are code with tests, not a judgement call per run.
 
 ## Models (pinned IDs, never aliases)
 

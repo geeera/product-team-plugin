@@ -13,22 +13,11 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import sys
 from datetime import date, datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from ptlib import calendar, gh  # noqa: E402
-
-
-def freeze_days_from_project(path: str = ".product-team/project.yml") -> int:
-    # Tiny targeted read so the script stays stdlib-only (no YAML parser available everywhere).
-    try:
-        with open(path, encoding="utf-8") as f:
-            m = re.search(r"^\s*freeze_days:\s*(\d+)", f.read(), re.MULTILINE)
-    except FileNotFoundError:
-        return 2
-    return int(m.group(1)) if m else 2
+from ptlib import calendar, gh, project  # noqa: E402
 
 
 def main() -> None:
@@ -51,7 +40,7 @@ def main() -> None:
         if sprint:
             sprint_title, demo = sprint["title"], date.fromisoformat(sprint["due_on"][:10])
 
-    ctx = calendar.compute(now, sprint_title, demo, freeze_days_from_project())
+    ctx = calendar.compute(now, sprint_title, demo, project.freeze_days())
     print(json.dumps(ctx.to_dict(), indent=2))
 
 

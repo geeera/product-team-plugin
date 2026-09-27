@@ -59,6 +59,17 @@ Communication is from the phone.
 - **QA verdicts**: all agents act as one GitHub user and GitHub rejects approving your own PR, so QA posts a
   `QA: APPROVED` / `QA: CHANGES REQUESTED` review comment and the orchestrator merges.
 - **Owner commands** are honoured only from the repository owner's account.
+- **The development plan is code** (`backlog next`): order and caps are tested functions, not re-decided by a
+  model each run. Work only a person can do carries `needs:local` / `needs:owner` and leaves the plan.
+- **Hotfix path**: P0/P1 live in production → `hotfix/*` from `main`, independent QA, released without waiting
+  for the demo, back-merged to `stage` and `dev`; rollback is a PR or a manual deploy of the previous ref.
+- **Branch guard** instead of branch protection: a workflow opens a critical issue for the owner when `dev`,
+  `stage` or `main` moves without a merged PR. A separate machine account for the agents (so their token cannot
+  push to protected branches and QA approvals become real reviews) is the stronger option, left to the owner.
+- **One inbox**: a pinned "Needs you" issue rewritten by every run is the owner's only to-do list.
+- **Measured runs**: every run records its duration and counts; `runlog stats` and `sprint-metrics` (plan vs
+  shipped, cycle time, QA first-pass rate) feed the demo.
+- **Versioned plugin**: products pin a release tag; upgrades arrive as a PR with the changelog.
 
 ## To verify before building on it
 

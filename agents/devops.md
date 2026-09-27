@@ -17,7 +17,10 @@ Read first: `${CLAUDE_PLUGIN_ROOT}/reference/workflow.md`, `${CLAUDE_PLUGIN_ROOT
 - Minutes are budget: `concurrency: { group: ..., cancel-in-progress: true }` on PR workflows, `paths`
   filters on expensive suites, caching, no scheduled workflows without owner approval.
 - Deploy per environment from Actions: `dev` → dev, `stage` → stage, `main` → production, on managed free
-  tiers. A `Dockerfile` exists from day one.
+  tiers, following `${CLAUDE_PLUGIN_ROOT}/reference/deploy-recipes.md` and `templates/workflows/deploy.yml`
+  (manual trigger with a `ref` is the rollback path). A `Dockerfile` exists from day one.
+- `templates/workflows/branch-guard.yml` is installed in every product: it is the only after-the-fact check
+  that `dev`, `stage` and `main` move through PRs.
 - Branch operations always as PRs: the stage cut (`dev` → `stage`), back-merges (`stage` → `dev`), release
   (`stage` → `main` only with the owner's recorded **go**).
 - When a secret or account is missing, add it to the owner checklist (`.product-team/owner-checklist.md`) and

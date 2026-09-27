@@ -20,7 +20,9 @@ Write `demo.json` (schema = the example data inside the template):
   shipped feature** (create the wow issues first) — `summary` and, where available, `evidence`.
 - `release`: `recommendation` (`go` only if no open `release-blocker`), `auto_no_go` (a blocker found during the
   freeze), `blockers` list.
-- `metrics`: 3–6 figures from `analyst` (shipped vs planned, cycle time, Actions minutes, free-tier usage).
+- `metrics`: 3–6 figures from `analyst`: `scripts/sprint-metrics` (planned vs shipped, median cycle time,
+  QA first-pass rate), `scripts/runlog stats` (runs, failures, minutes), plus Actions minutes and free-tier
+  usage where readable.
 
 ## 2. Build
 `${CLAUDE_PLUGIN_ROOT}/scripts/demo-page build demo.json demo-<sprint>.html`

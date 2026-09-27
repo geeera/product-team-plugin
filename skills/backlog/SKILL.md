@@ -15,6 +15,7 @@ Conventions (statuses, kinds, severities, flags, milestones) are in
 | Set up labels in a repository (idempotent) | `backlog init` |
 | Current sprint | `backlog sprint current` |
 | Create a sprint | `backlog sprint create "Sprint 03" 2026-10-23` (due = demo day) |
+| The development plan for this run | `backlog next` (ordered dispatch, skipped with reasons, missing architect notes) |
 | What is ready to build | `backlog list --status approved --milestone current` |
 | Blocked on the owner | `backlog list --status blocked` |
 | One issue with comments | `backlog show 42` |

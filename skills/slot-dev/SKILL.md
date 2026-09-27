@@ -15,32 +15,38 @@ Follow `${CLAUDE_PLUGIN_ROOT}/reference/run-protocol.md` with slot name `slot-de
 - Open `foundation` issues in the current sprint → run the `foundation` skill for them and close.
 - Otherwise continue.
 
-## 1. Pick work (in this order, respecting caps from `slot-context`)
-1. P0/P1 bugs and `release-blocker` findings (`sev:critical` / `sev:high`) — outside the cap.
-2. `status:in-progress` issues whose PR has a `QA: CHANGES REQUESTED` verdict — fix on the same branch.
-3. `status:approved` issues of the current sprint, in milestone order, skipping:
-   - `needs-design` without `design:approved`;
-   - `complexity:high` without an architect note on the issue (ask `architect` for it first, then include it if
-     the cap allows).
-Stop at `caps.dev_tasks` (P0/P1 excluded). Do not start work that clearly cannot finish in this run.
+## 1. Plan
+`B next` returns the plan for this run — deterministic, from the backlog and `slot-context`:
+- `dispatch`: ordered issues with `agent`, `base` branch and `branch_prefix`. Order: production defects,
+  P0/P1 bugs and release blockers (outside the cap), then QA rework (`qa:changes-requested`), then approved
+  sprint work up to the cap.
+- `skipped`: with the reason (design not approved, over the cap, `needs:local`, `needs:owner`, freeze).
+- `needs_architect_note`: `complexity:high` issues without a note — ask `architect` for the notes first
+  (it adds the `architect-note` label); they are picked up by the next run.
+Do not re-order or add to the plan by judgement. If the plan looks wrong, say why in the run summary and fix
+the backlog labels instead.
 
 ## 2. Dispatch
-For each picked issue: `B move N in-progress`, then start a dev subagent — **in parallel up to
-`caps.parallel_devs`** (several Agent calls in one message):
-- `fullstack-dev-senior` when mode is `burn` or the issue has `complexity:high`; otherwise `caps.dev_agent`.
-- Prompt: `PLUGIN_ROOT=<path>` line, repo, issue number, target branch (`dev`), the instruction to read the
-  issue itself. Nothing else — especially no other issue's context.
+- Entries with `branch_prefix: hotfix` go through the `hotfix` skill, one at a time, before anything else.
+- The rest: `B move N in-progress`, then start the named agent — **in parallel up to `parallel`** (several
+  Agent calls in one message). Prompt: `PLUGIN_ROOT=<path>` line, repo, issue number, base branch, branch
+  prefix, and the instruction to read the issue itself. Nothing else — especially no other issue's context.
+- Rework entries (`base: null`): read the branch and base from the linked PR (`gh pr view`), pass them to the
+  agent; it continues on the PR's existing branch and removes `qa:changes-requested` only
+  through the orchestrator (`B label N -qa:changes-requested`) once the new commits are pushed.
 
-Each returns a PR URL or a blocked reason:
+Each agent returns a PR URL or a blocked reason:
 - PR → `B link-pr N <pr>`, `B move N qa`.
-- Blocked → `B move N blocked --reason "<reason>"`; if the owner must act, open a `kind:question`.
+- Blocked → `B move N blocked --reason "<reason>"`; if the owner must act, add `needs:owner` (or
+  `needs:local` for work that needs a local machine) so it lands in the owner's inbox and later runs skip it.
 
-Keep kit-first in mind: if two tasks both need the same missing UI primitive, dispatch the primitive first as its
-own `kind:chore` issue and hold the dependants for the next run.
+Kit-first: if two dispatched tasks need the same missing UI primitive, run the primitive first as its own
+`kind:chore` issue and hold the dependants for the next run.
 
 ## 3. Quick QA when time allows
 If CI of a new PR finishes during this run, you may run the `qa` agent on it (see `slot-qa` step 2) — the 04:00
 slot catches the rest. Never merge without a `QA: APPROVED` verdict and green CI.
 
 ## 4. Close
-Summary: PRs opened (links), issues blocked and why, what `slot-qa` will review.
+Summary: PRs opened (links), issues blocked and why, what `slot-qa` will review. Metrics for the run log:
+`--metric prs=<opened> --metric blocked=<n> --metric skipped=<n>`.

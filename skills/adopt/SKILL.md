@@ -40,12 +40,15 @@ Also run the owner's `engineering-baseline:conformance-audit` if installed, to r
 - `.product-team/project.yml` (`mode: adopted`, `decisions_dir` = the project's folder).
 - `.product-team/owner-checklist.md` — only what is missing.
 - `.claude/settings.json` plugin entries (merge, don't overwrite existing settings).
-- CI: only add what is missing from the contract (security workflow, concurrency, e2e hook); never replace
-  working pipelines.
+- CI: only add what is missing from the contract (security workflow, `branch-guard.yml`, concurrency, e2e
+  hook); never replace working pipelines. A missing deploy becomes a Sprint 01 question with options from
+  `reference/deploy-recipes.md`.
 
 ## 4. Backlog
 - `backlog init`, `backlog sprint create "Sprint 01" <demo day>`.
-- Every audit finding → `kind:finding` with severity; blockers get `release-blocker`.
+- Every audit finding → `kind:finding` with severity; blockers get `release-blocker`. Anything only the owner
+  or a local machine can do gets `needs:owner` / `needs:local`.
+- `scripts/inbox update` so the owner starts with one list.
 - First sprint = **audit follow-ups and blockers only, no features**. Existing feature ideas the owner mentions
   become `status:proposed` for the first demo.
 

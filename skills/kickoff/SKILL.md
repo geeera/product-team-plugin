@@ -40,7 +40,7 @@ has commits:
 - `.claude/settings.json` from `${CLAUDE_PLUGIN_ROOT}/templates/claude-settings.json` so cloud sessions load
   this plugin.
 - `CLAUDE.md`: how to work in this repo — commands, structure, conventions, links to decisions.
-- `backlog init`; `backlog sprint create "Sprint 01" <demo day, two weeks out, a weekday>`.
+- `backlog init`; `backlog sprint create "Sprint 01" <demo day, two weeks out, a weekday>`; `inbox update`.
 
 ## 5. First sprint = foundation
 Create `kind:chore` issues, `status:approved` (the owner approved the kickoff), milestone Sprint 01:

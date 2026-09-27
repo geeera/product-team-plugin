@@ -16,6 +16,8 @@ skills. Output is JSON on stdout; errors go to stderr with a non-zero exit.
   backlog comment N (--body B | --body-file F)
   backlog link-pr N PR                           record the PR on the issue
   backlog answers N                              owner commands (/approve, /reject, /go, …) on the issue
+  backlog next [--now ISO]                       what a development run takes now: ordered dispatch list,
+                                                 skipped issues with reasons, missing architect notes
   backlog sprint current|list
   backlog sprint create TITLE DUE_DATE           DUE_DATE = demo day, YYYY-MM-DD
 """
@@ -29,8 +31,8 @@ from datetime import date, datetime
 from urllib.parse import quote
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from ptlib import commands, gh  # noqa: E402
-from ptlib.calendar import KYIV, pick_current_sprint  # noqa: E402
+from ptlib import commands, gh, picker, project  # noqa: E402
+from ptlib.calendar import KYIV, compute, pick_current_sprint  # noqa: E402
 from ptlib.labels import LABELS, STATUSES, KINDS, SEVERITIES  # noqa: E402
 
 
@@ -205,6 +207,19 @@ def cmd_answers(repo: str, args) -> None:
     out({"owner": owner, "commands": commands.parse(comments, owner)})
 
 
+def cmd_next(repo: str, args) -> None:
+    now = datetime.fromisoformat(args.now) if args.now else datetime.now(KYIV)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=KYIV)
+    sprint = current_sprint(repo)
+    demo = date.fromisoformat(sprint["due_on"][:10]) if sprint else None
+    ctx = compute(now, sprint["title"] if sprint else None, demo, project.freeze_days()).to_dict()
+    issues = [slim(i) for i in gh.api_list(f"repos/{repo}/issues?state=open&per_page=100") if "pull_request" not in i]
+    plan = picker.pick(issues, ctx["sprint"], ctx)
+    plan["context"] = ctx
+    out(plan)
+
+
 def cmd_sprint(repo: str, args) -> None:
     if args.action == "current":
         s = current_sprint(repo)
@@ -241,6 +256,7 @@ def main() -> None:
     cm = sub.add_parser("comment"); cm.add_argument("number", type=int); cm.add_argument("--body"); cm.add_argument("--body-file")
     lp = sub.add_parser("link-pr"); lp.add_argument("number", type=int); lp.add_argument("pr", type=int)
     an = sub.add_parser("answers"); an.add_argument("number", type=int)
+    nx = sub.add_parser("next"); nx.add_argument("--now")
     sp = sub.add_parser("sprint"); sp.add_argument("action", choices=["current", "list", "create"])
     sp.add_argument("title", nargs="?"); sp.add_argument("due", nargs="?")
     args = p.parse_args()
@@ -248,7 +264,7 @@ def main() -> None:
     handlers = {
         "init": cmd_init, "list": cmd_list, "show": cmd_show, "create": cmd_create, "move": cmd_move, "close": cmd_close, "milestone": cmd_milestone,
         "label": cmd_label, "comment": cmd_comment, "link-pr": cmd_link_pr, "answers": cmd_answers,
-        "sprint": cmd_sprint,
+        "sprint": cmd_sprint, "next": cmd_next,
     }
     try:
         handlers[args.cmd](gh.repo(), args)

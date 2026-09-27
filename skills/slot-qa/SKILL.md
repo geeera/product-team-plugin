@@ -16,20 +16,27 @@ step 2 for any PRs to `dev` that are still open.
 
 ## 2. Review PRs (`status:qa` issues)
 For each linked open PR, oldest first:
-1. `gh pr checks <pr>` — pending: skip (next slot); red: comment the failing job on the PR,
-   `B move N in-progress --reason "CI red: <job>"`.
-2. Green → start the **`qa` agent** with only: `PLUGIN_ROOT=<path>`, repo, PR number, issue number. Never pass
+1. **Current with its base?** `gh pr view <pr> --json mergeable,mergeStateStatus`. Behind or conflicting →
+   the PR's developer agent merges the base into the branch (no force-push; generated files are regenerated,
+   not hand-merged) and pushes; CI then runs again — review it in a later slot.
+2. `gh pr checks <pr>` — pending: skip (next slot); red: comment the failing job on the PR,
+   `B move N in-progress --reason "CI red: <job>"`, `B label N +qa:changes-requested`.
+3. Green → start the **`qa` agent** with only: `PLUGIN_ROOT=<path>`, repo, PR number, issue number. Never pass
    the developer's summary or transcript. Independent reviews may run in parallel (up to 3).
-3. Verdict:
-   - `QA: APPROVED` → `gh pr merge <pr> --squash --delete-branch`, `B move N done`.
-   - `QA: CHANGES REQUESTED` → `B move N in-progress`. If the requested changes are small and the issue is P0/P1,
-     dispatch `fullstack-dev` now on the same branch, then one more `qa` pass. Otherwise `slot-dev` picks it up.
-4. Findings the reviewer filed outside the PR's scope stay in the backlog with their severity.
+4. Verdict:
+   - `QA: APPROVED` → `gh pr merge <pr> --squash --delete-branch`, `B label N -qa:changes-requested`,
+     `B move N done`.
+   - `QA: CHANGES REQUESTED` → `B move N in-progress`, `B label N +qa:changes-requested` (this is what puts it
+     in the next `B next` plan). If the changes are small and the issue is P0/P1, dispatch the developer now on
+     the same branch, then one more `qa` pass.
+5. Findings the reviewer filed outside the PR's scope stay in the backlog with their severity.
 
 ## 3. Triage
 Review new `kind:finding` / `kind:bug` issues since the last run: severity set, `release-blocker` on security
 Critical/High and UX blockers, blockers placed in the current sprint (`B move N approved` — no owner approval
-needed), Medium in the next sprint, Low in the backlog.
+needed), Medium in the next sprint, Low in the backlog. A P0/P1 defect that is live in production gets
+`in-production` and goes through the `hotfix` skill in this run. Work that needs a local machine or the owner
+gets `needs:local` / `needs:owner`.
 
 ## 4. Deep audit — Saturday burn slot only
 When `slot-context` is `burn` on a Saturday and no deep audit ran this sprint (look for a run-log summary with
@@ -37,7 +44,7 @@ When `slot-context` is `burn` on a Saturday and no deep audit ran this sprint (l
 - `qa`: security audit of the whole `dev` branch (OWASP, dependency audit, secrets in history, authz paths).
 - `designer`: UX walkthrough of the key flows on `stage` (or `dev` before the cut) per
   `reference/qa-checklists.md`.
-- `analyst`: sprint metrics for the demo.
+- `analyst`: sprint metrics for the demo (`scripts/sprint-metrics`, `scripts/runlog stats`).
 - `architect` is **not** used for the security part (Fable refusals); it may review debt and structure.
 All output becomes findings through `B create`.
 
@@ -45,9 +52,10 @@ All output becomes findings through `B create`.
 If today is the sprint's demo date (`slot-context.demo_date`), run the `demo-prep` skill after the reviews.
 
 ## 6. Morning summary
+Run `${CLAUDE_PLUGIN_ROOT}/scripts/inbox update` first — the pinned "Needs you" issue is the owner's to-do list.
 Hand the facts to the `scribe` agent to format; post it as the run summary (run-log comment) and print it. It
 contains, in this order:
-1. **Needs you** — designs waiting, questions, cost approvals, release decision (links, one line each).
+1. **Needs you** — the count from the inbox and its link (the details live there, not in the summary).
 2. Shipped to `dev` overnight (issue → PR).
 3. Blockers and P0/P1 status.
 4. What the team does next.

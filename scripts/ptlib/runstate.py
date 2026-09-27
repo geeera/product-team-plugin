@@ -1,12 +1,15 @@
 """Run-log state machine: overlap guard and the 3-failures-in-a-row pause."""
 from __future__ import annotations
 
+import json
 import re
-from datetime import datetime, timedelta
-from typing import List, Optional
+from datetime import datetime, timedelta, timezone
+from statistics import median
+from typing import Dict, Iterable, List, Optional
 
 MARKER = re.compile(r"<!-- pt-run id=(\S+) slot=(\S+) state=(\S+) -->")
 PAUSE_MARKER = "<!-- pt-paused -->"
+METRICS = re.compile(r"<!-- pt-metrics (\{.*?\}) -->")
 FAILURE_LIMIT = 3
 OVERLAP_WINDOW = timedelta(hours=3)
 
@@ -23,6 +26,7 @@ def parse_runs(comments: List[dict]) -> List[dict]:
                     "state": m.group(3),
                     "at": c.get("created_at"),
                     "comment_id": c.get("id"),
+                    "metrics": _metrics_of(c.get("body") or ""),
                 }
             )
     runs.sort(key=lambda r: r["at"] or "")
@@ -58,3 +62,59 @@ def resumed_after_pause(pause_at: Optional[str], owner_commands: List[dict]) -> 
     if not pause_at:
         return False
     return any(c["command"] == "resume" and (c["at"] or "") > pause_at for c in owner_commands)
+
+
+def _metrics_of(body: str) -> dict:
+    # The run log is a public comment thread: a malformed block must not stop every future run.
+    m = METRICS.search(body)
+    if not m:
+        return {}
+    try:
+        value = json.loads(m.group(1))
+    except ValueError:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def started_at(run_id: str) -> datetime:
+    """Run ids start with the UTC start time, e.g. 20260927T201300Z-slot-dev."""
+    return datetime.strptime(run_id.split("-", 1)[0], "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
+
+
+def parse_metrics(pairs: Iterable[str]) -> Dict[str, object]:
+    out: Dict[str, object] = {}
+    for pair in pairs:
+        key, sep, value = pair.partition("=")
+        if not sep or not key.strip():
+            raise ValueError(f"metric must look like key=value, got {pair!r}")
+        value = value.strip()
+        if "-->" in pair or "<!--" in pair:
+            raise ValueError(f"metric must not contain HTML comment markers: {pair!r}")
+        out[key.strip()] = int(value) if value.lstrip("-").isdigit() else value
+    return out
+
+
+def metrics_marker(metrics: Dict[str, object]) -> str:
+    return f"<!-- pt-metrics {json.dumps(metrics, sort_keys=True)} -->"
+
+
+def stats(runs: List[dict], now: datetime, since: datetime) -> Dict[str, dict]:
+    """Per slot: runs, failures (dangling counted), median minutes, and summed numeric metrics."""
+    per_slot: Dict[str, dict] = {}
+    for r in runs:
+        if not r["at"] or _ts(r["at"]) < since:
+            continue
+        slot = per_slot.setdefault(r["slot"], {"runs": 0, "failed": 0, "minutes": [], "totals": {}})
+        slot["runs"] += 1
+        if effective_state(r, now) == "failed":
+            slot["failed"] += 1
+        minutes = r["metrics"].get("minutes")
+        if isinstance(minutes, int):
+            slot["minutes"].append(minutes)
+        for key, value in r["metrics"].items():
+            if key != "minutes" and isinstance(value, int):
+                slot["totals"][key] = slot["totals"].get(key, 0) + value
+    for slot in per_slot.values():
+        mins = slot.pop("minutes")
+        slot["median_minutes"] = median(mins) if mins else None
+    return per_slot

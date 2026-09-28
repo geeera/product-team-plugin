@@ -34,6 +34,20 @@ conventions an agent could imitate (the inbox shows a standing "Security setup" 
    your `/approve` on the budget question) or making the repository public. Until then `branch-guard.yml`
    reports, after the fact, any change that reached `dev`, `stage` or `main` without a merged PR.
 
+## Daily digest on your phone (5 minutes)
+
+The agents write to GitHub as your account, and GitHub never notifies you about your own comments — so their
+questions would not reach your phone. `owner-digest.yml` sends the pinned "Needs you" list once a day instead.
+Pick one channel and put its values in Settings → Secrets and variables → Actions:
+
+- **Telegram** (recommended): message @BotFather → `/newbot` → copy the token into `PT_TELEGRAM_TOKEN`. Send your new
+  bot any message, open `https://api.telegram.org/bot<token>/getUpdates` in a browser and copy `chat.id` into
+  `PT_TELEGRAM_CHAT`.
+- **ntfy** (no account): install the ntfy app, subscribe to a long random topic name, put that name in
+  `PT_NTFY_TOPIC`. Anyone who guesses the topic can read it — keep it long and random.
+
+Set `owner.language` in `.product-team/project.yml` to `ru` for the digest and questions in Russian.
+
 ## Claude
 - [ ] Scheduled routines created for `slot-pm`, `slot-dev`, `slot-qa` (see the plugin README)
 - [ ] Project chat created for owner ↔ team conversation

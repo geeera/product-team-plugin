@@ -84,6 +84,13 @@ Communication is from the phone.
   tagged plugin release named in the manifest and requires a byte-identical result; settings files are never part
   of an update.
 - **One inbox**: a pinned "Needs you" issue rewritten by every run is the owner's only to-do list.
+- **Decision policy** (2026-09-28): the owner decides money, scope, release, access, legal and design approvals —
+  nothing else. `backlog` refuses any other question; the team decides the rest and records it (`backlog decide`,
+  or a decision record), listed as FYI in the digest and reversible with `/reject`. Every question opens with the
+  answer line.
+- **Daily digest**: GitHub does not notify the owner about comments written with the owner's own account, so the
+  inbox goes to the phone once a day through Telegram or ntfy from GitHub Actions (`owner-digest.yml`), and at once
+  for what cannot wait.
 - **Measured runs**: every run records its duration and counts; `runlog stats` and `sprint-metrics` (plan vs
   shipped, cycle time, QA first-pass rate) feed the demo.
 - **How the team reaches the cloud**: cloud sessions never install plugins a repository enables, but they load

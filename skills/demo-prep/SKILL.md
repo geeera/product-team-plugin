@@ -39,5 +39,7 @@ Write `demo.json` (schema = the example data inside the template):
   `/go` or `/no-go why` (or `/override why` when blocked) **on the demo issue**.
 
 ## 4. Notify
+Run `${CLAUDE_PLUGIN_ROOT}/scripts/inbox update`, then `${CLAUDE_PLUGIN_ROOT}/scripts/workflows run owner-digest.yml`
+so the release question reaches the phone now, not tomorrow morning.
 Comment on the demo issue with the link and the three decisions that matter most. The page's "Copy decisions"
 button produces a `/demo-decisions` block the owner can paste there too — both routes are read by `demo-apply`.

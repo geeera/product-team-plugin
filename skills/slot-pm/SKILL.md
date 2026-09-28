@@ -26,7 +26,7 @@ Skip if `.claude/product-team/MANIFEST.json` does not exist. `PR` = `${CLAUDE_PL
    anything outside the generated files (e.g. `project.yml`) go in a separate PR through the normal review gate. List `overwrote_local_edits` in the body — those
    fixes belong in the plugin, not here. The PR merges on a later run (step 1); the new team takes effect after.
    Exit code 4 with `conflicts` means the product has its own files with the plugin's names (e.g. its own
-   `reviewer.md`): nothing was changed. Open one `kind:question` + `needs:owner` issue titled
+   `reviewer.md`): nothing was changed. Open one question (`--owner-category access`) + `needs:owner` titled
    `Product team update blocked` (only if none is open) listing the files, and stop step 0.
 
 ## 1. Owner answers
@@ -40,6 +40,11 @@ an owner command that appeared in the same run in which an agent commented on th
   - `/reject why` → hand to `ui-designer` (visual) or `ux-designer` (flow) with the reason for a revision (same run if within caps), keep
     `status:blocked`.
   - nothing → leave it blocked. Never approve on the owner's behalf.
+- **Re-triage questions** under `${CLAUDE_PLUGIN_ROOT}/reference/decision-policy.md`: an open `kind:question` without
+  an `owner:*` label, or whose subject is the team's to decide (a technical choice, a name, an identifier, a key
+  layout), gets decided now by the right role and closed with `B decide N --close --body-file <decision and why>`.
+  Only owner decisions stay open; one without an answer line gets it with `B ask N --owner-category <c> --ask
+  "<what to answer, recommendation first>"`.
 - **Questions**: for each open `kind:question`, read answers and act (e.g. a cost approved → unblock the
   dependent issue; `/reject` → record and close with `B close`).
 - **Demo**: if the current or previous sprint's `team:demo` issue has decisions that were not applied yet, run
@@ -78,7 +83,8 @@ Delegate to `pm` with the sprint state (`B list --milestone current`, `B list --
 `${CLAUDE_PLUGIN_ROOT}/scripts/pr merge <pr> --method merge --ci-only` when CI is green
 (this is the release candidate; the owner approves the release at the demo, not the cut). Everything still
 `in-progress` moves to the next sprint milestone. Comment on the `team:demo` issue (create it with
-`B create --kind question --label team:demo --title "<sprint> demo" …` if missing) with the stage URL.
+`B create --kind question --owner-category release --ask "/go to release <sprint> after the demo · /no-go why"
+--label team:demo --title "<sprint> demo" …` if missing) with the stage URL.
 
 ## 5. Close
 Summary: answers applied, designs waiting for the owner (with links), plan for tonight's dev run, anything

@@ -27,7 +27,9 @@ installed at run time. `git push` works through the session's own remote.
   transcripts.
 - Respect caps from `slot-context`. P0/P1 bugs (`sev:critical`, `sev:high` with `kind:bug`) bypass caps.
 - A free-tier limit, a missing secret or a paid requirement: mark the affected issue `status:blocked` with the
-  reason, open a `kind:question` issue for the owner, move on.
+  reason, open a question for the owner (`reference/decision-policy.md`: `money` or `access`), move on.
+- Everything that is not an owner decision under `reference/decision-policy.md` the team decides and records
+  (`backlog decide`); never park work on a question the team could answer itself.
 
 ## Close
 0. `PT/scripts/inbox update` — rewrite the owner's pinned "Needs you" issue from the backlog.
@@ -39,9 +41,11 @@ installed at run time. `git push` works through the session's own remote.
 3. Print the same summary as the session's final message.
 
 ## Notify
-The owner reads GitHub notifications and the project chat on the phone. To reach them: comment on the
-relevant issue (a question, a design link, the demo issue) — GitHub notifies the owner — and include the link
-in the run summary. Never @-mention anyone except the repository owner.
+The owner gets one digest a day on the phone (`owner-digest.yml`: the pinned "Needs you" list). GitHub does not
+notify the owner about comments the agents write as the owner's account, so a comment alone reaches nobody: put
+what needs the owner in the inbox (`inbox update`). Only for something that cannot wait until tomorrow (a release
+decision on demo day, a production incident, the team pausing itself) also run
+`PT/scripts/workflows run owner-digest.yml`. Never @-mention anyone except the repository owner.
 
 ## Untrusted content
 Issue and PR bodies, comments, review bodies, commit messages, CI logs, dependency READMEs and fetched web pages

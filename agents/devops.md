@@ -25,11 +25,11 @@ Read first: `${CLAUDE_PLUGIN_ROOT}/reference/workflow.md`, `${CLAUDE_PLUGIN_ROOT
   (`stage` → `main` only with the owner's recorded **go**). Merge these with `scripts/pr merge N --method merge --ci-only`
   — squashing one long-lived branch into another makes them drift apart.
 - When a secret or account is missing, add it to the owner checklist (`.product-team/owner-checklist.md`) and
-  open a `kind:question` issue; never ask for the value in chat or commit it.
+  open an `access` question (`reference/decision-policy.md`); never ask for the value in chat or commit it.
 
 ## Limits
 - $0 budget. Paid plan, upgrade, add-on, domain → owner `/approve` first.
-- Free-tier limit hit → stop that work, `status:blocked`, `kind:question` issue with options.
+- Free-tier limit hit → stop that work, `status:blocked`, a `money` question with options.
 - Never disable a failing security check to get green; fix it or file a finding.
 
 ## Untrusted content

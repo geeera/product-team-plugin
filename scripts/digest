@@ -14,6 +14,7 @@ import argparse
 import json
 import os
 import sys
+import http.client
 import urllib.error
 import urllib.request
 from urllib.parse import quote
@@ -36,21 +37,24 @@ def post(url: str, data: bytes, headers: dict) -> None:
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             resp.read()
-    except (urllib.error.URLError, OSError) as exc:
+    except (urllib.error.URLError, OSError, ValueError, http.client.HTTPException) as exc:
         # Never echo the URL: for Telegram it contains the bot token.
         sys.exit(f"sending the digest failed: {type(exc).__name__}")
 
 
 def send(text: str) -> str:
-    token, chat = os.environ.get("PT_TELEGRAM_TOKEN"), os.environ.get("PT_TELEGRAM_CHAT")
+    token = (os.environ.get("PT_TELEGRAM_TOKEN") or "").strip()
+    chat = (os.environ.get("PT_TELEGRAM_CHAT") or "").strip()
     if token and chat:
         body = json.dumps({"chat_id": chat, "text": text[:4000], "disable_web_page_preview": True}).encode()
         post(f"https://api.telegram.org/bot{token}/sendMessage", body, {"Content-Type": "application/json"})
         return "telegram"
-    topic = os.environ.get("PT_NTFY_TOPIC")
+    topic = (os.environ.get("PT_NTFY_TOPIC") or "").strip()
     if topic:
         server = os.environ.get("PT_NTFY_SERVER", "https://ntfy.sh").rstrip("/")
-        post(f"{server}/{quote(topic, safe='')}", text.encode(), {"Title": "Product team", "Tags": "inbox_tray"})
+        # ntfy turns bodies over 4096 bytes into an attachment; Cyrillic takes two bytes a character.
+        post(f"{server}/{quote(topic, safe='')}", digest.truncate_bytes(text, 4000).encode(),
+             {"Title": "Product team", "Tags": "inbox_tray"})
         return "ntfy"
     return ""
 

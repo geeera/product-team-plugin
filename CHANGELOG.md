@@ -15,8 +15,11 @@ first `slot-pm` of the day runs `vendor self-update` and opens a PR with the ent
   every morning, and at once on demo day. Needed because GitHub never notifies you about comments made with your
   own account — which is how the agents write.
 - **Inbox**: answer line per question, "Decided by the team (FYI)", owner language (`owner.language: ru`).
+- `backlog reversals`: team decisions the owner answered with `/reject`; `slot-pm` reopens them.
 - `scripts/workflows run FILE`. New labels `owner:*`, `team-decided`. Run `backlog init` once; add
   `owner-digest.yml` and one digest channel (owner checklist).
+- **Breaking** — `backlog create --kind question` now requires `--owner-category` and `--ask`. Existing questions
+  keep working; `slot-pm` adds the answer line to the ones that stay the owner's.
 
 ## 0.7.0
 

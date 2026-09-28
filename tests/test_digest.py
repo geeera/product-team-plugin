@@ -27,6 +27,16 @@ class DigestTest(unittest.TestCase):
         self.assertIn("• Agents use your GitHub account", text)
         self.assertNotIn("Answer:", text)
 
+    def test_standing_security_item_alone_does_not_push(self):
+        body = inbox.render([], same_account_url="https://x/checklist", language="ru")
+        self.assertEqual(digest.needs_count(digest.parse_inbox(body)), 0)
+
+    def test_truncation_counts_bytes(self):
+        text = "я" * 3000  # 6000 bytes
+        cut = digest.truncate_bytes(text, 4000)
+        self.assertLessEqual(len(cut.encode()), 4000)
+        self.assertTrue(cut.endswith("…"))
+
     def test_empty_inbox_needs_nothing(self):
         self.assertEqual(digest.needs_count(digest.parse_inbox(inbox.render([]))), 0)
 

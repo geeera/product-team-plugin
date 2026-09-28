@@ -14,6 +14,8 @@ _ITEM = re.compile(r"^- (?:#(\d+) )?\[(.+?)\]\((\S+?)\)(?: — (.+))?$")
 HEADER = {"en": "{product}: {n} need you", "ru": "{product}: нужно твоё внимание — {n}"}
 ANSWER = {"en": "Answer", "ru": "Ответ"}
 FYI_KEYS = ("Decided by the team", "Решено командой")
+# Standing items the owner already knows about; they ride along but never trigger a push on their own.
+STANDING_KEYS = ("Security setup", "Безопасность")
 
 
 def parse_inbox(body: str) -> List[Tuple[str, List[dict]]]:
@@ -35,7 +37,7 @@ def is_fyi(title: str) -> bool:
 
 
 def format_digest(product: str, sections: List[Tuple[str, List[dict]]], language: str = "en") -> str:
-    needs = sum(len(items) for title, items in sections if not is_fyi(title))
+    needs = needs_count(sections)
     lines = [HEADER.get(language, HEADER["en"]).format(product=product, n=needs), ""]
     for title, items in sections:
         if not items:
@@ -52,4 +54,12 @@ def format_digest(product: str, sections: List[Tuple[str, List[dict]]], language
 
 
 def needs_count(sections: List[Tuple[str, List[dict]]]) -> int:
-    return sum(len(items) for title, items in sections if not is_fyi(title))
+    """What justifies a push: everything except FYI and standing items."""
+    return sum(len(items) for title, items in sections if not is_fyi(title) and not title.startswith(STANDING_KEYS))
+
+
+def truncate_bytes(text: str, limit: int) -> str:
+    data = text.encode("utf-8")
+    if len(data) <= limit:
+        return text
+    return data[: limit - 4].decode("utf-8", "ignore").rstrip() + "\n…"

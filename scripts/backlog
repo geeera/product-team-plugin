@@ -13,6 +13,7 @@ skills. Output is JSON on stdout; errors go to stderr with a non-zero exit.
                  --ask "what to answer" — anything else is the team's call (`backlog decide`)
   backlog ask N --owner-category C --ask "what to answer"
                  turn an existing issue into a policy-conform owner question (answer line on top, owner:* label)
+  backlog reversals [--days 14]  team decisions the owner answered with /reject since they were made
   backlog decide N (--body B | --body-file F) [--close]
                  record a team decision on the issue (label team-decided); --close closes a question it answers
   backlog move N STATUS [--reason TEXT]          set the single status:* label (done closes the issue)
@@ -33,7 +34,7 @@ import argparse
 import json
 import os
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from urllib.parse import quote
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -169,15 +170,38 @@ def cmd_ask(repo: str, args) -> None:
         body = owner.question_body(args.ask, body, args.owner_category, project.owner_language())
     except ValueError as exc:
         sys.exit(str(exc))
+    if any(l["name"] == "design:awaiting-approval" for l in issue["labels"]):
+        sys.exit("designs are answered on their issue as they are (the inbox shows /approve · /reject); not a question")
     labels = sorted({l["name"] for l in issue["labels"] if not l["name"].startswith(("owner:", "kind:"))}
                     | {"kind:question", f"owner:{args.owner_category}"})
     out(slim(gh.api(f"repos/{repo}/issues/{args.number}", "PATCH", {"body": body, "labels": labels})))
 
 
+def cmd_reversals(repo: str, args) -> None:
+    owner_login = gh.owner_login(repo)
+    since = (datetime.now(KYIV) - timedelta(days=args.days)).isoformat(timespec="seconds")
+    found = []
+    for issue in gh.api_list(f"repos/{repo}/issues?state=all&labels=team-decided&since={quote(since)}&per_page=100"):
+        if "pull_request" in issue:
+            continue
+        comments = gh.api_list(f"repos/{repo}/issues/{issue['number']}/comments?per_page=100")
+        rejection = owner.reversed_by_owner(comments, owner_login)
+        if rejection:
+            found.append(dict(slim(issue), reason=rejection.get("text", ""), at=rejection.get("at")))
+    out(found)
+
+
 def cmd_decide(repo: str, args) -> None:
-    c = gh.api(f"repos/{repo}/issues/{args.number}/comments", "POST", {"body": owner.decision_comment(body_arg(args))})
+    text = body_arg(args).strip()
+    if not text:
+        sys.exit("a team decision needs its reasoning: --body or --body-file")
     issue = gh.api(f"repos/{repo}/issues/{args.number}")
-    labels = sorted({l["name"] for l in issue["labels"]} | {"team-decided"})
+    current = {l["name"] for l in issue["labels"]}
+    if args.close and "kind:question" not in current:
+        sys.exit("--close is only for questions a decision answers; move other issues through their status")
+    c = gh.api(f"repos/{repo}/issues/{args.number}/comments", "POST", {"body": owner.decision_comment(text)})
+    # A decided question is no longer the owner's: drop owner:* so it leaves "Questions" and shows as FYI only.
+    labels = sorted({l for l in current if not l.startswith("owner:")} | {"team-decided"})
     patch = {"labels": labels}
     if args.close:
         patch.update(state="closed", state_reason="completed")
@@ -293,6 +317,7 @@ def main() -> None:
     cr.add_argument("--label", action="append"); cr.add_argument("--milestone")
     cr.add_argument("--body"); cr.add_argument("--body-file")
     cr.add_argument("--owner-category", choices=sorted(owner.CATEGORIES)); cr.add_argument("--ask")
+    rv = sub.add_parser("reversals"); rv.add_argument("--days", type=int, default=14)
     ak = sub.add_parser("ask"); ak.add_argument("number", type=int)
     ak.add_argument("--owner-category", required=True, choices=sorted(owner.CATEGORIES)); ak.add_argument("--ask", required=True)
     de = sub.add_parser("decide"); de.add_argument("number", type=int); de.add_argument("--body"); de.add_argument("--body-file")
@@ -310,7 +335,7 @@ def main() -> None:
     args = p.parse_args()
 
     handlers = {
-        "init": cmd_init, "list": cmd_list, "show": cmd_show, "create": cmd_create, "move": cmd_move, "close": cmd_close, "decide": cmd_decide, "ask": cmd_ask, "milestone": cmd_milestone,
+        "init": cmd_init, "list": cmd_list, "show": cmd_show, "create": cmd_create, "move": cmd_move, "close": cmd_close, "decide": cmd_decide, "ask": cmd_ask, "reversals": cmd_reversals, "milestone": cmd_milestone,
         "label": cmd_label, "comment": cmd_comment, "link-pr": cmd_link_pr, "answers": cmd_answers,
         "sprint": cmd_sprint, "next": cmd_next,
     }

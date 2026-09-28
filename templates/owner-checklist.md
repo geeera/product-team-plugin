@@ -51,7 +51,8 @@ Set `owner.language` in `.product-team/project.yml` to `ru` for the digest and q
 ## Claude
 - [ ] Scheduled routines created for `slot-pm`, `slot-dev`, `slot-qa` (see the plugin README)
 - [ ] Project chat created for owner ↔ team conversation
-- [ ] GitHub mobile notifications on for issues labelled `kind:question`, `design:awaiting-approval`, `team:demo`
+- [ ] One digest channel set up (see "Daily digest on your phone") — GitHub notifications do not show the agents'
+      questions while they write as your account
 
 ## Budget
 Budget is **$0**. Any paid plan, upgrade or domain arrives as a `kind:question` issue; nothing is bought without

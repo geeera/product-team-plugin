@@ -40,11 +40,16 @@ an owner command that appeared in the same run in which an agent commented on th
   - `/reject why` → hand to `ui-designer` (visual) or `ux-designer` (flow) with the reason for a revision (same run if within caps), keep
     `status:blocked`.
   - nothing → leave it blocked. Never approve on the owner's behalf.
-- **Re-triage questions** under `${CLAUDE_PLUGIN_ROOT}/reference/decision-policy.md`: an open `kind:question` without
-  an `owner:*` label, or whose subject is the team's to decide (a technical choice, a name, an identifier, a key
-  layout), gets decided now by the right role and closed with `B decide N --close --body-file <decision and why>`.
-  Only owner decisions stay open; one without an answer line gets it with `B ask N --owner-category <c> --ask
-  "<what to answer, recommendation first>"`.
+- **Re-triage questions** under `${CLAUDE_PLUGIN_ROOT}/reference/decision-policy.md`. For each open `kind:question`
+  without an `owner:*` label (older questions have none — the label is not the test, the subject is):
+  - it asks for money, scope, a release, an account/secret/permission, a legal call or a design approval → it
+    stays: `B ask N --owner-category <c> --ask "<what to answer, recommendation first>"`;
+  - it asks for a technical choice, a name, an identifier, a key layout, an order of work → the right role decides
+    now and closes it: `B decide N --close --body-file <decision and why>`;
+  - `team:demo` issues are always the owner's (`release`) — never close them this way.
+- **Reversals**: `B reversals` lists team decisions the owner answered with `/reject why`. For each, reopen the
+  work with the owner's reason: redo the decision, or turn it into an owner question with `B ask` if the owner
+  wants to decide it.
 - **Questions**: for each open `kind:question`, read answers and act (e.g. a cost approved → unblock the
   dependent issue; `/reject` → record and close with `B close`).
 - **Demo**: if the current or previous sprint's `team:demo` issue has decisions that were not applied yet, run

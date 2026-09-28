@@ -10,8 +10,8 @@ TEXT: Dict[str, Dict[str, tuple]] = {
     "en": {
         "setup": ("Security setup", "Until this is done, agents can imitate your approvals"),
         "paused": ("Team is paused", "Check the failed runs, then comment `/resume` on the run log"),
-        "release": ("Release decision", "Answer on the demo issue"),
-        "design": ("Designs to approve", "Open the link, then answer on the issue"),
+        "release": ("Release decision", "On the demo issue: `/go` or `/no-go why`"),
+        "design": ("Designs to approve", "Open the link, then `/approve` or `/reject why` on the issue"),
         "question": ("Questions", "Each line says what to answer"),
         "owner": ("Only you can do", "Payment, account or decision described on the issue"),
         "local": ("Needs your machine", "Run locally (e.g. on a Mac); the issue says what"),
@@ -23,8 +23,8 @@ TEXT: Dict[str, Dict[str, tuple]] = {
     "ru": {
         "setup": ("Безопасность", "Пока это не сделано, агенты могут изобразить твоё одобрение"),
         "paused": ("Команда на паузе", "Посмотри упавшие запуски и напиши `/resume` в журнале запусков"),
-        "release": ("Решение о релизе", "Ответь в issue демо"),
-        "design": ("Дизайн на утверждение", "Открой ссылку и ответь в issue"),
+        "release": ("Решение о релизе", "В issue демо: `/go` или `/no-go причина`"),
+        "design": ("Дизайн на утверждение", "Открой ссылку, затем `/approve` или `/reject причина` в issue"),
         "question": ("Вопросы", "В каждой строке написано, что ответить"),
         "owner": ("Только ты можешь", "Оплата, аккаунт или решение — описано в issue"),
         "local": ("Нужен твой компьютер", "Запустить локально (например, на Mac); что именно — в issue"),

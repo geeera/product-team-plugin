@@ -38,6 +38,15 @@ def ask_of(body: str) -> Optional[str]:
     return m.group(1).strip() if m else None
 
 
+def reversed_by_owner(comments: list, owner_login: str) -> dict:
+    """The owner's `/reject` written after the latest team decision on an issue, or {}."""
+    decided_at = max((c.get("created_at") or "" for c in comments if DECISION_MARKER in (c.get("body") or "")), default="")
+    if not decided_at:
+        return {}
+    from . import commands  # local import keeps owner.py free of the command grammar for its other callers
+    return commands.latest(commands.parse(comments, owner_login), ["reject"], since=decided_at)
+
+
 def decision_comment(text: str) -> str:
     return (f"{DECISION_MARKER}\n**Decided by the team** (not an owner decision under the decision policy; the "
             f"owner can reverse it with `/reject why`).\n\n{text.strip()}\n")

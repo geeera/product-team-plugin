@@ -7,7 +7,7 @@ model: claude-opus-5-5
 # QA regression on `stage`
 
 Runs inside the calling slot's run protocol. `B` = `${CLAUDE_PLUGIN_ROOT}/scripts/backlog`. Stage URL:
-`environments.stage.url` in `.product-team/project.yml` (missing → `kind:question` for devops/owner, stop).
+`environments.stage.url` in `.product-team/project.yml` (missing → `devops` sets it up; only a missing account or secret becomes an `access` question, then stop).
 
 1. **Run the suite** — `qa-runner` agent: full `e2e` command with `BASE_URL=<stage url>` on a checkout of `stage`,
    plus the a11y assertions. It reports failures with evidence; no code changes.

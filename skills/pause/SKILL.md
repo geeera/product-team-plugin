@@ -27,7 +27,7 @@ switched off, which stops every run and all quota use, and keeps their schedule 
 3. Write the record to a temp file and `R/runlog pause --record-file <file> --reason "<owner's words>"`:
    `{"routines": [{"id", "name", "cron", "model", "environment_id", "prompt", "was_enabled"}], "workflows": [...]}`.
    This labels the run log `team:paused` (any run that still fires does no work) and stores the record.
-4. `R/inbox update`.
+4. `R/inbox update`. Keep `owner-digest.yml` on: it is how the owner hears about anything urgent while paused.
 
 ## 3. Report
 One short message: what was switched off, where the record is (run-log link), what stays on, and that "продолжим" /

@@ -4,6 +4,7 @@
   workflows list                 name, file, state
   workflows disable FILE...      e.g. renovate.yml
   workflows enable FILE...
+  workflows run FILE             start a workflow_dispatch run on the default branch (e.g. owner-digest.yml)
 """
 from __future__ import annotations
 
@@ -21,6 +22,7 @@ def main() -> None:
     p = argparse.ArgumentParser(prog="workflows", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("list")
+    sub.add_parser("run").add_argument("file")
     for name in ("disable", "enable"):
         sub.add_parser(name).add_argument("files", nargs="+")
     args = p.parse_args()
@@ -30,6 +32,11 @@ def main() -> None:
             flows = gh.api(f"repos/{repo}/actions/workflows?per_page=100").get("workflows", [])
             print(json.dumps([{"name": w["name"], "file": w["path"].rsplit("/", 1)[-1], "state": w["state"]}
                               for w in flows], indent=2))
+            return
+        if args.cmd == "run":
+            branch = gh.api(f"repos/{repo}")["default_branch"]
+            gh.api(f"repos/{repo}/actions/workflows/{quote(args.file, safe='')}/dispatches", "POST", {"ref": branch})
+            print(json.dumps({"started": args.file, "ref": branch}))
             return
         for f in args.files:
             gh.api(f"repos/{repo}/actions/workflows/{quote(f, safe='')}/{args.cmd}", "PUT")

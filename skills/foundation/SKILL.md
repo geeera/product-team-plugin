@@ -15,7 +15,7 @@ Parallelise only where marked.
 1. **Architecture skeleton** (`architect`): project structure per the stack decision and the owner's baseline
    (Feature-Sliced Design on the frontend, shared-first), error handling, config/env access, logging, API
    conventions, one vertical "hello" slice proving the layers. Decision records for each non-obvious choice.
-2. **CI + security** (`devops`, parallel with 3): `ci.yml`, `security.yml` and `branch-guard.yml` from
+2. **CI + security** (`devops`, parallel with 3): `ci.yml`, `security.yml`, `branch-guard.yml` and `owner-digest.yml` from
    `${CLAUDE_PLUGIN_ROOT}/templates/workflows/` filled for the stack; `Dockerfile`; commands written into
    `.product-team/project.yml`.
 3. **Tokens** (`ui-designer`, parallel with 2): the complete token set from `design-system.md` for the chosen visual
@@ -26,7 +26,7 @@ Parallelise only where marked.
    library, each with stories for variants, states, both themes and reduced motion. Storybook deploys with `dev`.
 5. **Deploy** (`devops`): dev / stage / production from Actions on the chosen free tiers
    (`reference/deploy-recipes.md`, `templates/workflows/deploy.yml`); URLs into `project.yml`; a rollback
-   rehearsal (manual deploy of the previous ref to `stage`) before the first release. Missing accounts or secrets → owner checklist + `kind:question`, and the issue waits.
+   rehearsal (manual deploy of the previous ref to `stage`) before the first release. Missing accounts or secrets → owner checklist + an `access` question, and the issue waits.
 6. **E2E harness** (`fullstack-dev`): runs against `BASE_URL`, a11y assertions built in (axe or the stack's
    equivalent), one smoke test on the hello slice. Wired into CI with a paths filter.
 7. **Signature-moment prototypes** (`ux-designer` for the flow, then `ui-designer`): interactive prototypes for the `signature-moment` issues, sent for

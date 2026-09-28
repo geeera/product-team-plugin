@@ -9,6 +9,13 @@ skills. Output is JSON on stdout; errors go to stderr with a non-zero exit.
   backlog show N                                 issue with body, labels, comments
   backlog create --title T --kind K [--status proposed] [--severity SEV] [--label L]...
                  [--milestone M|current] (--body B | --body-file F)
+                 kind question also needs --owner-category money|scope|release|access|legal|design and
+                 --ask "what to answer" — anything else is the team's call (`backlog decide`)
+  backlog ask N --owner-category C --ask "what to answer"
+                 turn an existing issue into a policy-conform owner question (answer line on top, owner:* label)
+  backlog reversals [--days 14]  team decisions the owner answered with /reject since they were made
+  backlog decide N (--body B | --body-file F) [--close]
+                 record a team decision on the issue (label team-decided); --close closes a question it answers
   backlog move N STATUS [--reason TEXT]          set the single status:* label (done closes the issue)
   backlog milestone N TITLE|current|none         put the issue into a sprint (or remove it)
   backlog close N [--reason TEXT]                close as not planned (rejected, duplicate, obsolete)
@@ -27,11 +34,11 @@ import argparse
 import json
 import os
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from urllib.parse import quote
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from ptlib import commands, gh, picker, project  # noqa: E402
+from ptlib import commands, gh, owner, picker, project  # noqa: E402
 from ptlib.calendar import KYIV, compute, pick_current_sprint  # noqa: E402
 from ptlib.labels import LABELS, STATUSES, KINDS, SEVERITIES  # noqa: E402
 
@@ -135,15 +142,70 @@ def cmd_create(repo: str, args) -> None:
     if args.status not in STATUSES:
         sys.exit(f"unknown status {args.status}; one of {STATUSES}")
     labels = [f"kind:{args.kind}", f"status:{args.status}"] + list(args.label or [])
+    body = body_arg(args)
+    if args.kind == "question":
+        # The decision policy, enforced: only owner decisions become questions, and each says how to answer.
+        try:
+            body = owner.question_body(args.ask or "", body, args.owner_category or "", project.owner_language())
+        except ValueError as exc:
+            sys.exit(str(exc))
+        labels.append(f"owner:{args.owner_category}")
     if args.severity:
         if args.severity not in SEVERITIES:
             sys.exit(f"unknown severity {args.severity}; one of {SEVERITIES}")
         labels.append(f"sev:{args.severity}")
-    payload = {"title": args.title, "body": body_arg(args), "labels": labels}
+    payload = {"title": args.title, "body": body, "labels": labels}
     ms = resolve_milestone(repo, args.milestone)
     if ms:
         payload["milestone"] = ms["number"]
     out(slim(gh.api(f"repos/{repo}/issues", "POST", payload)))
+
+
+def cmd_ask(repo: str, args) -> None:
+    issue = gh.api(f"repos/{repo}/issues/{args.number}")
+    body = issue.get("body") or ""
+    if owner.ask_of(body):  # replace an existing answer line rather than stacking two
+        body = body.split(owner.ASK_MARKER, 1)[-1]
+    try:
+        body = owner.question_body(args.ask, body, args.owner_category, project.owner_language())
+    except ValueError as exc:
+        sys.exit(str(exc))
+    if any(l["name"] == "design:awaiting-approval" for l in issue["labels"]):
+        sys.exit("designs are answered on their issue as they are (the inbox shows /approve · /reject); not a question")
+    labels = sorted({l["name"] for l in issue["labels"] if not l["name"].startswith(("owner:", "kind:"))}
+                    | {"kind:question", f"owner:{args.owner_category}"})
+    out(slim(gh.api(f"repos/{repo}/issues/{args.number}", "PATCH", {"body": body, "labels": labels})))
+
+
+def cmd_reversals(repo: str, args) -> None:
+    owner_login = gh.owner_login(repo)
+    since = (datetime.now(KYIV) - timedelta(days=args.days)).isoformat(timespec="seconds")
+    found = []
+    for issue in gh.api_list(f"repos/{repo}/issues?state=all&labels=team-decided&since={quote(since)}&per_page=100"):
+        if "pull_request" in issue:
+            continue
+        comments = gh.api_list(f"repos/{repo}/issues/{issue['number']}/comments?per_page=100")
+        rejection = owner.reversed_by_owner(comments, owner_login)
+        if rejection:
+            found.append(dict(slim(issue), reason=rejection.get("text", ""), at=rejection.get("at")))
+    out(found)
+
+
+def cmd_decide(repo: str, args) -> None:
+    text = body_arg(args).strip()
+    if not text:
+        sys.exit("a team decision needs its reasoning: --body or --body-file")
+    issue = gh.api(f"repos/{repo}/issues/{args.number}")
+    current = {l["name"] for l in issue["labels"]}
+    if args.close and "kind:question" not in current:
+        sys.exit("--close is only for questions a decision answers; move other issues through their status")
+    c = gh.api(f"repos/{repo}/issues/{args.number}/comments", "POST", {"body": owner.decision_comment(text)})
+    # A decided question is no longer the owner's: drop owner:* so it leaves "Questions" and shows as FYI only.
+    labels = sorted({l for l in current if not l.startswith("owner:")} | {"team-decided"})
+    patch = {"labels": labels}
+    if args.close:
+        patch.update(state="closed", state_reason="completed")
+    out(dict(slim(gh.api(f"repos/{repo}/issues/{args.number}", "PATCH", patch)), decision_url=c["html_url"]))
 
 
 def cmd_move(repo: str, args) -> None:
@@ -254,6 +316,12 @@ def main() -> None:
     cr.add_argument("--status", default="proposed"); cr.add_argument("--severity")
     cr.add_argument("--label", action="append"); cr.add_argument("--milestone")
     cr.add_argument("--body"); cr.add_argument("--body-file")
+    cr.add_argument("--owner-category", choices=sorted(owner.CATEGORIES)); cr.add_argument("--ask")
+    rv = sub.add_parser("reversals"); rv.add_argument("--days", type=int, default=14)
+    ak = sub.add_parser("ask"); ak.add_argument("number", type=int)
+    ak.add_argument("--owner-category", required=True, choices=sorted(owner.CATEGORIES)); ak.add_argument("--ask", required=True)
+    de = sub.add_parser("decide"); de.add_argument("number", type=int); de.add_argument("--body"); de.add_argument("--body-file")
+    de.add_argument("--close", action="store_true")
     mv = sub.add_parser("move"); mv.add_argument("number", type=int); mv.add_argument("status"); mv.add_argument("--reason")
     ms = sub.add_parser("milestone"); ms.add_argument("number", type=int); ms.add_argument("title")
     cl = sub.add_parser("close"); cl.add_argument("number", type=int); cl.add_argument("--reason")
@@ -267,7 +335,7 @@ def main() -> None:
     args = p.parse_args()
 
     handlers = {
-        "init": cmd_init, "list": cmd_list, "show": cmd_show, "create": cmd_create, "move": cmd_move, "close": cmd_close, "milestone": cmd_milestone,
+        "init": cmd_init, "list": cmd_list, "show": cmd_show, "create": cmd_create, "move": cmd_move, "close": cmd_close, "decide": cmd_decide, "ask": cmd_ask, "reversals": cmd_reversals, "milestone": cmd_milestone,
         "label": cmd_label, "comment": cmd_comment, "link-pr": cmd_link_pr, "answers": cmd_answers,
         "sprint": cmd_sprint, "next": cmd_next,
     }

@@ -42,4 +42,4 @@ team:
 
 owner:
   timezone: Europe/Kyiv
-  language: en           # language of owner-facing summaries and questions
+  language: en           # en | ru — questions, the inbox and the daily digest

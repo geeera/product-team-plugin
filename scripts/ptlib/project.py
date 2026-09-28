@@ -45,6 +45,16 @@ def reviewer_logins(path: str = PROJECT_FILE) -> list:
     return logins
 
 
+def owner_language(path: str = PROJECT_FILE) -> str:
+    """`owner.language` — the language of questions and the daily digest (en | ru)."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            m = re.search(r"^\s*language:\s*['\"]?(\w+)", f.read(), re.MULTILINE)
+    except FileNotFoundError:
+        return "en"
+    return m.group(1) if m else "en"
+
+
 def freeze_days(path: str = PROJECT_FILE) -> int:
     try:
         with open(path, encoding="utf-8") as f:

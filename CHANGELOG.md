@@ -4,6 +4,23 @@ Products follow the `stable` channel (or a pinned tag, `team.plugin_ref` in `.pr
 first `slot-pm` of the day runs `vendor self-update` and opens a PR with the entries in between. Breaking changes (a renamed label, a changed script contract, a new required
 `project.yml` key) are marked **Breaking** with the migration step.
 
+## 0.8.0
+
+- **Decision policy** (`reference/decision-policy.md`): the owner decides only money, scope, release, access,
+  legal and design approvals. `backlog create --kind question` requires `--owner-category` and `--ask` (the answer
+  line, first in the issue) and refuses anything else; `backlog decide` records a team decision (`team-decided`,
+  FYI in the digest, reversible with `/reject`); `backlog ask` fixes existing questions. `slot-pm` re-triages open
+  questions and closes the team's own.
+- **Daily digest to the phone**: `owner-digest.yml` + `scripts/digest` send the pinned inbox through Telegram or ntfy
+  every morning, and at once on demo day. Needed because GitHub never notifies you about comments made with your
+  own account — which is how the agents write.
+- **Inbox**: answer line per question, "Decided by the team (FYI)", owner language (`owner.language: ru`).
+- `backlog reversals`: team decisions the owner answered with `/reject`; `slot-pm` reopens them.
+- `scripts/workflows run FILE`. New labels `owner:*`, `team-decided`. Run `backlog init` once; add
+  `owner-digest.yml` and one digest channel (owner checklist).
+- **Breaking** — `backlog create --kind question` now requires `--owner-category` and `--ask`. Existing questions
+  keep working; `slot-pm` adds the answer line to the ones that stay the owner's.
+
 ## 0.7.0
 
 - **Pause and resume by asking.** `pause` (the owner says "pause development") switches off this repository's

@@ -48,7 +48,7 @@ Also run the owner's `engineering-baseline:conformance-audit` if installed, to r
   `.claude/skills/`, scripts and references to `.claude/product-team/`. Cloud sessions load these from the clone;
   they never install plugins listed in `.claude/settings.json`. `vendor` refuses to overwrite the project's own
   agents or skills of the same name — rename the plugin's side only by changing the plugin.
-- CI: only add what is missing from the contract (security workflow, `branch-guard.yml`, concurrency, e2e
+- CI: only add what is missing from the contract (security workflow, `branch-guard.yml`, `owner-digest.yml`, concurrency, e2e
   hook); never replace working pipelines. A missing deploy becomes a Sprint 01 question with options from
   `reference/deploy-recipes.md`.
 

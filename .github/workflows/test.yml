@@ -32,4 +32,4 @@ jobs:
           cd /tmp/product && for s in backlog pr runlog slot-context inbox vendor; do python .claude/product-team/scripts/$s --help > /dev/null; done
           ! grep -rl 'CLAUDE_PLUGIN_ROOT' .claude/agents .claude/skills
       - name: Scripts start
-        run: for s in backlog runlog slot-context demo-page inbox sprint-metrics pr vendor workflows; do python scripts/$s --help > /dev/null; done
+        run: for s in backlog runlog slot-context demo-page inbox sprint-metrics pr vendor workflows digest; do python scripts/$s --help > /dev/null; done

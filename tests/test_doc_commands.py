@@ -1,4 +1,8 @@
 """Every script command the agents are told to run must exist with the flags they are told to pass."""
+try:  # first: no test may read real credentials or run `gh auth token` (tests/_isolation.py)
+    from . import _isolation  # noqa: F401
+except ImportError:  # `unittest discover -s tests` imports test modules without their package
+    import _isolation  # noqa: F401
 import functools
 import re
 import subprocess

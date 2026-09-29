@@ -1,3 +1,7 @@
+try:  # first: no test may read real credentials or run `gh auth token` (tests/_isolation.py)
+    from . import _isolation  # noqa: F401
+except ImportError:  # `unittest discover -s tests` imports test modules without their package
+    import _isolation  # noqa: F401
 import base64
 import contextlib
 import importlib.machinery
@@ -164,16 +168,16 @@ class PushTest(unittest.TestCase):
         argv, kwargs = self.pushes[-1]
         self.assertEqual(argv, ["git", "push", "https://github.com/o/r.git",
                                 "refs/heads/feature/7-x:refs/heads/feature/7-x"])
-        self.assertFalse([a for a in argv if SECRET in a or BASIC in a])
+        self.assertFalse(any(SECRET in a or BASIC in a for a in argv), "token in argv")
         env = kwargs["env"]
         self.assertEqual(env["GIT_CONFIG_KEY_1"], "http.https://github.com/.extraheader")
-        self.assertEqual(env["GIT_CONFIG_VALUE_1"], f"AUTHORIZATION: basic {BASIC}")
+        self.assertTrue(env["GIT_CONFIG_VALUE_1"] == f"AUTHORIZATION: basic {BASIC}", "token mismatch")
         self.assertEqual((env["GIT_CONFIG_KEY_0"], env["GIT_CONFIG_VALUE_0"]), (env["GIT_CONFIG_KEY_1"], ""))
         self.assertEqual((env["GIT_CONFIG_KEY_2"], env["GIT_CONFIG_VALUE_2"]), ("credential.helper", ""))
         self.assertEqual((env["GIT_CONFIG_GLOBAL"], env["GIT_CONFIG_NOSYSTEM"]), (os.devnull, "1"))
         self.assertEqual(env["GIT_TERMINAL_PROMPT"], "0")
-        self.assertNotIn(SECRET, (Path(self.repo) / ".git" / "config").read_text())
-        self.assertNotIn(SECRET, json.dumps(result))
+        self.assertFalse(SECRET in (Path(self.repo) / ".git" / "config").read_text(), "token leaked")
+        self.assertFalse(SECRET in json.dumps(result), "token leaked")
         self.assertEqual(result["as"], "acme-team[bot]")
 
     def test_insteadof_rewrite_of_github_is_refused_before_pushing(self):
@@ -219,14 +223,14 @@ class PushTest(unittest.TestCase):
                  mock.patch.object(pr.gh, "token_login", return_value="acme-team[bot]"), \
                  mock.patch.object(pr.subprocess, "run", side_effect=self.fake_run):
                 pr.main()  # no --branch: the current branch
-        self.assertNotIn(SECRET, stdout.getvalue())
+        self.assertFalse(SECRET in stdout.getvalue(), "token leaked")
         self.assertIn('"branch": "feature/7-x"', stdout.getvalue())
 
     def test_a_failed_push_scrubs_the_token_from_the_error(self):
         with self.assertRaises(pr.gh.GhError) as caught:
             self.run_push(returncode=128, stderr=f"fatal: auth failed x-access-token:{SECRET} {BASIC}".encode())
-        self.assertNotIn(SECRET, str(caught.exception))
-        self.assertNotIn(BASIC, str(caught.exception))
+        self.assertFalse(SECRET in str(caught.exception), "token leaked")
+        self.assertFalse(BASIC in str(caught.exception), "token leaked")
 
     def test_only_team_branch_prefixes_are_pushed(self):
         for branch in ("dev", "stage", "main", "master", "gh-pages", "+feature/x", "+x", "HEAD:dev",

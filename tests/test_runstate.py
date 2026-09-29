@@ -1,3 +1,7 @@
+try:  # first: no test may read real credentials or run `gh auth token` (tests/_isolation.py)
+    from . import _isolation  # noqa: F401
+except ImportError:  # `unittest discover -s tests` imports test modules without their package
+    import _isolation  # noqa: F401
 import sys
 import unittest
 from datetime import datetime, timezone

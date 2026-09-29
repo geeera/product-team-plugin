@@ -1,4 +1,8 @@
 """Static checks on the plugin's own files: what `claude plugin validate` would reject, plus the plugin's rules."""
+try:  # first: no test may read real credentials or run `gh auth token` (tests/_isolation.py)
+    from . import _isolation  # noqa: F401
+except ImportError:  # `unittest discover -s tests` imports test modules without their package
+    import _isolation  # noqa: F401
 import json
 import re
 import unittest
@@ -29,6 +33,12 @@ class ManifestTest(unittest.TestCase):
         self.assertRegex(plugin["version"], r"^\d+\.\d+\.\d+$")
         # Two places name the version; a stale marketplace entry would advertise the wrong release.
         self.assertEqual(market["plugins"][0].get("version", plugin["version"]), plugin["version"])
+
+    def test_every_test_module_is_isolated_from_real_credentials(self):
+        for path in sorted((ROOT / "tests").glob("test_*.py")):
+            with self.subTest(path=path.name):
+                body = path.read_text(encoding="utf-8").split("\nimport ", 1)[0]  # before the first plain import
+                self.assertIn("import _isolation", body)
 
     def test_changelog_has_the_current_version(self):
         version = json.loads((ROOT / ".claude-plugin/plugin.json").read_text())["version"]

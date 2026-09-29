@@ -46,12 +46,17 @@ def child_env(**extra: str) -> dict:
     return env
 
 
+def _run_gh_auth_token() -> "subprocess.CompletedProcess[str]":
+    """The one place a real credential is read from the `gh` CLI (the test suite replaces it with a tripwire)."""
+    return subprocess.run(["gh", "auth", "token"], capture_output=True, text=True, check=False, env=child_env())
+
+
 def _gh_cli_token() -> str:
     global _cli_token_cache
     if _cli_token_cache is None:
         _cli_token_cache = ""
         if shutil.which("gh"):
-            proc = subprocess.run(["gh", "auth", "token"], capture_output=True, text=True, check=False, env=child_env())
+            proc = _run_gh_auth_token()
             _cli_token_cache = proc.stdout.strip() if proc.returncode == 0 else ""
     return _cli_token_cache
 

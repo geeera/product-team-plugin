@@ -1,4 +1,8 @@
 """Who counts as the owner speaking: same-account mode vs the agents acting as a GitHub App."""
+try:  # first: no test may read real credentials or run `gh auth token` (tests/_isolation.py)
+    from . import _isolation  # noqa: F401
+except ImportError:  # `unittest discover -s tests` imports test modules without their package
+    import _isolation  # noqa: F401
 import importlib.machinery
 import importlib.util
 import io
@@ -79,13 +83,13 @@ class AnswerCliTest(unittest.TestCase):
 
     def test_answer_is_posted_with_the_owners_token(self):
         posted, _ = self.run_cli(["answer", "7", "--command", "approve", "--owner-said", "да"], app_mode=True)
-        self.assertEqual(posted[0]["auth"], "owner-pat")
+        self.assertTrue(posted[0]["auth"] == "owner-pat", "token mismatch")
         self.assertTrue(posted[0]["body"].startswith("/approve"))
 
     def test_same_account_answer_uses_the_agents_own_token(self):
         posted, _ = self.run_cli(["answer", "7", "--command", "approve", "--owner-said", "да"], app_mode=False,
                                  owner_token=None)
-        self.assertIsNone(posted[0]["auth"])
+        self.assertTrue(posted[0]["auth"] is None, "expected no token")
 
     def test_answer_without_the_owners_token_in_app_mode_fails_cleanly(self):
         with self.assertRaises(SystemExit) as caught:

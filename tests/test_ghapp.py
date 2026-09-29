@@ -1,3 +1,7 @@
+try:  # first: no test may read real credentials or run `gh auth token` (tests/_isolation.py)
+    from . import _isolation  # noqa: F401
+except ImportError:  # `unittest discover -s tests` imports test modules without their package
+    import _isolation  # noqa: F401
 import base64
 import json
 import os
@@ -231,7 +235,7 @@ class InstallationTokenTest(IsolatedTest):
     def test_mints_a_token_scoped_to_the_repository_with_the_jwt(self):
         fake = FakeGitHub()
         with mock.patch.object(gh, "api", side_effect=fake):
-            self.assertEqual(ghapp.installation_token("team", "o/r"), "ghs_token1")
+            self.assertTrue(ghapp.installation_token("team", "o/r") == "ghs_token1", "token mismatch")
         self.assertEqual(fake.calls[0], ("GET", "repos/o/r/installation", None, "the.jwt"))
         self.assertEqual(fake.calls[1], ("POST", "app/installations/42/access_tokens", {"repositories": ["r"]}, "the.jwt"))
 
@@ -239,14 +243,14 @@ class InstallationTokenTest(IsolatedTest):
         fake = FakeGitHub()
         with mock.patch.object(gh, "api", side_effect=fake):
             ghapp.installation_token("team", "o/r")
-            self.assertEqual(ghapp.installation_token("team", "o/r"), "ghs_token1")
+            self.assertTrue(ghapp.installation_token("team", "o/r") == "ghs_token1", "token mismatch")
         self.assertEqual(fake.minted, 1)
 
     def test_renewed_inside_the_refresh_margin(self):
         fake = FakeGitHub(expires_in=ghapp.REFRESH_MARGIN - 10)
         with mock.patch.object(gh, "api", side_effect=fake):
             ghapp.installation_token("team", "o/r")
-            self.assertEqual(ghapp.installation_token("team", "o/r"), "ghs_token2")
+            self.assertTrue(ghapp.installation_token("team", "o/r") == "ghs_token2", "token mismatch")
         self.assertEqual(fake.minted, 2)
 
     def test_not_installed_and_clock_skew_are_explained(self):
@@ -278,15 +282,15 @@ class TokenPrecedenceTest(IsolatedTest):
     def test_team_app_wins_over_personal_tokens(self):
         with clean_env(PT_TEAM_APP_ID="1", PT_TEAM_APP_KEY_FILE="/k", GH_TOKEN="personal", PT_REPO="o/r"), \
              mock.patch.object(ghapp, "installation_token", return_value="ghs_app") as minted:
-            self.assertEqual(gh.token(), "ghs_app")
+            self.assertTrue(gh.token() == "ghs_app", "token mismatch")
         minted.assert_called_once_with("team", "o/r")
 
     def test_without_the_app_the_personal_chain_is_unchanged(self):
         with clean_env(GH_TOKEN="t1", GITHUB_TOKEN="t2"), mock.patch("shutil.which", return_value=None):
-            self.assertEqual(gh.token(), "t1")
+            self.assertTrue(gh.token() == "t1", "token mismatch")
         gh._token_cache = None
         with clean_env(GITHUB_TOKEN="t2"), mock.patch("shutil.which", return_value=None):
-            self.assertEqual(gh.token(), "t2")
+            self.assertTrue(gh.token() == "t2", "token mismatch")
 
     def test_a_failing_app_never_falls_back_to_the_personal_token(self):
         with clean_env(PT_TEAM_APP_ID="1", PT_TEAM_APP_KEY_FILE="/k", GH_TOKEN="personal", PT_REPO="o/r"), \
@@ -298,12 +302,12 @@ class TokenPrecedenceTest(IsolatedTest):
         with clean_env(PT_REVIEW_APP_ID="2", PT_REVIEW_APP_KEY_FILE="/k", PT_REVIEW_TOKEN="pat", PT_REPO="o/r"), \
              mock.patch.object(ghapp, "installation_token", return_value="ghs_review") as minted, \
              mock.patch.object(ghapp, "identity", return_value={"login": "acme-review[bot]"}):
-            self.assertEqual(gh.review_token(), "ghs_review")
+            self.assertTrue(gh.review_token() == "ghs_review", "token mismatch")
         minted.assert_called_once_with("review", "o/r")
         with clean_env(PT_REVIEW_TOKEN="pat"):
-            self.assertEqual(gh.review_token(), "pat")
+            self.assertTrue(gh.review_token() == "pat", "token mismatch")
         with clean_env():
-            self.assertIsNone(gh.review_token())
+            self.assertTrue(gh.review_token() is None, "expected no token")
             self.assertIsNone(gh.review_login())
 
     def test_personal_token_without_app_uses_get_user(self):
@@ -338,12 +342,12 @@ class OwnerTokenTest(IsolatedTest):
 
     def test_same_account_mode_needs_no_separate_token(self):
         with clean_env(GH_TOKEN="personal"):
-            self.assertIsNone(gh.owner_token("o/r"))
+            self.assertTrue(gh.owner_token("o/r") is None, "expected no token")
 
     def test_app_mode_uses_only_pt_owner_token(self):
         with clean_env(PT_OWNER_TOKEN="owner-pat", GH_TOKEN="gh-pat", **APP_ENV), \
              mock.patch.object(gh, "api", side_effect=github({"owner-pat": "GeeEra", "gh-pat": "geeera"})):
-            self.assertEqual(gh.owner_token("o/r"), "owner-pat")
+            self.assertTrue(gh.owner_token("o/r") == "owner-pat", "token mismatch")
 
     def test_app_mode_never_borrows_gh_token_or_gh_auth(self):
         gh._cli_token_cache = "cli-pat"

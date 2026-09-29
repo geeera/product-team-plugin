@@ -21,6 +21,7 @@ Conventions (statuses, kinds, severities, flags, milestones) are in
 | One issue with comments | `backlog show 42` |
 | New issue | `backlog create --title "…" --kind feature --body-file /tmp/body.md [--status proposed] [--severity high] [--label needs-design] [--milestone current]` |
 | Change status | `backlog move 42 in-progress [--reason "…"]` (`done` closes the issue) |
+| Rewrite title or body (e.g. after grooming) | `backlog edit 42 [--title "…"] [--body-file /tmp/b.md]` |
 | Flags | `backlog label 42 +design:approved -design:awaiting-approval` |
 | Move to a sprint | `backlog milestone 42 "Sprint 04"` (`current`, or `none` to remove) |
 | Close without doing it | `backlog close 42 --reason "owner rejected at demo"` (not planned) |

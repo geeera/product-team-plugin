@@ -61,18 +61,32 @@ def verdict(body, login, sha="head1"):
     return {"body": body, "commit_id": sha, "submitted_at": "2026-09-29T10:00:00Z", "user": {"login": login}}
 
 
+def run_gate(reviews, config="", files=("apps/web/page.tsx",), security=(), review_bot=None, same_account=False,
+             team_bot=None, ci_state="pass"):
+    """pr.gate with GitHub mocked: `config` is project.yml on the base branch, `files` the PR's changed paths."""
+    with mock.patch.object(pr, "view", return_value={"head_sha": "head1", "base": "dev"}), \
+         mock.patch.object(pr, "changed_files", return_value=list(files)), \
+         mock.patch.object(pr, "security_check", return_value=list(security)), \
+         mock.patch.object(pr, "ci", return_value={"state": ci_state, "failing": [], "pending": []}), \
+         mock.patch.object(pr.gh, "api_list", return_value=reviews), \
+         mock.patch.object(pr, "base_project_text", return_value=config) as base, \
+         mock.patch.object(pr.gh, "review_login", return_value=review_bot), \
+         mock.patch.object(pr.gh, "app_mode", return_value=team_bot is not None), \
+         mock.patch.object(pr.gh, "token_login", return_value=team_bot), \
+         mock.patch.object(pr.gh, "acts_as_owner", return_value=same_account):
+        result = pr.gate("o/r", 5)
+    base.assert_called_once_with("o/r", "dev")
+    return result
+
+
+def logins_yml(logins):
+    return "team:\n  reviewer_logins: [%s]\n" % ", ".join(f"'{x}'" for x in logins) if logins else ""
+
+
 class GateIdentityTest(unittest.TestCase):
     def gate(self, reviews, logins=(), review_bot=None, same_account=False, team_bot=None):
-        with mock.patch.object(pr, "view", return_value={"head_sha": "head1", "base": "dev"}), \
-             mock.patch.object(pr, "security_check", return_value=[]), \
-             mock.patch.object(pr, "ci", return_value={"state": "pass", "failing": [], "pending": []}), \
-             mock.patch.object(pr.gh, "api_list", return_value=reviews), \
-             mock.patch.object(pr, "base_reviewer_logins", return_value=list(logins)), \
-             mock.patch.object(pr.gh, "review_login", return_value=review_bot), \
-             mock.patch.object(pr.gh, "app_mode", return_value=team_bot is not None), \
-             mock.patch.object(pr.gh, "token_login", return_value=team_bot), \
-             mock.patch.object(pr.gh, "acts_as_owner", return_value=same_account):
-            return pr.gate("o/r", 5)
+        return run_gate(reviews, logins_yml(logins), review_bot=review_bot, same_account=same_account,
+                        team_bot=team_bot)
 
     def test_with_the_review_app_only_its_bot_can_pass_the_gate(self):
         forged = [verdict("QA: APPROVED", "acme-team[bot]"), verdict("REVIEW: APPROVED", "geeera")]
@@ -107,20 +121,125 @@ class GateIdentityTest(unittest.TestCase):
         self.assertIn("no reviewing identity", warning)
 
 
-class BaseReviewerLoginsTest(unittest.TestCase):
+class BaseProjectTextTest(unittest.TestCase):
     def test_reads_project_yml_from_the_base_branch_not_the_working_tree(self):
         with mock.patch.object(pr.gh, "raw", return_value="team:\n  reviewer_logins: ['acme-review[bot]']\n") as raw:
-            self.assertEqual(pr.base_reviewer_logins("o/r", "dev"), ["acme-review[bot]"])
-        self.assertEqual(raw.call_args[0][0], "repos/o/r/contents/.product-team/project.yml?ref=dev")
+            self.assertIn("acme-review[bot]", pr.base_project_text("o/r", "dev"))
+        self.assertEqual(raw.call_args[0][0], "repos/o/r/contents/.product-team/project.yml?ref=refs/heads/dev")
 
-    def test_no_project_yml_on_the_base_means_no_list(self):
+    def test_the_base_is_read_as_a_full_branch_ref(self):
+        with mock.patch.object(pr.gh, "raw", return_value="") as raw:
+            pr.base_project_text("o/r", "release/1.0 x")
+        self.assertTrue(raw.call_args[0][0].endswith("?ref=refs/heads/release/1.0%20x"))
+
+    def test_no_project_yml_on_the_base_means_empty_config(self):
         with mock.patch.object(pr.gh, "raw", side_effect=pr.gh.GhError("GET … → HTTP 404: Not Found")):
-            self.assertEqual(pr.base_reviewer_logins("o/r", "dev"), [])
+            self.assertEqual(pr.base_project_text("o/r", "dev"), "")
 
     def test_other_errors_are_not_swallowed(self):
         with mock.patch.object(pr.gh, "raw", side_effect=pr.gh.GhError("GET … → HTTP 500")):
             with self.assertRaises(pr.gh.GhError):
-                pr.base_reviewer_logins("o/r", "dev")
+                pr.base_project_text("o/r", "dev")
+
+
+PROPORTIONAL = """team:
+  reviewer_logins: []
+review:
+  qa: always
+  reviewer: code
+  code_paths: ["apps/**", "libs/**"]
+  max_rework_rounds: 1
+owner:
+  language: en
+"""
+BOTH = [verdict("QA: APPROVED", "x"), verdict("REVIEW: APPROVED", "x")]
+QA_ONLY = [verdict("QA: APPROVED", "x")]
+
+
+class RequiredVerdictsGateTest(unittest.TestCase):
+    """Which verdicts `pr gate` requires, from the review block of project.yml on the PR's base branch."""
+
+    def test_without_a_review_block_qa_and_review_are_required_on_every_pr(self):
+        for files in (["apps/web/page.tsx"], [".github/workflows/ci.yml"], ["docs/setup.md"]):
+            with self.subTest(files=files):
+                result = run_gate(QA_ONLY, "", files)
+                self.assertEqual(result["required"], ["QA", "REVIEW"])
+                self.assertEqual(result["missing"], ["REVIEW: no verdict"])
+                self.assertFalse(result["policy"]["configured"])
+                self.assertIn("default", result["why"]["REVIEW"]["why"])
+
+    def test_reviewer_code_pr_touching_only_ci_and_docs_needs_no_review(self):
+        result = run_gate(QA_ONLY, PROPORTIONAL, ["docs/setup.md", "README.md", ".github/workflows/ci.yml"],
+                          security=["dependencies or CI: .github/workflows/ci.yml"])
+        self.assertEqual(result["required"], ["QA", "SECURITY"])
+        self.assertFalse(result["why"]["REVIEW"]["required"])
+        self.assertIn("no changed path matches code_paths (apps/**, libs/**)", result["why"]["REVIEW"]["why"])
+        self.assertEqual(result["missing"], ["SECURITY: no verdict"])
+
+    def test_reviewer_code_docs_only_pr_passes_with_qa_alone(self):
+        result = run_gate(QA_ONLY, PROPORTIONAL, ["docs/setup.md"])
+        self.assertTrue(result["passed"], result["missing"])
+        self.assertEqual(result["required"], ["QA"])
+
+    def test_reviewer_code_pr_touching_apps_needs_review(self):
+        result = run_gate(QA_ONLY, PROPORTIONAL, ["docs/setup.md", "apps/web/src/page.tsx"])
+        self.assertEqual(result["required"], ["QA", "REVIEW"])
+        self.assertEqual(result["missing"], ["REVIEW: no verdict"])
+        self.assertIn("apps/web/src/page.tsx", result["why"]["REVIEW"]["why"])
+        self.assertTrue(run_gate(BOTH, PROPORTIONAL, ["libs/ui/button.ts"])["passed"])
+
+    def test_moving_code_out_of_a_code_path_still_needs_review(self):
+        # changed_files lists a rename's old path too
+        result = run_gate(QA_ONLY, PROPORTIONAL, ["tools/old.ts", "apps/web/old.ts"])
+        self.assertIn("REVIEW", result["required"])
+
+    def test_reviewer_never_and_qa_code(self):
+        config = "review:\n  qa: code\n  reviewer: never\n  code_paths:\n    - apps/**\n"
+        docs = run_gate([], config, ["docs/a.md"])
+        self.assertEqual(docs["required"], [])
+        self.assertTrue(docs["passed"])
+        code = run_gate([], config, ["apps/a.ts"])
+        self.assertEqual(code["required"], ["QA"])
+        self.assertIn("never", code["why"]["REVIEW"]["why"])
+
+    def test_security_is_required_whatever_the_policy_says(self):
+        config = "review:\n  qa: never\n  reviewer: never\n"
+        result = run_gate([], config, ["apps/api/auth.ts"], security=["sensitive path: apps/api/auth.ts"])
+        self.assertEqual(result["required"], ["SECURITY"])
+        self.assertTrue(result["why"]["SECURITY"]["required"])
+        self.assertIn("auth.ts", result["why"]["SECURITY"]["why"])
+
+    def test_every_verdict_gets_a_reason(self):
+        result = run_gate(BOTH, PROPORTIONAL, ["apps/a.ts"])
+        self.assertEqual(set(result["why"]), {"QA", "REVIEW", "SECURITY"})
+        self.assertIn("qa: always", result["why"]["QA"]["why"])
+        self.assertFalse(result["why"]["SECURITY"]["required"])
+        self.assertEqual(result["policy"]["max_rework_rounds"], 1)
+
+    def test_an_unreadable_review_block_fails_the_gate(self):
+        result = run_gate(BOTH, "review:\n  reviewer: sometimes\n", ["docs/a.md"])
+        self.assertFalse(result["passed"])
+        self.assertIn("review.reviewer", result["missing"][0])
+
+    def test_ci_still_decides(self):
+        result = run_gate(QA_ONLY, PROPORTIONAL, ["docs/a.md"], ci_state="fail")
+        self.assertFalse(result["passed"])
+        self.assertEqual(result["missing"], ["CI: fail"])
+
+    def test_the_policy_is_read_from_the_base_branch_not_the_pr(self):
+        # The PR adds a relaxed review block; dev has none, so REVIEW stays required.
+        with mock.patch.object(pr.gh, "raw", return_value="") as raw, \
+             mock.patch.object(pr, "view", return_value={"head_sha": "head1", "base": "dev"}), \
+             mock.patch.object(pr, "changed_files", return_value=[".product-team/project.yml", "docs/a.md"]), \
+             mock.patch.object(pr, "security_check", return_value=["agent tooling or gate config"]), \
+             mock.patch.object(pr, "ci", return_value={"state": "pass", "failing": [], "pending": []}), \
+             mock.patch.object(pr.gh, "api_list", return_value=QA_ONLY), \
+             mock.patch.object(pr.gh, "review_login", return_value=None), \
+             mock.patch.object(pr.gh, "app_mode", return_value=False), \
+             mock.patch.object(pr.gh, "acts_as_owner", return_value=False):
+            result = pr.gate("o/r", 5)
+        self.assertTrue(raw.call_args[0][0].endswith("?ref=refs/heads/dev"))
+        self.assertEqual(result["required"], ["QA", "REVIEW", "SECURITY"])
 
 
 SECRET = "ghs_S3CRETtoken"

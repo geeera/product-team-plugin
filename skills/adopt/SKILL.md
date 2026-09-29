@@ -41,7 +41,10 @@ Also run the owner's `engineering-baseline:conformance-audit` if installed, to r
   where decisions live, how the team works here.
 - Decision records: **reuse the project's own** folder and format. If none exists, create
   `docs/decisions/` and record "0001 — adopted by the product team" with the audit summary.
-- `.product-team/project.yml` (`mode: adopted`, `decisions_dir` = the project's folder).
+- `.product-team/project.yml` (`mode: adopted`, `decisions_dir` = the project's folder), with the `review:` block
+  of the template: `qa: always`, `reviewer: code`, and `code_paths` set to where this project's app and library
+  code actually lives (from the audit, e.g. `["apps/**", "libs/**"]` or `["src/**"]`) — never docs, CI or config
+  (`reference/workflow.md` → Review gate).
 - `.product-team/owner-checklist.md` — only what is missing.
 - The team itself: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/vendor install .` from the installed plugin (in a
   product that already has the vendored copy, `vendor self-update` instead) — agents to `.claude/agents/`, skills to

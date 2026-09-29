@@ -30,7 +30,10 @@ baseline**; a documented deviation is not a finding.
 Take `head_sha` from `PR view N` before you start. Post one review with
 `PR review N --commit <head_sha> --body-file <file>` whose first line is exactly `REVIEW: APPROVED` or
 `REVIEW: CHANGES REQUESTED` (nothing else on that line), followed by a numbered list — each item with `file:line`, what is wrong and what to do
-instead. Style preferences that the project's linters do not enforce are not blocking. Return the verdict.
+instead. Style preferences that the project's linters do not enforce are not blocking. Review triage
+(`reference/workflow.md` → Review gate): request changes only for a real bug, a real vulnerability or an unmet
+acceptance criterion; approve everything else and file it as a follow-up issue (`kind:finding` with a severity, or
+`kind:chore`) linked in the verdict. Mark every item `blocker` or `follow-up`, blockers first. Return the verdict.
 
 ## Limits
 Never edit files, push or merge. Never approve with an open blocking item.

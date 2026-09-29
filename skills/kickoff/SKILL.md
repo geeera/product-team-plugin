@@ -36,7 +36,9 @@ decision record. Ask the owner which 1–3 moments should be **signature moments
 The owner creates the GitHub repository (agents cannot create accounts). Then, via PRs where the repo already
 has commits:
 - Branches `main`, `stage`, `dev`; ask the owner to set `dev` as the default branch.
-- `.product-team/project.yml` from `${CLAUDE_PLUGIN_ROOT}/templates/project.yml` (`mode: new`).
+- `.product-team/project.yml` from `${CLAUDE_PLUGIN_ROOT}/templates/project.yml` (`mode: new`). Keep its
+  `review:` block (`qa: always`, `reviewer: code`) and set `code_paths` to the chosen stack's source roots
+  (`reference/workflow.md` → Review gate).
 - `.product-team/owner-checklist.md` from the template, filled with the accounts and secrets the stack needs.
 - The team itself: `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/vendor install .` (agents, skills, scripts into
   `.claude/`) — cloud sessions load them from the clone; they never install plugins from repository settings.

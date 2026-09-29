@@ -23,13 +23,16 @@ explicit error handling, tests when the change warrants it.
 4. Tests: unit tests for logic, an e2e test per acceptance criterion that describes a user flow (with a11y
    assertions). Bug fix → failing regression test first.
 5. Run the contract commands from `.product-team/project.yml` (`lint`, `test`, `build`, `e2e` if cheap
-   locally). All must pass before you push.
+   locally). All must pass before you push. Then run the **real flow end to end**: start the app (or the
+   service, CLI, job) and use the changed path as a user or client would — browser, API call, CLI run — and keep
+   the evidence (commands, observed output or status codes, screenshots for UI). Unit tests alone are not it.
 6. Commit with `${CLAUDE_PLUGIN_ROOT}/scripts/pr commit -m "…"` and push with
    `${CLAUDE_PLUGIN_ROOT}/scripts/pr push --branch <branch>` — never a bare `git commit`/`git push`: with the
    team's GitHub App configured they commit and push as its bot — and open a PR to the base branch with
    `${CLAUDE_PLUGIN_ROOT}/scripts/pr create --base <base> --head <branch> --title … --body-file …`
-   (GitHub REST; do not rely on the `gh` CLI) with `Closes #<issue>`, a short summary, how it was
-   tested, and screenshots for UI changes if you can produce them.
+   (GitHub REST; do not rely on the `gh` CLI) with `Closes #<issue>`, a short summary, and a **How it was
+   verified** section with the end-to-end evidence from step 5 (docs, CI or config-only changes: how you checked
+   them). QA treats a behaviour change without that evidence as an unmet criterion.
 7. Return: PR URL, what was done, anything left undone, and any risk QA should look at.
 
 ## Limits
@@ -38,6 +41,9 @@ explicit error handling, tests when the change warrants it.
   (`reference/identities.md`), a verdict from you would count; the gate relies on you not doing it.
 - Never read, print or commit secret values; reference `secrets.NAME` only.
 - No new paid dependency or service. New runtime dependencies need a one-line justification in the PR.
+- Rework: fix the blockers the review kept; non-blocking items are follow-up issues, not part of this PR.
+- Issue comments start with `**Developer note**` (`reference/workflow.md` → Owner commands), so text you quote
+  never reads as an owner command.
 - If blocked (missing design, unclear criterion, free-tier limit): stop, comment on the issue what is
   missing, return without a PR. Say whether it needs the owner (payment, account, decision) or a local
   machine (e.g. a Mac build or a device) so the orchestrator can label it `needs:owner` / `needs:local`.

@@ -36,6 +36,11 @@ the backlog labels instead.
   agent; it continues on the PR's existing branch and removes `qa:changes-requested` only
   through the orchestrator (`B label N -qa:changes-requested`) once the new commits are pushed.
 
+Developers run the real flow end to end before they open a PR — the app started and the changed path used as a
+user or client would, not only the unit tests — and paste the evidence in the PR body under **How it was
+verified** (`reference/workflow.md` → Review gate). A returned PR without it goes back to the same agent in this
+run. Rework addresses only the blockers the review triage kept; non-blocking items are already follow-up issues.
+
 Each agent returns a PR URL or a blocked reason:
 - PR → `B link-pr N <pr>`, `B move N qa`.
 - Blocked → `B move N blocked --reason "<reason>"`; if the owner must act, add `needs:owner` (or
@@ -46,7 +51,8 @@ Kit-first: if two dispatched tasks need the same missing UI primitive, run the p
 
 ## 3. Quick review when time allows
 If CI of a new PR finishes during this run, you may run its reviewers now exactly as `slot-qa` step 2 does
-(`qa`, `reviewer`, and `security` when `PR security-check` requires it) and merge only when `PR gate` passes.
+(only the verdicts `PR gate` lists as `required`, with the same review triage) and merge only when `PR gate`
+passes.
 The 04:00 slot catches the rest.
 
 ## 4. Close

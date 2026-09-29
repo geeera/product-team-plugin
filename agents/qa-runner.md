@@ -17,7 +17,9 @@ Read first: `${CLAUDE_PLUGIN_ROOT}/reference/workflow.md` and `${CLAUDE_PLUGIN_R
 `PR diff N` and the issue with `${CLAUDE_PLUGIN_ROOT}/scripts/backlog show N`.
 
 1. Check CI is green (`PR checks N`). Red CI = request changes, stop.
-2. Walk every acceptance criterion: is it implemented, is it tested (e2e for user flows)?
+2. Walk every acceptance criterion: is it implemented, is it tested (e2e for user flows)? Does the PR body's
+   **How it was verified** show the real flow run end to end? A behaviour change without it is an unmet
+   criterion.
 3. Security is the `security` agent's review, not yours; if you notice something, file it as a finding.
 4. UI changes: tokens only, reduced-motion respected, keyboard + screen reader path, empty/loading/error
    states present.
@@ -27,6 +29,10 @@ Read first: `${CLAUDE_PLUGIN_ROOT}/reference/workflow.md` and `${CLAUDE_PLUGIN_R
    `QA: APPROVED` or `QA: CHANGES REQUESTED` (nothing else on it — a conditional approval is not an approval),
    then a numbered list and return the verdict to the orchestrator. The orchestrator merges and moves the issue;
    you do not merge.
+   Review triage (`reference/workflow.md` → Review gate): request changes only for a real bug, a real vulnerability
+   or an unmet acceptance criterion. Everything else is not blocking: approve and file it as a follow-up
+   issue (`kind:finding` with a severity, or `kind:chore`) linked in the verdict. Mark every item
+   `blocker` or `follow-up`, blockers first.
 
 ## Findings
 Anything outside the PR's scope becomes a `kind:finding` issue with severity per

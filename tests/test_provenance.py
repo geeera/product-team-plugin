@@ -69,11 +69,13 @@ def node(c, editors=(), total=None, body=None, entries=True):
             "userContentEdits": {"totalCount": len(edits) if total is None else total, "nodes": edits}}
 
 
-def graphql_page(nodes, issue_author=OWNER, issue_editors=(), has_next=False, cursor=None, issue_body="Build X"):
+def graphql_page(nodes, issue_author=OWNER, issue_editors=(), has_next=False, cursor=None, issue_body="Build X",
+                 typename="Issue"):
     issue = node({"id": 0, "html_url": "", "user": {"login": issue_author}, "body": issue_body}, issue_editors)
     issue.pop("fullDatabaseId"), issue.pop("url")
+    issue["__typename"] = typename
     issue["comments"] = {"pageInfo": {"hasNextPage": has_next, "endCursor": cursor}, "nodes": nodes}
-    return {"repository": {"issue": issue}}
+    return {"repository": {"issueOrPullRequest": issue}}
 
 
 def history(*nodes, issue_author=OWNER, issue_editors=()):
@@ -107,7 +109,7 @@ class FetchTest(unittest.TestCase):
         self.assertIn("HTTP 502", unavailable()["error"])
 
     def test_a_missing_issue_is_an_error(self):
-        with mock.patch.object(gh, "graphql", return_value={"repository": {"issue": None}}):
+        with mock.patch.object(gh, "graphql", return_value={"repository": {"issueOrPullRequest": None}}):
             self.assertIn("no issue", provenance.fetch("o/r", 7)["error"])
 
     def test_a_server_without_full_database_ids_falls_back_to_url_keys(self):
@@ -121,6 +123,34 @@ class FetchTest(unittest.TestCase):
         self.assertNotIn("fullDatabaseId", call.call_args_list[1][0][0])
         self.assertEqual(list(h["comments"]), [c["html_url"]])
         self.assertEqual([x["command"] for x in commands.parse([c], OWNER, h)], ["go"])
+
+    def test_the_query_asks_for_an_issue_or_a_pull_request_by_number(self):
+        with mock.patch.object(gh, "graphql", return_value=graphql_page([])) as call:
+            provenance.fetch("o/r", 7)
+        query = call.call_args[0][0]
+        self.assertIn("issueOrPullRequest(number: $number)", query)
+        self.assertIn("... on Issue {", query)
+        self.assertIn("... on PullRequest {", query)
+        self.assertNotIn("issue(number:", query)
+
+    def test_a_pull_request_number_is_checked_like_an_issue(self):
+        genuine, forged = rest(1, OWNER, "/go"), rest(2, OWNER, "/approve", edited=True)
+        page = graphql_page([node(genuine), node(forged, [BOT])], typename="PullRequest")
+        with mock.patch.object(gh, "graphql", return_value=page):
+            h = provenance.fetch("o/r", 15)
+        self.assertNotIn("error", h)
+        self.assertEqual([x["command"] for x in commands.parse([genuine, forged], OWNER, h)], ["go"])
+        self.assertEqual([r["comment_id"] for r in commands.rejected([genuine, forged], OWNER, h)], [2])
+
+    def test_anything_but_an_issue_or_pull_request_fails_closed(self):
+        for answer in ({"repository": {"issueOrPullRequest": None}}, {"repository": None}, None,
+                       graphql_page([], typename="Discussion")):
+            with self.subTest(answer=str(answer)[:60]):
+                with mock.patch.object(gh, "graphql", return_value=answer):
+                    h = provenance.fetch("o/r", 15)
+                self.assertIn("no issue or pull request #15", h["error"])
+                edited = rest(1, OWNER, "/go", edited=True)
+                self.assertEqual(commands.parse([edited], OWNER, h), [])
 
     def test_other_errors_are_not_retried(self):
         with mock.patch.object(gh, "graphql", side_effect=gh.GhError("HTTP 502")) as call:

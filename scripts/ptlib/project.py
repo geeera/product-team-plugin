@@ -83,3 +83,94 @@ def freeze_days(path: str = PROJECT_FILE) -> int:
     except FileNotFoundError:
         return 2
     return int(m.group(1)) if m else 2
+
+
+REVIEW_MODES = ("always", "code", "never")
+# `code` without `code_paths`: the usual source roots plus source files anywhere. Broad on purpose: a false
+# positive costs one review, a false negative merges unreviewed code.
+DEFAULT_CODE_PATHS = (
+    "apps/**", "libs/**", "packages/**", "src/**", "lib/**", "app/**", "server/**", "client/**", "services/**",
+    "api/**", "*.ts", "*.tsx", "*.js", "*.jsx", "*.mjs", "*.cjs", "*.vue", "*.svelte", "*.py", "*.go", "*.rs",
+    "*.java", "*.kt", "*.kts", "*.swift", "*.m", "*.dart", "*.rb", "*.php", "*.cs", "*.c", "*.cc", "*.cpp", "*.h",
+    "*.sql",
+)
+_REVIEW_KEYS = ("qa", "reviewer", "code_paths", "max_rework_rounds")
+
+
+def default_review_policy() -> dict:
+    """No `review:` block: QA and REVIEW on every PR, as before 0.10.2, so existing products do not change silently."""
+    return {"configured": False, "qa": "always", "reviewer": "always", "code_paths": list(DEFAULT_CODE_PATHS),
+            "max_rework_rounds": 1}
+
+
+def _scalar(raw: str) -> str:
+    return raw.split("#", 1)[0].strip().strip("'\"")
+
+
+def _glob_list(inline: str, following: list) -> list:
+    """An inline `["a", b]` list, or `- a` lines under an empty `key:`."""
+    inline = inline.split("#", 1)[0].strip()
+    if inline:
+        if not (inline.startswith("[") and inline.endswith("]")):
+            raise ValueError(f"review.code_paths must be a list like [\"apps/**\", \"libs/**\"], got {inline!r}")
+        return [x.strip().strip("'\"") for x in inline[1:-1].split(",") if x.strip().strip("'\"")]
+    items = []
+    for line in following:
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        m = re.match(r"^[ \t]+-[ \t]*(.*)$", line)
+        if not m:
+            break
+        items.append(_scalar(m.group(1)))
+    return [x for x in items if x]
+
+
+def review_policy_from_text(text: str) -> dict:
+    """The top-level `review:` block of a project.yml given as text: which verdicts a PR needs besides SECURITY.
+
+    ValueError when the block is present but a value cannot be read: guessing could drop a required verdict.
+    """
+    lines = (text or "").splitlines()
+    start = next((i for i, line in enumerate(lines) if re.match(r"^review:[ \t]*(#.*)?$", line)), None)
+    policy = default_review_policy()
+    if start is None:
+        return policy
+    block = []
+    for line in lines[start + 1:]:
+        if line.strip() and not line[0].isspace() and not line.startswith("#"):
+            break
+        block.append(line)
+    policy["configured"] = True
+    for i, line in enumerate(block):
+        m = re.match(r"^[ \t]+([A-Za-z_]+):[ \t]*(.*)$", line)
+        if not m:
+            continue
+        key, value = m.group(1), m.group(2)
+        if key not in _REVIEW_KEYS:
+            raise ValueError(f"review.{key} is not a known setting (known: {', '.join(_REVIEW_KEYS)})")
+        if key in ("qa", "reviewer"):
+            mode = _scalar(value)
+            if mode not in REVIEW_MODES:
+                raise ValueError(f"review.{key} must be one of {', '.join(REVIEW_MODES)}, not {mode!r}")
+            policy[key] = mode
+        elif key == "code_paths":
+            paths = _glob_list(value, block[i + 1:])
+            if not paths:
+                raise ValueError("review.code_paths is set but empty or unreadable; list globs such as "
+                                 "[\"apps/**\", \"libs/**\"]")
+            policy[key] = paths
+        else:
+            number = _scalar(value)
+            if not number.isdigit():
+                raise ValueError(f"review.max_rework_rounds must be a whole number, not {number!r}")
+            policy[key] = int(number)
+    return policy
+
+
+def review_policy(path: str = PROJECT_FILE) -> dict:
+    """review_policy_from_text() of the working tree's project.yml (guidance only: the gate reads the base branch)."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            return review_policy_from_text(f.read())
+    except FileNotFoundError:
+        return default_review_policy()

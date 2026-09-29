@@ -4,6 +4,37 @@ Products follow the `stable` channel (or a pinned tag, `team.plugin_ref` in `.pr
 first `slot-pm` of the day runs `vendor self-update` and opens a PR with the entries in between. Breaking changes (a renamed label, a changed script contract, a new required
 `project.yml` key) are marked **Breaking** with the migration step.
 
+## 0.10.2
+
+- **Proportional reviews.** A new `review:` block in `.product-team/project.yml` says which verdicts a PR needs:
+  `qa` and `reviewer` are `always`, `code` (only when the PR changes a path matching `code_paths`) or `never`;
+  `max_rework_rounds` caps rework rounds for non-blockers. `pr gate` / `pr merge` read it from the PR's **base**
+  branch, like `team.reviewer_logins`, so a PR cannot relax its own gate. SECURITY is unchanged (`pr
+  security-check` decides). `pr gate` now answers `why` (for QA, REVIEW and SECURITY: required or not, and why)
+  and `policy`. An unreadable block fails the gate. **No block = the old behaviour** (QA and REVIEW on every PR):
+  existing products change only when they add the block. **Migration** (optional): copy the `review:` block from
+  `templates/project.yml` and set `code_paths` to the product's source roots; kickoff and adopt now write it
+  (`reviewer: code`).
+- **Review triage** (`reference/workflow.md` → Review gate; `slot-qa`, `slot-dev`, `qa`, `reviewer`): only a real
+  bug, a real vulnerability or an unmet acceptance criterion blocks a merge; everything else is approved and filed
+  as a follow-up issue (`kind:finding` / `kind:chore`). After `max_rework_rounds` a PR goes back only for an open
+  blocker. `slot-qa` starts only the reviewers `pr gate` requires.
+- **Evidence before review**: developers run the real flow end to end (not only unit tests) and paste the evidence
+  in the PR body under **How it was verified**; QA treats a behaviour change without it as an unmet criterion.
+- **Owner commands are read only from the owner's own prose** (from QA in geeera/team-console): a command counts
+  only as the first token of a line (at most three spaces indented) outside fenced code blocks, inline code,
+  blockquotes and HTML comments, and not in a comment that starts with a team note header (`**Architect note**`,
+  `**PM grooming**`, … — `commands.AGENT_NOTE_ROLES`) or a script marker (`<!-- pt-… -->`). Every agent now starts
+  its issue comments with its header. `/go-live` or `/approved` are no longer read as `/go` / `/approve`.
+  **Breaking** for owners who indent commands four spaces or put them after other text on the line.
+- **Owner commands on pull requests**: the edit-history read (`provenance.fetch`) uses
+  `repository.issueOrPullRequest(number:)`, so a PR number is checked like an issue instead of failing; anything
+  else still fails closed.
+- **HTTP deadline and retry** (`ptlib/gh.py`): every API call has an overall wall-clock deadline, retry included
+  (default 90 s, `PT_HTTP_DEADLINE` seconds; a slow trickling answer is cut there, not only a stalled read).
+  A `GET` is retried once after a timeout or a 5xx with a short backoff when the deadline leaves room; writes
+  (POST, PUT, PATCH, DELETE — GraphQL included) are never retried.
+
 ## 0.10.1
 
 - **Security: edited owner comments no longer count** (geeera/team-console#60). GitHub keeps a comment's author when

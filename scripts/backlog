@@ -28,7 +28,8 @@ skills. Output is JSON on stdout; errors go to stderr with a non-zero exit.
   backlog label N [+L|-L]...                     add/remove flags
   backlog comment N (--body B | --body-file F)
   backlog link-pr N PR                           record the PR on the issue
-  backlog answers N                              owner commands (/approve, /reject, /go, …) on the issue
+  backlog answers N                              owner commands (/approve, /reject, /go, …) on the issue; owner
+                                                 comments someone else edited are listed under "ignored"
   backlog next [--now ISO]                       what a development run takes now: ordered dispatch list,
                                                  skipped issues with reasons, missing architect notes
   backlog sprint current|list
@@ -46,7 +47,7 @@ from datetime import date, datetime, timedelta
 from urllib.parse import quote
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from ptlib import brief, commands, gh, inbox, owner, picker, project  # noqa: E402
+from ptlib import brief, commands, gh, inbox, owner, picker, project, provenance  # noqa: E402
 from ptlib.calendar import KYIV, compute, pick_current_sprint  # noqa: E402
 from ptlib.labels import LABELS, STATUSES, KINDS, SEVERITIES  # noqa: E402
 
@@ -140,8 +141,10 @@ def cmd_show(repo: str, args) -> None:
     issue = gh.api(f"repos/{repo}/issues/{args.number}")
     data = slim(issue)
     data["body"] = issue.get("body") or ""
+    # A reading aid only: whose words count as the owner's comes from `answers`, which checks the edit history.
     data["comments"] = [
-        {"author": c["user"]["login"], "at": c["created_at"], "body": c["body"]}
+        {"author": c["user"]["login"], "at": c["created_at"], "body": c["body"],
+         "edited": not provenance.rest_unedited(c)}
         for c in gh.api_list(f"repos/{repo}/issues/{args.number}/comments?per_page=100")
     ]
     out(data)
@@ -212,7 +215,7 @@ def cmd_reversals(repo: str, args) -> None:
         if "pull_request" in issue:
             continue
         comments = gh.api_list(f"repos/{repo}/issues/{issue['number']}/comments?per_page=100")
-        rejection = owner.reversed_by_owner(comments, owner_login)
+        rejection = owner.reversed_by_owner(comments, owner_login, provenance.fetch(repo, issue["number"]))
         if rejection:
             found.append(dict(slim(issue), reason=rejection.get("text", ""), at=rejection.get("at")))
     out(found)
@@ -308,12 +311,21 @@ def cmd_link_pr(repo: str, args) -> None:
 
 def cmd_answers(repo: str, args) -> None:
     owner = gh.owner_login(repo)
+    issue = gh.api(f"repos/{repo}/issues/{args.number}")
     comments = gh.api_list(f"repos/{repo}/issues/{args.number}/comments?per_page=100")
+    # Anyone with Issues write can edit an owner comment into a command: only unedited or owner-edited ones count.
+    history = provenance.fetch(repo, args.number)
     # When the agents act as the owner's account, an agent can write a comment that looks like the owner's; as an
     # app they cannot, and commands.parse already counts only the owner's login.
     same_account = gh.acts_as_owner(repo)
+    trusted, _ = provenance.screen(comments, [owner], history)
     out({"owner": owner, "agents": gh.token_login(), "same_account": same_account,
-         "commands": commands.parse(comments, owner)})
+         "commands": commands.parse(comments, owner, history),
+         "ignored": commands.rejected(comments, owner, history),
+         "done": [{"at": c.get("created_at"), "comment_id": c.get("id"), "url": c.get("html_url")}
+                  for c in trusted if brief.DONE_MARKER in (c.get("body") or "")],
+         "body": provenance.body_statement(issue, owner, history),
+         "history_error": history.get("error", "")})
 
 
 def cmd_next(repo: str, args) -> None:

@@ -11,6 +11,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 from ptlib import demo  # noqa: E402
 
+NO_EDITS = {"issue": None, "comments": {}}  # GitHub knows of no edits to any of these comments
+
 DATA = {
     "product": "p", "repo": "o/r", "sprint": "Sprint 01", "demo_date": "2026-10-09",
     "demo_issue": {"number": 1, "url": "u"}, "release": {"recommendation": "go", "blockers": []},
@@ -49,16 +51,16 @@ class DecisionsTest(unittest.TestCase):
 
     def test_takes_latest_owner_block(self):
         comments = [
-            {"user": {"login": "geeera"}, "created_at": "2026-10-09T10:00:00Z", "body": self.block({"release": {"decision": "no-go"}})},
-            {"user": {"login": "geeera"}, "created_at": "2026-10-09T11:00:00Z", "body": self.block({"release": {"decision": "go"}})},
-            {"user": {"login": "intruder"}, "created_at": "2026-10-09T12:00:00Z", "body": self.block({"release": {"decision": "no-go"}})},
+            {"user": {"login": "geeera"}, "created_at": "2026-10-09T10:00:00Z", "updated_at": "2026-10-09T10:00:00Z", "body": self.block({"release": {"decision": "no-go"}})},
+            {"user": {"login": "geeera"}, "created_at": "2026-10-09T11:00:00Z", "updated_at": "2026-10-09T11:00:00Z", "body": self.block({"release": {"decision": "go"}})},
+            {"user": {"login": "intruder"}, "created_at": "2026-10-09T12:00:00Z", "updated_at": "2026-10-09T12:00:00Z", "body": self.block({"release": {"decision": "no-go"}})},
         ]
-        found = demo.decisions_from_comments(comments, "Geeera")
+        found = demo.decisions_from_comments(comments, "Geeera", NO_EDITS)
         self.assertEqual(found["decisions"]["release"]["decision"], "go")
 
     def test_ignores_malformed_json(self):
-        comments = [{"user": {"login": "geeera"}, "created_at": "t", "body": "/demo-decisions\n```json\n{oops\n```"}]
-        self.assertIsNone(demo.decisions_from_comments(comments, "geeera"))
+        comments = [{"user": {"login": "geeera"}, "created_at": "t", "updated_at": "t", "body": "/demo-decisions\n```json\n{oops\n```"}]
+        self.assertIsNone(demo.decisions_from_comments(comments, "geeera", NO_EDITS))
 
     def test_normalises_db_rows(self):
         rows = [{"id": "issue-21", "data": {"item": "issue-21", "decision": "approve", "comment": "yes"}}]

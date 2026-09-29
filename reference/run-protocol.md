@@ -17,7 +17,8 @@ use the GitHub REST API with the team GitHub App's token when `PT_TEAM_APP_ID` i
    stop: the product was never set up (run `kickoff` or `adopt`).
 2. `PT/scripts/runlog start <slot>`:
    - `proceed` → keep the `run_id`.
-   - `overlap` / `paused` → print the reason and end the run. No other action.
+   - `overlap` / `paused` / `unverified` → print the reason and end the run. No other action. (`unverified`: the
+     run log's edit history could not be read, so no entry and no `/resume` can be trusted.)
    - `pause` → the team just paused itself: tell the owner (see *Notify*) and end the run.
 3. `PT/scripts/slot-context` → mode (`normal` / `burn` / `freeze`), `is_cut_day`, caps, sprint, demo date.
 

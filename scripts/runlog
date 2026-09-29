@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Team run log on a single GitHub issue labelled team:run-log (stop conditions, reference/schedule-and-models.md).
 
-  runlog start SLOT        → {"decision": "proceed"|"overlap"|"paused"|"pause", "run_id": ...}
+  runlog start SLOT        → {"decision": "proceed"|"overlap"|"paused"|"pause"|"unverified", "run_id": ...}
                              proceed: a `started` entry was written, do the work, then call finish.
                              overlap/paused: exit without work. pause: this call paused the team — notify, exit.
+                             unverified: the log's edit history could not be fetched, so no entry or /resume can
+                             be trusted — exit without work.
   runlog finish RUN_ID finished|failed [--summary-file F] [--metric key=value]...
                            duration is recorded automatically; add counts such as prs=2 merged=1 blocked=0
   runlog stats [--days 14] → per slot: runs, failures, median minutes, summed metrics (for the demo)
@@ -28,7 +30,7 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from ptlib import commands, gh, runstate  # noqa: E402
+from ptlib import commands, gh, provenance, runstate  # noqa: E402
 
 TITLE = "Team run log"
 LABEL = "team:run-log"
@@ -47,18 +49,21 @@ def log_issue(repo: str) -> dict:
 
 
 def load(repo: str):
-    """Comments by anyone other than the account that opened the log (the team's) are ignored as run entries."""
+    """The log issue, its comments and their edit history (provenance.fetch; {"error": …} when unavailable)."""
     issue = log_issue(repo)
     comments = gh.api_list(f"repos/{repo}/issues/{issue['number']}/comments?per_page=100")
-    return issue, comments
+    return issue, comments, provenance.fetch(repo, issue["number"])
 
 
-def team_comments(issue: dict, comments: list) -> list:
+def team_comments(issue: dict, comments: list, history: dict) -> list:
+    """Run entries and pause records: comments by the account that opened the log (the team's), never edited by
+    anyone outside the team — an edited entry could fake a finished run or plant routine prompts in a pause record."""
     team = {(issue.get("user") or {}).get("login", "")}
     if gh.app_mode():
         # A log opened before the team app existed keeps working: its runs now come from the app's bot.
         team.add(gh.token_login() or "")
-    return [c for c in comments if (c.get("user") or {}).get("login", "") in team - {""}]
+    team.discard("")
+    return provenance.screen(comments, team, history)[0]
 
 
 def pause_at(comments: list) -> str:
@@ -67,11 +72,16 @@ def pause_at(comments: list) -> str:
 
 
 def cmd_start(repo: str, args) -> int:
-    issue, comments = load(repo)
+    issue, comments, history = load(repo)
+    if history.get("error"):
+        # The gate itself: without the edit history neither run entries nor a /resume can be trusted.
+        print(json.dumps({"decision": "unverified", "log_url": issue["html_url"],
+                          "reason": f"cannot check who edited the run log: {history['error']}"}, indent=2))
+        return 3
     now = datetime.now(timezone.utc)
     labels = {l["name"] for l in issue["labels"]}
-    owner_cmds = commands.parse(comments, gh.owner_login(repo))
-    team = team_comments(issue, comments)
+    owner_cmds = commands.parse(comments, gh.owner_login(repo), history)
+    team = team_comments(issue, comments, history)
     paused_since = max([pause_at(team)] + [c["created_at"] for c in team if runstate.OWNER_RESUME in (c.get("body") or "")])
     paused = PAUSED in labels
     if paused and runstate.resumed_after_pause(paused_since, owner_cmds):
@@ -79,7 +89,7 @@ def cmd_start(repo: str, args) -> int:
         paused = False
     resume = commands.latest(owner_cmds, ["resume"])
     reset_at = max(resume.get("at") or "", paused_since)
-    decision = runstate.decide(runstate.parse_runs(team_comments(issue, comments)), args.slot, now, paused, reset_at)
+    decision = runstate.decide(runstate.parse_runs(team), args.slot, now, paused, reset_at)
 
     if decision["decision"] == "pause":
         gh.api(f"repos/{repo}/issues/{issue['number']}/labels", "POST", {"labels": [PAUSED]})
@@ -100,8 +110,8 @@ def cmd_start(repo: str, args) -> int:
 def cmd_finish(repo: str, args) -> int:
     if args.state not in ("finished", "failed"):
         sys.exit("state must be finished or failed")
-    issue, comments = load(repo)
-    target = next((r for r in runstate.parse_runs(team_comments(issue, comments)) if r["id"] == args.run_id), None)
+    issue, comments, history = load(repo)
+    target = next((r for r in runstate.parse_runs(team_comments(issue, comments, history)) if r["id"] == args.run_id), None)
     if not target:
         sys.exit(f"run {args.run_id} not found in the run log")
     summary = ""
@@ -127,27 +137,29 @@ def cmd_finish(repo: str, args) -> int:
 
 
 def cmd_status(repo: str, _args) -> int:
-    issue, comments = load(repo)
+    issue, comments, history = load(repo)
     now = datetime.now(timezone.utc)
-    runs = runstate.parse_runs(team_comments(issue, comments))[-10:]
+    runs = runstate.parse_runs(team_comments(issue, comments, history))[-10:]
     print(json.dumps({
         "paused": PAUSED in {l["name"] for l in issue["labels"]},
         "log_url": issue["html_url"],
         "runs": [dict(r, effective=runstate.effective_state(r, now)) for r in runs],
+        "history_error": history.get("error", ""),
     }, indent=2))
     return 0
 
 
 def cmd_stats(repo: str, args) -> int:
-    issue, comments = load(repo)
+    issue, comments, history = load(repo)
     now = datetime.now(timezone.utc)
-    result = runstate.stats(runstate.parse_runs(team_comments(issue, comments)), now, now - timedelta(days=args.days))
-    print(json.dumps({"days": args.days, "slots": result}, indent=2))
+    result = runstate.stats(runstate.parse_runs(team_comments(issue, comments, history)), now,
+                            now - timedelta(days=args.days))
+    print(json.dumps({"days": args.days, "slots": result, "history_error": history.get("error", "")}, indent=2))
     return 0
 
 
 def cmd_pause(repo: str, args) -> int:
-    issue, _ = load(repo)
+    issue = log_issue(repo)
     with open(args.record_file, encoding="utf-8") as f:
         record = json.load(f)
     if not isinstance(record, dict):
@@ -164,14 +176,14 @@ def cmd_pause(repo: str, args) -> int:
 
 
 def cmd_pause_record(repo: str, _args) -> int:
-    issue, comments = load(repo)
-    print(json.dumps(runstate.active_owner_pause(team_comments(issue, comments)), indent=2))
+    issue, comments, history = load(repo)
+    print(json.dumps(runstate.active_owner_pause(team_comments(issue, comments, history)), indent=2))
     return 0
 
 
 def cmd_resume(repo: str, _args) -> int:
-    issue, comments = load(repo)
-    record = runstate.active_owner_pause(team_comments(issue, comments))
+    issue, comments, history = load(repo)
+    record = runstate.active_owner_pause(team_comments(issue, comments, history))
     if PAUSED in {l["name"] for l in issue["labels"]}:
         gh.api(f"repos/{repo}/issues/{issue['number']}/labels/{quote(PAUSED, safe='')}", "DELETE")
     now = datetime.now(timezone.utc).isoformat(timespec="minutes")

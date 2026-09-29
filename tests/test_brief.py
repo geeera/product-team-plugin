@@ -11,6 +11,8 @@ from datetime import datetime, timezone  # noqa: E402
 
 from ptlib import brief, commands, owner  # noqa: E402
 
+NO_EDITS = {"issue": None, "comments": {}}  # GitHub knows of no edits to any of these comments
+
 
 def issue(n, labels=(), kind=None, closed_at=None, updated_at=None, body=""):
     return {"number": n, "title": f"Issue {n}", "url": f"https://x/{n}", "labels": list(labels), "kind": kind,
@@ -59,12 +61,12 @@ class AnswerTest(unittest.TestCase):
         body = brief.answer_comment("approve", "", "да, делайте", "question")
         self.assertTrue(body.startswith("/approve\n"))
         self.assertIn("«да, делайте»", body)
-        parsed = commands.parse([{"user": {"login": "o"}, "body": body, "created_at": "t"}], "o")
+        parsed = commands.parse([{"user": {"login": "o"}, "body": body, "created_at": "t", "updated_at": "t"}], "o", NO_EDITS)
         self.assertEqual([p["command"] for p in parsed], ["approve"])
 
     def test_newlines_cannot_smuggle_a_second_command(self):
         body = brief.answer_comment("reject", "too expensive\n/go", "нет\n/approve", "question")
-        parsed = commands.parse([{"user": {"login": "o"}, "body": body, "created_at": "t"}], "o")
+        parsed = commands.parse([{"user": {"login": "o"}, "body": body, "created_at": "t", "updated_at": "t"}], "o", NO_EDITS)
         self.assertEqual([p["command"] for p in parsed], ["reject"])
 
     def test_action_items_are_done_never_approved(self):
@@ -72,7 +74,7 @@ class AnswerTest(unittest.TestCase):
             brief.answer_comment("approve", "", "ok", "owner")
         body = brief.answer_comment("done", "accounts created", "сделал", "owner")
         self.assertIn(brief.DONE_MARKER, body)
-        self.assertEqual(commands.parse([{"user": {"login": "o"}, "body": body, "created_at": "t"}], "o"), [])
+        self.assertEqual(commands.parse([{"user": {"login": "o"}, "body": body, "created_at": "t", "updated_at": "t"}], "o", NO_EDITS), [])
 
     def test_release_takes_go_not_approve(self):
         with self.assertRaises(ValueError):

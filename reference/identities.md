@@ -5,7 +5,8 @@ only hold by convention:
 
 - a verdict in the merge gate (`QA:`, `REVIEW:`, `SECURITY:`) is a comment by the same account that wrote the code,
   so the gate cannot tell a reviewer's approval from a developer approving itself;
-- an owner command (`/approve`, `/go`, …) is a comment by the owner's account, so an agent could write one.
+- an owner command (`/approve`, `/go`, …) is a comment by the owner's account, so an agent could write one — or
+  edit an old comment of the owner's into one: GitHub keeps the original author on an edited comment.
 
 Two GitHub Apps give the agents identities of their own. GitHub then records who wrote what, and the scripts check it.
 
@@ -112,7 +113,19 @@ settings and deleting the old one there.
 ## What changes for the team
 
 - **Owner commands** count only when your login wrote them (`commands.parse`, the demo decisions block, reversals
-  of team decisions). A bot comment that quotes you is never read as your answer.
+  of team decisions, the `/resume` on the run log, "done" reports). A bot comment that quotes you is never read as
+  your answer.
+- **Edited comments**: GitHub keeps the author of a comment when someone else edits its body, and anyone with
+  Issues write on the repository can — the team app, the review app, a collaborator, any other app with that
+  permission. A comment of yours counts only if **nobody but you ever edited it**. The scripts read each issue's
+  edit history (GraphQL `userContentEdits`, `lastEditedAt` + `editor`): a comment edited by any other login, by a
+  deleted account, or with more edits than one page of history shows, is ignored, and `backlog answers` lists it
+  under `ignored` with the reason. When the history cannot be fetched only comments whose REST `updated_at` equals
+  `created_at` (two seconds of slack) count; the rest are ignored and `history_error` says why; `runlog start`
+  then does no work at all (`decision: unverified`). The same check covers the issue body (`backlog answers` →
+  `body.owner_statement`, and `body.edited_at`/`editors`: an approval given before someone else rewrote the question
+  is an approval of the old text) and the team's own run-log entries and pause records (edits allowed only by the
+  team's logins). Reactions are never read as approvals.
 - **`same_account`** (`backlog answers`, the inbox, the gate warning) is true when an agent in the session can write
   as you: the agents' own identity is your account, **or**, in app mode, any personal credential in the session
   (`PT_OWNER_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN`, `gh auth`) resolves to your login. Only a session with none of those
@@ -152,6 +165,8 @@ settings and deleting the old one there.
 It does:
 - make the author of every comment, review, commit and push visible and checkable — self-approval and imitated owner
   commands stop counting;
+- make edits checkable: an owner comment rewritten by the team app, the review app or a collaborator (an old "ok"
+  turned into `/go`, `/approve` or `/resume`) stops counting;
 - keep your personal token out of the scheduled environments entirely, and flag any session that has one;
 - confine a leaked installation token to one repository and one hour.
 
@@ -164,6 +179,13 @@ It does not:
   agents' own shell commands, the project's contract commands (`lint`, `test`, `build`), package scripts and
   dependencies they run all inherit the session's environment and can read `PT_*_APP_KEY` and `PT_OWNER_TOKEN`;
 - protect the app keys from anyone who can edit the cloud environment or read your machine;
+- tell your edits from an agent's **in same-account mode**. There the agents *are* your login, so a comment they
+  edit still reads as edited by you and counts; the edit check only separates you from the apps and from other
+  collaborators. Nor does it help against anyone holding your own credentials (`PT_OWNER_TOKEN`, `gh auth`) —
+  such a session is `same_account: true` for the same reason;
+- protect what GitHub itself does not record: a revision someone deletes from a comment's history still shows who
+  made it, but the check trusts GitHub's edit history as complete. A comment with more than 50 edits is ignored
+  rather than half-checked;
 - enforce anything server-side. Rulesets that require the review bot's approval need GitHub Pro or a public
   repository; `branch-guard.yml` still reports changes that reached `dev`, `stage` or `main` without a merged PR.
 
@@ -181,3 +203,5 @@ It does not:
 | an owner answer must be posted with …'s own token in PT_OWNER_TOKEN | set `PT_OWNER_TOKEN` in the team-chat session, or answer on GitHub |
 | refusing to push: … rewrites … / git would push to … | remove the repository-local `insteadOf`; in the cloud, allow direct `github.com` access |
 | git push as …[bot] … failed | the network cannot reach `github.com` directly, or the app lacks Contents/Workflows write |
+| `answers` → `ignored`: it was edited by … | someone else changed your comment; write the command again in a new comment |
+| `history_error` / `runlog start` → `unverified` | GitHub's GraphQL API did not answer (outage, or a token without Issues read); the next run retries |

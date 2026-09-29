@@ -23,12 +23,16 @@ no internal jargon, links only where the owner needs to look at something.
    - how many things need the owner.
 3. Then the decisions, **one at a time**, from `needs_you`: what it is, why it matters, the team's recommendation,
    and what the options mean. Wait for the answer before the next one. Design approvals: give the link to look at.
-4. When the owner has heard everything: `R/brief mark`.
+4. When the owner has heard everything: `R/brief mark --at <generated_at from step 1>`.
 
 ## Turning answers into actions
-- A plain answer to a question ("да", "ok", "нет, потому что…", "go", "отложим") → `R/backlog answer N --command
-  approve|reject|go|no-go|override [--text "<the owner's reason, in their words>"]`. A reason is required for
-  reject / no-go / override — ask for one if the owner did not give it. Say what you recorded.
+- Answers depend on the item's `section` in `needs_you`, and always carry the owner's words:
+  `R/backlog answer N --command <c> --owner-said "<what the owner wrote, verbatim>" [--text "<their reason>"]`.
+  - `question`, `design` → `approve` / `reject` (with a reason).
+  - `release` → `go`, `no-go` (with a reason) or `override` (with the written reason) — confirm first.
+  - `owner`, `local` (things only the owner can do: accounts, secrets, a GPU, a local build) → `done` once the
+    owner says it is done; "ok" to such an item means "noted", not "done" — ask.
+  An ambiguous reply ("ok" to a question with two options) → ask which option. Say what you recorded.
 - "Later" / "not now" → nothing is written; the question stays for the next briefing.
 - A reversal of a team decision ("нет, сделайте иначе") → `R/backlog answer N --command reject --text …`.
 - A request for work ("добавь…", "исправь…") → the PM writes it up: `R/backlog create --kind feature|bug|chore`

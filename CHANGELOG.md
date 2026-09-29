@@ -11,6 +11,10 @@ first `slot-pm` of the day runs `vendor self-update` and opens a PR with the ent
   owner's decisions one at a time; plain answers ("да", "нет, потому что…") are written as the commands the team
   reads, marked as given in the chat; requests for work become issues. `team-chat` skill, `scripts/brief`,
   `backlog answer`. `kickoff` and `adopt` walk the owner through creating the chat; the digest points to it.
+- Answers are typed by item: questions and designs take approve/reject, the demo issue go/no-go/override, action
+  items (accounts, secrets, local work) only "done" — never an approval. Each answer quotes the owner's words, is
+  written on one line (no smuggled commands), and only on an open item waiting for the owner. Scheduled runs never
+  call `backlog answer`. The briefing counts runs that died as failed and marks up to the brief the owner heard.
 
 ## 0.8.0
 

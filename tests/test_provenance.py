@@ -12,14 +12,16 @@ import importlib.machinery
 import importlib.util
 import io
 import json
+import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
-from ptlib import brief, commands, demo, gh, owner, provenance  # noqa: E402
+from ptlib import brief, commands, demo, gh, owner, project, provenance, runlogissue, runstate  # noqa: E402
 
 OWNER, BOT, REVIEWER, STRANGER = "geeera", "acme-team[bot]", "acme-review[bot]", "collaborator"
 CREATED, EDITED = "2026-09-29T10:00:00Z", "2026-09-29T11:00:00Z"
@@ -52,19 +54,23 @@ def actor(login):
     return {"__typename": "User", "login": login}
 
 
-def node(cid, author, editors=(), total=None):
-    """GraphQL IssueComment. `editors`: who made each edit, oldest first (the creation entry is the author's)."""
+def node(c, editors=(), total=None, body=None, entries=True):
+    """GraphQL IssueComment for REST comment `c`, read at the same moment. `editors`: who made each edit, oldest
+    first (the creation entry is the author's); `body`: what GraphQL returns, by default the REST body."""
+    author = c["user"]["login"]
     edits = [{"editedAt": EDITED, "editor": actor(e)} for e in reversed(editors)]
     if editors:
         edits.append({"editedAt": CREATED, "editor": actor(author)})
-    return {"fullDatabaseId": str(cid), "url": f"https://github.com/o/r/issues/7#issuecomment-{cid}",
+    if not entries:
+        edits = []
+    return {"fullDatabaseId": str(c["id"]), "url": c["html_url"], "body": c["body"] if body is None else body,
             "author": actor(author), "lastEditedAt": EDITED if editors else None,
             "editor": actor(editors[-1]) if editors else None,
             "userContentEdits": {"totalCount": len(edits) if total is None else total, "nodes": edits}}
 
 
-def graphql_page(nodes, issue_author=OWNER, issue_editors=(), has_next=False, cursor=None):
-    issue = node(0, issue_author, issue_editors)
+def graphql_page(nodes, issue_author=OWNER, issue_editors=(), has_next=False, cursor=None, issue_body="Build X"):
+    issue = node({"id": 0, "html_url": "", "user": {"login": issue_author}, "body": issue_body}, issue_editors)
     issue.pop("fullDatabaseId"), issue.pop("url")
     issue["comments"] = {"pageInfo": {"hasNextPage": has_next, "endCursor": cursor}, "nodes": nodes}
     return {"repository": {"issue": issue}}
@@ -82,14 +88,16 @@ def unavailable():
 
 class FetchTest(unittest.TestCase):
     def test_bot_editors_get_the_rest_login_and_comments_are_keyed_by_id_and_url(self):
-        h = history(node(5890087054, OWNER, [BOT]))
+        c = rest(5890087054, OWNER, "/go", edited=True)
+        h = history(node(c, [BOT]))
         record = h["comments"]["5890087054"]
-        self.assertIs(record, h["comments"]["https://github.com/o/r/issues/7#issuecomment-5890087054"])
+        self.assertIs(record, h["comments"][c["html_url"]])
         self.assertTrue(record["edited"] and record["complete"])
         self.assertIn(BOT, record["editors"])
 
     def test_follows_comment_pages(self):
-        pages = [graphql_page([node(1, OWNER)], has_next=True, cursor="c1"), graphql_page([node(2, OWNER, [BOT])])]
+        pages = [graphql_page([node(rest(1, OWNER, "a"))], has_next=True, cursor="c1"),
+                 graphql_page([node(rest(2, OWNER, "b", edited=True), [BOT])])]
         with mock.patch.object(gh, "graphql", side_effect=pages) as call:
             h = provenance.fetch("o/r", 7)
         self.assertEqual(sorted(k for k in h["comments"] if k.isdigit()), ["1", "2"])
@@ -102,19 +110,36 @@ class FetchTest(unittest.TestCase):
         with mock.patch.object(gh, "graphql", return_value={"repository": {"issue": None}}):
             self.assertIn("no issue", provenance.fetch("o/r", 7)["error"])
 
+    def test_a_server_without_full_database_ids_falls_back_to_url_keys(self):
+        c = rest(1, OWNER, "/go")
+        url_only = node(c)
+        url_only.pop("fullDatabaseId")
+        answers = [gh.GhError("GraphQL: Field 'fullDatabaseId' doesn't exist on type 'IssueComment'"),
+                   graphql_page([url_only])]
+        with mock.patch.object(gh, "graphql", side_effect=answers) as call:
+            h = provenance.fetch("o/r", 7)
+        self.assertNotIn("fullDatabaseId", call.call_args_list[1][0][0])
+        self.assertEqual(list(h["comments"]), [c["html_url"]])
+        self.assertEqual([x["command"] for x in commands.parse([c], OWNER, h)], ["go"])
+
+    def test_other_errors_are_not_retried(self):
+        with mock.patch.object(gh, "graphql", side_effect=gh.GhError("HTTP 502")) as call:
+            self.assertIn("502", provenance.fetch("o/r", 7)["error"])
+        self.assertEqual(call.call_count, 1)
+
 
 class OwnerCommandTest(unittest.TestCase):
     def test_an_unedited_owner_comment_counts(self):
-        found = commands.parse([rest(1, OWNER, "/go")], OWNER, history(node(1, OWNER)))
-        self.assertEqual([c["command"] for c in found], ["go"])
+        c = rest(1, OWNER, "/go")
+        self.assertEqual([x["command"] for x in commands.parse([c], OWNER, history(node(c)))], ["go"])
 
     def test_an_owner_comment_edited_by_the_owner_counts(self):
-        found = commands.parse([rest(1, OWNER, "/approve", edited=True)], OWNER, history(node(1, OWNER, [OWNER])))
-        self.assertEqual([c["command"] for c in found], ["approve"])
+        c = rest(1, OWNER, "/approve", edited=True)
+        self.assertEqual([x["command"] for x in commands.parse([c], OWNER, history(node(c, [OWNER])))], ["approve"])
 
     def test_an_owner_comment_edited_by_the_team_bot_is_ignored_with_the_reason(self):
         comments = [rest(1, OWNER, "/go", edited=True)]
-        h = history(node(1, OWNER, [BOT]))
+        h = history(node(comments[0], [BOT]))
         self.assertEqual(commands.parse(comments, OWNER, h), [])
         ignored = commands.rejected(comments, OWNER, h)
         self.assertEqual(len(ignored), 1)
@@ -122,21 +147,27 @@ class OwnerCommandTest(unittest.TestCase):
 
     def test_an_edit_by_another_login_is_ignored_even_when_the_owner_edited_last(self):
         comments = [rest(1, OWNER, "/resume", edited=True)]
-        h = history(node(1, OWNER, [STRANGER, OWNER]))
+        h = history(node(comments[0], [STRANGER, OWNER]))
         self.assertEqual(commands.parse(comments, OWNER, h), [])
         self.assertIn(STRANGER, commands.rejected(comments, OWNER, h)[0]["reason"])
 
     def test_an_edit_by_a_deleted_account_is_ignored(self):
         comments = [rest(1, OWNER, "/approve", edited=True)]
-        h = history(node(1, OWNER, [None]))
+        h = history(node(comments[0], [None]))
         self.assertEqual(commands.parse(comments, OWNER, h), [])
         self.assertIn("deleted account", commands.rejected(comments, OWNER, h)[0]["reason"])
 
     def test_a_history_longer_than_one_page_is_ignored(self):
         comments = [rest(1, OWNER, "/approve", edited=True)]
-        h = history(node(1, OWNER, [OWNER], total=provenance.EDITS_PER_ITEM + 5))
+        h = history(node(comments[0], [OWNER], total=provenance.EDITS_PER_ITEM + 5))
         self.assertEqual(commands.parse(comments, OWNER, h), [])
-        self.assertIn("cannot be checked", commands.rejected(comments, OWNER, h)[0]["reason"])
+        self.assertIn("incomplete", commands.rejected(comments, OWNER, h)[0]["reason"])
+
+    def test_an_edit_without_history_entries_is_ignored_even_when_the_last_editor_is_the_owner(self):
+        comments = [rest(1, OWNER, "/approve", edited=True)]
+        h = history(node(comments[0], [OWNER], entries=False))
+        self.assertEqual(commands.parse(comments, OWNER, h), [])
+        self.assertIn("incomplete", commands.rejected(comments, OWNER, h)[0]["reason"])
 
     def test_history_fetch_failure_ignores_edited_comments_and_says_why(self):
         comments = [rest(1, OWNER, "/go", edited=True), rest(2, OWNER, "/approve")]
@@ -159,13 +190,33 @@ class OwnerCommandTest(unittest.TestCase):
         self.assertEqual(commands.parse([{"id": 3, "user": {"login": OWNER}, "body": "/go", "created_at": CREATED}],
                                         OWNER, unavailable()), [])
 
-    def test_graphql_wins_over_rest_timestamps(self):
-        # REST says unedited, GraphQL knows the bot edited it: the history decides.
-        self.assertEqual(commands.parse([rest(1, OWNER, "/go")], OWNER, history(node(1, OWNER, [BOT]))), [])
+    def test_graphql_history_wins_over_rest_timestamps(self):
+        c = rest(1, OWNER, "/go")
+        self.assertEqual(commands.parse([c], OWNER, history(node(c, [BOT]))), [])
+
+    def test_rest_edited_but_graphql_unedited_is_not_counted(self):
+        # Two replicas disagree: REST says edited an hour later, GraphQL knows of no edit. Trust neither.
+        c = rest(1, OWNER, "/go", edited=True)
+        h = history(node(c))
+        self.assertEqual(commands.parse([c], OWNER, h), [])
+        self.assertIn("REST shows it edited", commands.rejected([c], OWNER, h)[0]["reason"])
+
+    def test_the_text_comes_from_the_same_read_as_the_history(self):
+        c = rest(1, OWNER, "/go")  # REST (a stale replica) shows a command…
+        self.assertEqual(commands.parse([c], OWNER, history(node(c, body="thanks, looks good"))), [])
+        c2 = rest(2, OWNER, "thanks")  # …or GraphQL has the newer text: the checked text is the one read
+        self.assertEqual([x["command"] for x in commands.parse([c2], OWNER, history(node(c2, body="/approve")))],
+                         ["approve"])
+
+    def test_an_author_mismatch_between_the_two_reads_is_not_counted(self):
+        c = rest(1, OWNER, "/go")
+        forged = node(c)
+        forged["author"] = actor(STRANGER)
+        self.assertEqual(commands.parse([c], OWNER, history(forged)), [])
 
     def test_ignored_lists_only_owner_comments_with_commands(self):
         comments = [rest(1, OWNER, "thanks", edited=True), rest(2, BOT, "/go", edited=True)]
-        h = history(node(1, OWNER, [BOT]), node(2, BOT, [BOT]))
+        h = history(node(comments[0], [BOT]), node(comments[1], [BOT]))
         self.assertEqual(commands.rejected(comments, OWNER, h), [])
 
 
@@ -173,22 +224,26 @@ class OtherOwnerInputTest(unittest.TestCase):
     BLOCK = '/demo-decisions\n```json\n{"decisions": {"release": {"decision": "go"}}}\n```'
 
     def test_a_demo_decisions_block_edited_in_by_the_review_bot_is_ignored(self):
-        comments = [rest(1, OWNER, self.BLOCK, edited=True)]
-        self.assertIsNone(demo.decisions_from_comments(comments, OWNER, history(node(1, OWNER, [REVIEWER]))))
-        self.assertIsNotNone(demo.decisions_from_comments(comments, OWNER, history(node(1, OWNER, [OWNER]))))
+        c = rest(1, OWNER, self.BLOCK, edited=True)
+        self.assertIsNone(demo.decisions_from_comments([c], OWNER, history(node(c, [REVIEWER]))))
+        self.assertIsNotNone(demo.decisions_from_comments([c], OWNER, history(node(c, [OWNER]))))
 
     def test_a_reversal_edited_in_by_the_team_bot_is_ignored(self):
         comments = [rest(1, BOT, owner.decision_comment("use X"), at="2026-09-29T09:00:00Z"),
                     rest(2, OWNER, "/reject use Y", edited=True)]
-        self.assertEqual(owner.reversed_by_owner(comments, OWNER, history(node(1, BOT), node(2, OWNER, [BOT]))), {})
-        self.assertEqual(owner.reversed_by_owner(comments, OWNER, history(node(1, BOT), node(2, OWNER)))["text"],
-                         "use Y")
+        self.assertEqual(owner.reversed_by_owner(comments, OWNER, history(node(comments[0]), node(comments[1], [BOT])),
+                                                 [BOT]), {})
+        self.assertEqual(owner.reversed_by_owner(comments, OWNER, history(node(comments[0]), node(comments[1], [OWNER])),
+                                                 [BOT])["text"], "use Y")
 
     def test_issue_body_is_the_owners_only_when_they_wrote_it_and_nobody_else_edited_it(self):
         issue = {"user": {"login": OWNER}, "body": "Build X", "created_at": CREATED, "updated_at": EDITED}
-        self.assertTrue(provenance.body_statement(issue, OWNER, history())["owner_statement"])
+        mine = provenance.body_statement(issue, OWNER, history())
+        self.assertTrue(mine["owner_statement"])
+        self.assertEqual(mine["body"], "Build X")
         edited = provenance.body_statement(issue, OWNER, history(issue_editors=[BOT]))
         self.assertFalse(edited["owner_statement"])
+        self.assertIsNone(edited["body"])
         self.assertEqual(edited["edited_at"], EDITED)
         self.assertIn(BOT, edited["editors"])
         bot_issue = dict(issue, user={"login": BOT})
@@ -197,8 +252,80 @@ class OtherOwnerInputTest(unittest.TestCase):
         self.assertFalse(provenance.body_statement(issue, OWNER, unavailable())["owner_statement"])
 
 
+class TeamDecisionDateTest(unittest.TestCase):
+    """A decision marker dates the team's decision; an owner /reject after it is a reversal."""
+    DECIDED = rest(1, BOT, owner.decision_comment("use X"), at="2026-09-29T09:00:00Z")
+    REJECT = rest(2, OWNER, "/reject use Y", at="2026-09-29T10:00:00Z")
+
+    def test_a_marker_posted_by_someone_outside_the_team_cannot_bury_a_reversal(self):
+        buried = rest(3, STRANGER, owner.decision_comment("still X"), at="2026-09-29T12:00:00Z")
+        comments = [self.DECIDED, self.REJECT, buried]
+        h = history(*(node(c) for c in comments))
+        self.assertEqual(owner.reversed_by_owner(comments, OWNER, h, [BOT])["text"], "use Y")
+
+    def test_a_marker_edited_into_a_later_team_comment_cannot_bury_it_either(self):
+        later = rest(3, BOT, owner.decision_comment("still X"), at="2026-09-29T12:00:00Z", edited=True)
+        comments = [self.DECIDED, self.REJECT, later]
+        h = history(node(self.DECIDED), node(self.REJECT), node(later, [REVIEWER]))
+        self.assertEqual(owner.reversed_by_owner(comments, OWNER, h, [BOT])["text"], "use Y")
+        self.assertEqual(owner.team_decided_at(comments, [BOT, OWNER], h), "2026-09-29T09:00:00Z")
+
+    def test_the_teams_own_later_decision_answers_it(self):
+        later = rest(3, BOT, owner.decision_comment("use Y", "2"), at="2026-09-29T12:00:00Z")
+        comments = [self.DECIDED, self.REJECT, later]
+        self.assertIn("pt-reversal-handled id=2", later["body"])
+        self.assertEqual(owner.reversed_by_owner(comments, OWNER, history(*(node(c) for c in comments)), [BOT]), {})
+
+
+class DecideCliTest(unittest.TestCase):
+    def run_decide(self, argv, comments):
+        posted = []
+
+        def api(path, method="GET", fields=None, auth=None):
+            if path == "repos/o/r/issues/7" and method == "GET":
+                return {"number": 7, "title": "t", "html_url": "u", "state": "open", "labels": [{"name": "kind:task"}]}
+            if path == "repos/o/r/issues/7/comments" and method == "POST":
+                posted.append(fields["body"])
+                return {"html_url": "https://x/c", "id": 9}
+            if path == "repos/o/r/issues/7" and method == "PATCH":
+                return {"number": 7, "title": "t", "html_url": "u", "state": "open", "labels": []}
+            raise AssertionError(f"{method} {path}")
+
+        stdout = io.StringIO()
+        with mock.patch.object(sys, "argv", ["backlog", *argv]), \
+             mock.patch.object(backlog.gh, "repo", return_value="o/r"), \
+             mock.patch.object(backlog.gh, "api", side_effect=api), \
+             mock.patch.object(backlog.gh, "api_list", return_value=comments), \
+             mock.patch.object(backlog.gh, "graphql", return_value=graphql_page([node(c) for c in comments])), \
+             mock.patch.object(backlog.gh, "owner_login", return_value=OWNER), \
+             mock.patch.object(backlog.gh, "token_login", return_value=BOT), \
+             mock.patch.object(sys, "stdout", stdout):
+            backlog.main()
+        return posted
+
+    COMMENTS = [TeamDecisionDateTest.DECIDED, TeamDecisionDateTest.REJECT]
+
+    def test_decide_refuses_while_an_owner_reversal_is_open(self):
+        with self.assertRaises(SystemExit) as caught:
+            self.run_decide(["decide", "7", "--body", "still X"], self.COMMENTS)
+        self.assertIn("--handles-reversal 2", str(caught.exception))
+
+    def test_decide_naming_the_reversal_records_it_as_handled(self):
+        posted = self.run_decide(["decide", "7", "--body", "use Y", "--handles-reversal", "2"], self.COMMENTS)
+        self.assertIn("pt-reversal-handled id=2", posted[0])
+
+    def test_decide_without_a_reversal_just_records(self):
+        posted = self.run_decide(["decide", "7", "--body", "use X"], [TeamDecisionDateTest.DECIDED])
+        self.assertNotIn("pt-reversal-handled", posted[0])
+
+    def test_a_decision_marker_cannot_be_posted_as_a_plain_comment(self):
+        with self.assertRaises(SystemExit) as caught:
+            self.run_decide(["comment", "7", "--body", owner.decision_comment("x")], [])
+        self.assertIn("backlog decide", str(caught.exception))
+
+
 class AnswersCliTest(unittest.TestCase):
-    def run_answers(self, comments, graphql):
+    def run_answers(self, comments, graphql, acted=([], "")):
         def api(path, method="GET", fields=None, auth=None):
             if path == "repos/o/r/issues/7" and method == "GET":
                 return {"user": {"login": BOT}, "body": "ask", "labels": [], "created_at": CREATED,
@@ -211,6 +338,7 @@ class AnswersCliTest(unittest.TestCase):
              mock.patch.object(backlog.gh, "api", side_effect=api), \
              mock.patch.object(backlog.gh, "api_list", return_value=comments), \
              mock.patch.object(backlog.gh, "graphql", **graphql), \
+             mock.patch.object(backlog.runlogissue, "acted_on", return_value=acted), \
              mock.patch.object(backlog.gh, "owner_login", return_value=OWNER), \
              mock.patch.object(backlog.gh, "token_login", return_value=BOT), \
              mock.patch.object(backlog.gh, "acts_as_owner", return_value=False), \
@@ -222,13 +350,14 @@ class AnswersCliTest(unittest.TestCase):
         done = brief.answer_comment("done", "created", "сделал", "owner")
         comments = [rest(1, OWNER, "/go", edited=True), rest(2, OWNER, "/approve"),
                     rest(3, OWNER, done), rest(4, OWNER, done, edited=True)]
-        data = self.run_answers(comments, {"return_value": graphql_page(
-            [node(1, OWNER, [BOT]), node(2, OWNER), node(3, OWNER), node(4, OWNER, [STRANGER])], issue_author=BOT)})
+        nodes = [node(comments[0], [BOT]), node(comments[1]), node(comments[2]), node(comments[3], [STRANGER])]
+        data = self.run_answers(comments, {"return_value": graphql_page(nodes, issue_author=BOT)})
         self.assertEqual([c["command"] for c in data["commands"]], ["approve"])
         self.assertEqual([i["comment_id"] for i in data["ignored"]], [1])
         self.assertEqual([d["comment_id"] for d in data["done"]], [3])
         self.assertFalse(data["body"]["owner_statement"])
         self.assertEqual(data["history_error"], "")
+        self.assertEqual(data["vanished"], [])
 
     def test_history_outage_is_reported(self):
         data = self.run_answers([rest(1, OWNER, "/go", edited=True)],
@@ -237,10 +366,123 @@ class AnswersCliTest(unittest.TestCase):
         self.assertIn("timeout", data["history_error"])
         self.assertIn("timeout", data["ignored"][0]["reason"])
 
+    def test_a_deleted_command_the_team_acted_on_is_flagged(self):
+        c = rest(2, OWNER, "/approve")
+        acted = ([{"issue": 7, "comment_id": 1, "run_id": "r1"}, {"issue": 7, "comment_id": 2, "run_id": "r1"},
+                  {"issue": 8, "comment_id": 5, "run_id": "r1"}], "")
+        data = self.run_answers([c], {"return_value": graphql_page([node(c)])}, acted)
+        self.assertEqual(data["vanished"], [{"issue": 7, "comment_id": 1, "run_id": "r1"}])
+
+    def test_an_unreadable_run_log_is_reported_not_guessed(self):
+        c = rest(2, OWNER, "/approve")
+        data = self.run_answers([c], {"return_value": graphql_page([node(c)])}, ([], "run log unreadable: 502"))
+        self.assertEqual(data["vanished"], [])
+        self.assertIn("502", data["vanished_check_error"])
+
+
+class ActedRecordTest(unittest.TestCase):
+    def test_acted_pairs_are_parsed_and_round_trip_through_a_run_entry(self):
+        pairs = runstate.parse_acted(["7:5890087054", "12:3"])
+        body = f"<!-- pt-run id=a slot=s state=finished -->\n{runstate.acted_marker(pairs)}\n**s** finished"
+        run = runstate.parse_runs([{"body": body, "created_at": CREATED, "id": 1}])[0]
+        self.assertEqual(run["acted"], [[7, 5890087054], [12, 3]])
+
+    def test_malformed_acted_values_are_refused_or_ignored(self):
+        for bad in ("7", "7:x", "a:1", "7:1:2"):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                runstate.parse_acted([bad])
+        body = '<!-- pt-run id=a slot=s state=finished -->\n<!-- pt-acted [[7, "x"], 3] -->'
+        self.assertEqual(runstate.parse_runs([{"body": body, "created_at": CREATED}])[0]["acted"], [])
+
+    def test_acted_on_reads_only_the_teams_unedited_entries(self):
+        log = {"number": 9, "user": {"login": BOT}, "created_at": CREATED}
+        mine = rest(1, BOT, "<!-- pt-run id=r1 slot=s state=finished -->\n<!-- pt-acted [[7, 11]] -->", edited=True)
+        planted = rest(2, BOT, "<!-- pt-run id=r2 slot=s state=finished -->\n<!-- pt-acted [[7, 12]] -->",
+                       edited=True)
+
+        def api_list(path):
+            return [log] if "labels=" in path else [mine, planted]
+
+        with mock.patch.object(gh, "api_list", side_effect=api_list), \
+             mock.patch.object(gh, "graphql", return_value=graphql_page(
+                 [node(mine, [BOT]), node(planted, [STRANGER])], issue_author=BOT)), \
+             mock.patch.object(gh, "owner_login", return_value=OWNER), \
+             mock.patch.object(gh, "token_login", return_value=BOT), \
+             mock.patch.object(project, "run_log_issue", return_value=0):
+            acted, error = runlogissue.acted_on("o/r")
+        self.assertEqual((acted, error), ([{"issue": 7, "comment_id": 11, "run_id": "r1"}], ""))
+
+    def test_finish_writes_the_acted_marker(self):
+        started = rest(1, BOT, "<!-- pt-run id=20260929T100000Z-slot-pm slot=slot-pm state=started -->")
+        log = {"number": 9, "user": {"login": BOT}, "labels": [], "html_url": "https://x/9"}
+        patched = []
+
+        def api(path, method="GET", fields=None, auth=None):
+            if method == "PATCH":
+                patched.append(fields["body"])
+            return {}
+
+        with mock.patch.object(sys, "argv", ["runlog", "finish", "20260929T100000Z-slot-pm", "finished",
+                                             "--acted", "7:5890087054"]), \
+             mock.patch.object(runlog.gh, "repo", return_value="o/r"), \
+             mock.patch.object(runlog.gh, "api", side_effect=api), \
+             mock.patch.object(runlog.gh, "api_list", side_effect=lambda p: [log] if "labels=" in p else [started]), \
+             mock.patch.object(runlog.gh, "graphql", return_value=graphql_page([node(started)], issue_author=BOT)), \
+             mock.patch.object(runlog.gh, "owner_login", return_value=OWNER), \
+             mock.patch.object(runlog.gh, "app_mode", return_value=True), \
+             mock.patch.object(runlog.gh, "token_login", return_value=BOT), \
+             mock.patch.object(runlog.runlogissue.project, "run_log_issue", return_value=0), \
+             mock.patch.object(sys, "stdout", io.StringIO()), self.assertRaises(SystemExit):
+            runlog.main()
+        self.assertIn("<!-- pt-acted [[7, 5890087054]] -->", patched[0])
+
+
+class RunLogChoiceTest(unittest.TestCase):
+    def issue(self, number, login, at):
+        return {"number": number, "user": {"login": login}, "created_at": at}
+
+    def test_an_issue_opened_by_anyone_else_is_never_the_log(self):
+        issues = [self.issue(40, STRANGER, "2026-09-30T00:00:00Z"), self.issue(3, BOT, "2026-09-01T00:00:00Z")]
+        self.assertEqual(runlogissue.choose(issues, {OWNER, BOT})["number"], 3)
+        self.assertIsNone(runlogissue.choose([self.issue(40, REVIEWER, CREATED)], {OWNER, BOT}))
+
+    def test_two_team_candidates_are_refused(self):
+        issues = [self.issue(3, OWNER, "2026-09-01T00:00:00Z"), self.issue(40, BOT, "2026-09-30T00:00:00Z")]
+        with self.assertRaises(runlogissue.AmbiguousLog) as caught:
+            runlogissue.choose(issues, {OWNER, BOT})
+        self.assertIn("run_log_issue", str(caught.exception))
+
+    def test_the_pinned_issue_wins_without_a_search(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "project.yml")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("team:\n  plugin_ref: stable\n  run_log_issue: 22   # pinned by kickoff\n")
+            self.assertEqual(project.run_log_issue(path), 22)
+            self.assertEqual(project.run_log_issue(os.path.join(tmp, "missing.yml")), 0)
+        with mock.patch.object(project, "run_log_issue", return_value=22), \
+             mock.patch.object(gh, "api", return_value={"number": 22}) as api, \
+             mock.patch.object(gh, "api_list", side_effect=AssertionError("no search when pinned")):
+            self.assertEqual(runlogissue.find("o/r")["number"], 22)
+        api.assert_called_once_with("repos/o/r/issues/22")
+
+    def test_runlog_refuses_to_start_on_an_ambiguous_log(self):
+        issues = [self.issue(3, OWNER, "2026-09-01T00:00:00Z"), self.issue(40, BOT, "2026-09-30T00:00:00Z")]
+        with mock.patch.object(sys, "argv", ["runlog", "start", "slot-dev"]), \
+             mock.patch.object(runlog.gh, "repo", return_value="o/r"), \
+             mock.patch.object(runlog.gh, "api", side_effect=AssertionError("must not write")), \
+             mock.patch.object(runlog.gh, "api_list", return_value=issues), \
+             mock.patch.object(runlog.gh, "owner_login", return_value=OWNER), \
+             mock.patch.object(runlog.gh, "token_login", return_value=BOT), \
+             mock.patch.object(runlog.runlogissue.project, "run_log_issue", return_value=0), \
+             self.assertRaises(SystemExit) as caught:
+            runlog.main()
+        self.assertIn("several run-log issues", str(caught.exception))
+
 
 class RunLogTest(unittest.TestCase):
     ISSUE = {"number": 9, "user": {"login": BOT}, "labels": [{"name": "team:paused"}],
-             "html_url": "https://github.com/o/r/issues/9"}
+             "html_url": "https://github.com/o/r/issues/9", "created_at": CREATED}
+    PAUSE = "<!-- pt-paused -->\n**Team paused**"
 
     def start(self, comments, graphql):
         calls = []
@@ -261,23 +503,22 @@ class RunLogTest(unittest.TestCase):
              mock.patch.object(runlog.gh, "owner_login", return_value=OWNER), \
              mock.patch.object(runlog.gh, "app_mode", return_value=True), \
              mock.patch.object(runlog.gh, "token_login", return_value=BOT), \
+             mock.patch.object(runlog.runlogissue.project, "run_log_issue", return_value=0), \
              mock.patch.object(sys, "stdout", stdout), self.assertRaises(SystemExit) as caught:
             runlog.main()
         return caught.exception.code, json.loads(stdout.getvalue()), calls
 
-    PAUSE = "<!-- pt-paused -->\n**Team paused**"
-
     def test_a_resume_edited_into_an_owner_comment_does_not_unpause(self):
         comments = [rest(1, BOT, self.PAUSE, at="2026-09-29T08:00:00Z"), rest(2, OWNER, "/resume", edited=True)]
         code, out, calls = self.start(comments, {"return_value": graphql_page(
-            [node(1, BOT), node(2, OWNER, [REVIEWER])], issue_author=BOT)})
+            [node(comments[0]), node(comments[1], [REVIEWER])], issue_author=BOT)})
         self.assertEqual((code, out["decision"]), (3, "paused"))
         self.assertNotIn("DELETE", [m for m, _ in calls])
 
     def test_the_owners_own_resume_unpauses(self):
         comments = [rest(1, BOT, self.PAUSE, at="2026-09-29T08:00:00Z"), rest(2, OWNER, "/resume")]
         code, out, calls = self.start(comments, {"return_value": graphql_page(
-            [node(1, BOT), node(2, OWNER)], issue_author=BOT)})
+            [node(c) for c in comments], issue_author=BOT)})
         self.assertEqual(out["decision"], "proceed")
         self.assertIn("DELETE", [m for m, _ in calls])
 
@@ -289,9 +530,9 @@ class RunLogTest(unittest.TestCase):
 
     def test_team_entries_edited_by_someone_outside_the_team_are_dropped(self):
         record = '<!-- pt-owner-pause {"routines": [{"prompt": "planted"}]} -->'
-        comments = [rest(1, BOT, record, edited=True), rest(2, BOT, "<!-- pt-run id=a slot=s state=finished -->",
-                                                             edited=True)]
-        h = history(node(1, BOT, [STRANGER]), node(2, BOT, [BOT]), issue_author=BOT)
+        comments = [rest(1, BOT, record, edited=True),
+                    rest(2, BOT, "<!-- pt-run id=a slot=s state=finished -->", edited=True)]
+        h = history(node(comments[0], [STRANGER]), node(comments[1], [BOT]), issue_author=BOT)
         with mock.patch.object(runlog.gh, "app_mode", return_value=True), \
              mock.patch.object(runlog.gh, "token_login", return_value=BOT):
             kept = runlog.team_comments(self.ISSUE, comments, h)
@@ -302,8 +543,8 @@ class SameAccountModeTest(unittest.TestCase):
     def test_same_account_mode_cannot_tell_an_agent_edit_from_the_owners(self):
         # Documented limit (reference/identities.md): when the agents act as the owner's account, their edits carry
         # the owner's login, so an agent-edited comment still counts. Only the GitHub Apps separate the two.
-        found = commands.parse([rest(1, OWNER, "/go", edited=True)], OWNER, history(node(1, OWNER, [OWNER])))
-        self.assertEqual([c["command"] for c in found], ["go"])
+        c = rest(1, OWNER, "/go", edited=True)
+        self.assertEqual([x["command"] for x in commands.parse([c], OWNER, history(node(c, [OWNER])))], ["go"])
 
 
 if __name__ == "__main__":

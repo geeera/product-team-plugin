@@ -125,7 +125,17 @@ settings and deleting the old one there.
   then does no work at all (`decision: unverified`). The same check covers the issue body (`backlog answers` →
   `body.owner_statement`, and `body.edited_at`/`editors`: an approval given before someone else rewrote the question
   is an approval of the old text) and the team's own run-log entries and pause records (edits allowed only by the
-  team's logins). Reactions are never read as approvals.
+  team's logins). Reactions are never read as approvals. The text that is checked comes from the same GraphQL
+  read as its history (REST only as the fallback above), and when REST shows an edit that GraphQL does not, the
+  comment is ignored as well.
+- **Team decisions** are dated only by decision comments of the team's own logins that nobody else edited, so a
+  marker posted or edited in by someone else cannot bury your `/reject`; `backlog decide` refuses a new decision
+  while your reversal is open unless it names it (`--handles-reversal`).
+- **The run log** is pinned (`team.run_log_issue`) or the single labelled issue the team or you opened — an
+  issue someone else opens and labels is never the log.
+- **Deleted commands**: GitHub keeps no trace of a deleted comment. Runs record the ids of the commands they acted
+  on (`runlog finish --acted`), and `backlog answers` lists under `vanished` any of them that is gone, for you to
+  look at — the team does not act on it again.
 - **`same_account`** (`backlog answers`, the inbox, the gate warning) is true when an agent in the session can write
   as you: the agents' own identity is your account, **or**, in app mode, any personal credential in the session
   (`PT_OWNER_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN`, `gh auth`) resolves to your login. Only a session with none of those
@@ -181,8 +191,12 @@ It does not:
 - protect the app keys from anyone who can edit the cloud environment or read your machine;
 - tell your edits from an agent's **in same-account mode**. There the agents *are* your login, so a comment they
   edit still reads as edited by you and counts; the edit check only separates you from the apps and from other
-  collaborators. Nor does it help against anyone holding your own credentials (`PT_OWNER_TOKEN`, `gh auth`) —
-  such a session is `same_account: true` for the same reason;
+  collaborators;
+- help against **anyone holding your own credentials**: `PT_OWNER_TOKEN`, your `gh auth`, a `GH_TOKEN` of yours,
+  and the team console's **owner user access token** (`ghu_…`, minted by the `team-console-<env>` app through the
+  OAuth flow and stored encrypted in the console's `api` Worker — geeera/team-console ADR 0003). Every write with
+  those *is* you, edits included; the console's app key alone (Issues write as `team-console-<env>[bot]`) is
+  caught by this check like any other bot;
 - protect what GitHub itself does not record: a revision someone deletes from a comment's history still shows who
   made it, but the check trusts GitHub's edit history as complete. A comment with more than 50 edits is ignored
   rather than half-checked;

@@ -52,8 +52,8 @@ class CommandAttributionTest(unittest.TestCase):
 
     def test_team_decision_reversal_and_demo_decisions_need_the_owners_login(self):
         decided = comment(BOT, owner.decision_comment("use X"), at="2026-09-29T09:00:00Z")
-        self.assertEqual(owner.reversed_by_owner([decided, comment(BOT, "/reject why")], OWNER, NO_EDITS), {})
-        self.assertEqual(owner.reversed_by_owner([decided, comment(OWNER, "/reject why")], OWNER, NO_EDITS)["text"], "why")
+        self.assertEqual(owner.reversed_by_owner([decided, comment(BOT, "/reject why")], OWNER, NO_EDITS, [BOT]), {})
+        self.assertEqual(owner.reversed_by_owner([decided, comment(OWNER, "/reject why")], OWNER, NO_EDITS, [BOT])["text"], "why")
         block = '/demo-decisions\n```json\n{"decisions": {"release": {"decision": "go"}}}\n```'
         self.assertIsNone(demo.decisions_from_comments([comment(BOT, block)], OWNER, NO_EDITS))
         self.assertIsNotNone(demo.decisions_from_comments([comment(OWNER, block)], OWNER, NO_EDITS))
@@ -80,6 +80,7 @@ class AnswerCliTest(unittest.TestCase):
              mock.patch.object(backlog.gh, "api_list", return_value=[comment(BOT, "/approve"), comment(OWNER, "/reject no")]), \
              mock.patch.object(backlog.gh, "owner_login", return_value=OWNER), \
              mock.patch.object(backlog.provenance, "fetch", return_value=NO_EDITS), \
+             mock.patch.object(backlog.runlogissue, "acted_on", return_value=([], "")), \
              mock.patch.object(backlog.gh, "token_login", return_value=agents_login), \
              mock.patch.object(backlog.gh, "acts_as_owner", return_value=agents_login == OWNER), \
              mock.patch.object(sys, "stdout", stdout):

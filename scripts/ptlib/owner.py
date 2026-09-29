@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import Optional
+from typing import Iterable, Optional
 
 # The only reasons to ask the owner. Everything else the team decides and records.
 CATEGORIES = {
@@ -38,15 +38,30 @@ def ask_of(body: str) -> Optional[str]:
     return m.group(1).strip() if m else None
 
 
-def reversed_by_owner(comments: list, owner_login: str, history: Optional[dict]) -> dict:
-    """The owner's `/reject` written after the latest team decision on an issue, or {} (history: commands.parse)."""
-    decided_at = max((c.get("created_at") or "" for c in comments if DECISION_MARKER in (c.get("body") or "")), default="")
+def team_decided_at(comments: list, team_logins: Iterable[str], history: Optional[dict]) -> str:
+    """When the team last recorded a decision on an issue, or "".
+
+    Only decision comments by the team's own logins that nobody else edited count: a marker anyone else posts or
+    edits in would otherwise move the date past an owner's `/reject` and bury it.
+    """
+    from . import provenance  # local import: provenance talks to GitHub, the pure helpers above do not
+    decisions, _ = provenance.screen(comments, team_logins, history)
+    return max((c.get("created_at") or "" for c in decisions if DECISION_MARKER in (c.get("body") or "")), default="")
+
+
+def reversed_by_owner(comments: list, owner_login: str, history: Optional[dict], team_logins: Iterable[str]) -> dict:
+    """The owner's `/reject` written after the latest team decision on an issue, or {}.
+
+    history: provenance.fetch of the issue; team_logins: who writes the team's decisions (gh.team_logins).
+    """
+    decided_at = team_decided_at(comments, set(team_logins) | {owner_login}, history)
     if not decided_at:
         return {}
     from . import commands  # local import keeps owner.py free of the command grammar for its other callers
     return commands.latest(commands.parse(comments, owner_login, history), ["reject"], since=decided_at)
 
 
-def decision_comment(text: str) -> str:
-    return (f"{DECISION_MARKER}\n**Decided by the team** (not an owner decision under the decision policy; the "
-            f"owner can reverse it with `/reject why`).\n\n{text.strip()}\n")
+def decision_comment(text: str, handles_reversal: Optional[str] = None) -> str:
+    handled = f"\n<!-- pt-reversal-handled id={handles_reversal} -->" if handles_reversal else ""
+    return (f"{DECISION_MARKER}{handled}\n**Decided by the team** (not an owner decision under the decision policy; "
+            f"the owner can reverse it with `/reject why`).\n\n{text.strip()}\n")

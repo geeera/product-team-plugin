@@ -43,15 +43,15 @@ class ReversalTest(unittest.TestCase):
     def test_owner_reject_after_the_decision_reverses_it(self):
         comments = [self.c("geeera", owner.decision_comment("Bundle id com.x"), "2026-09-28T10:00:00Z"),
                     self.c("geeera", "/reject use com.geeera.storify", "2026-09-28T12:00:00Z")]
-        self.assertEqual(owner.reversed_by_owner(comments, "geeera", NO_EDITS)["text"], "use com.geeera.storify")
+        self.assertEqual(owner.reversed_by_owner(comments, "geeera", NO_EDITS, [])["text"], "use com.geeera.storify")
 
     def test_reject_before_the_decision_does_not(self):
         comments = [self.c("geeera", "/reject old", "2026-09-27T10:00:00Z"),
                     self.c("geeera", owner.decision_comment("x"), "2026-09-28T10:00:00Z")]
-        self.assertEqual(owner.reversed_by_owner(comments, "geeera", NO_EDITS), {})
+        self.assertEqual(owner.reversed_by_owner(comments, "geeera", NO_EDITS, []), {})
 
     def test_no_decision_no_reversal(self):
-        self.assertEqual(owner.reversed_by_owner([self.c("geeera", "/reject x", "2026-09-28T10:00:00Z")], "geeera", NO_EDITS), {})
+        self.assertEqual(owner.reversed_by_owner([self.c("geeera", "/reject x", "2026-09-28T10:00:00Z")], "geeera", NO_EDITS, []), {})
 
 
 if __name__ == "__main__":

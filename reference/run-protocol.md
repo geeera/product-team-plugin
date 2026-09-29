@@ -39,7 +39,9 @@ use the GitHub REST API with the team GitHub App's token when `PT_TEAM_APP_ID` i
    that failed. Owner-facing, short, in the owner's language from `project.yml`.
 2. `PT/scripts/runlog finish <run_id> finished --summary-file <file> [--metric key=value]...` (or `failed` if
    the run could not do its job — a crash of one subtask that was handled is still `finished`). Duration is
-   recorded automatically; add the counts the slot skill names (PRs opened, merged, blocked…).
+   recorded automatically; add the counts the slot skill names (PRs opened, merged, blocked…), and
+   `--acted <issue>:<comment_id>` for every owner command the run acted on (the `comment_id` from
+   `backlog answers`), so a command deleted later is noticed.
 3. Print the same summary as the session's final message.
 
 ## Notify

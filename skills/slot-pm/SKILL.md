@@ -47,6 +47,10 @@ an owner command that appeared in the same run in which an agent commented on th
   - it asks for a technical choice, a name, an identifier, a key layout, an order of work → the right role decides
     now and closes it: `B decide N --close --body-file <decision and why>`;
   - `team:demo` issues are always the owner's (`release`) — never close them this way.
+- **Owner reports done**: an issue whose latest comment carries `<!-- pt-owner-done -->` (the owner said in the
+  team chat that an account, secret or local task is done) → check what can be checked (e.g. `gh`/REST shows the
+  secret name exists, the environment answers), then close it and unblock the work that waited on it; if it does
+  not check out, say what is missing in the inbox.
 - **Reversals**: `B reversals` lists team decisions the owner answered with `/reject why`. For each, reopen the
   work with the owner's reason: redo the decision, or turn it into an owner question with `B ask` if the owner
   wants to decide it.

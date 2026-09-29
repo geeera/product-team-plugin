@@ -60,6 +60,15 @@ Also run the owner's `engineering-baseline:conformance-audit` if installed, to r
 - First sprint = **audit follow-ups and blockers only, no features**. Existing feature ideas the owner mentions
   become `status:proposed` for the first demo.
 
-## 5. Output
+## 5. Team chat
+The owner talks to the team in **one chat per project** (SPEC decision 17), not in GitHub issues. Sessions cannot
+be created for the owner, so walk them through it once, in their language:
+1. On claude.ai/code (works on the phone too) start a new session on this repository and name it
+   `<product> · team`; pin it.
+2. In that chat, "что нового?" / "what's new?" starts a briefing (the `team-chat` skill); plain answers there become
+   the owner's decisions. The morning digest points back to this chat.
+Record in `.product-team/owner-checklist.md` that the chat exists.
+
+## 6. Output
 Owner summary: what the project is, conventions recorded, top risks, the first sprint, checklist items, the
 routines to create (as in `kickoff` step 6).

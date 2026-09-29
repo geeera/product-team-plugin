@@ -50,6 +50,7 @@ installed plugin; with both, the skills appear twice (`/slot-pm` and `/product-t
 | Routine, weekdays ~18:07 Kyiv | `/slot-pm` |
 | Routine, Mon–Thu ~23:13 Kyiv + burn runs | `/slot-dev` |
 | Routine, Tue–Fri ~04:21 Kyiv + burn runs | `/slot-qa` |
+| Talk to the team: briefing, answering questions, asking for work (say "what's new" in the team chat) | `/team-chat` |
 | Pause the team (or just say "pause development") | `/pause` |
 | Bring it back ("resume") | `/resume` |
 
@@ -60,9 +61,9 @@ Full schedule, caps and model pinning: [reference/schedule-and-models.md](refere
 | Path | What |
 | ---- | ---- |
 | [agents/](agents/) | Roles, each pinned to a model: `pm`, `architect`, `ux-designer`, `ui-designer`, `fullstack-dev` (with tier variants `-light` on Sonnet and `-heavy` on Fable, picked from the architect's `tier:*` label), `reviewer`, `qa`, `security`, `devops`, `analyst`, plus model variants `qa-runner` (Sonnet) and `scribe` (Haiku). Products add their own specialists in `.claude/agents/` and route issues to them with `agent:<name>` |
-| [skills/](skills/) | Procedures: `kickoff`, `adopt`, `foundation`, `slot-pm`, `slot-dev`, `slot-qa`, `qa-regression`, `hotfix`, `demo-prep`, `demo-apply`, `pause`, `resume`, `backlog` |
+| [skills/](skills/) | Procedures: `kickoff`, `adopt`, `foundation`, `slot-pm`, `slot-dev`, `slot-qa`, `qa-regression`, `hotfix`, `demo-prep`, `demo-apply`, `pause`, `resume`, `team-chat`, `backlog` |
 | [reference/](reference/) | Rules the roles share: decision policy (what the owner decides, what the team decides), workflow (branches, hotfix, labels, approvals, gates, budget), schedule and models, run protocol, stack contract, deploy recipes, design system, QA checklists |
-| [scripts/](scripts/) | `vendor` (install into a product, self-update), `pr` (pull requests over REST), `backlog` (tracker adapter; `backlog next` is the development plan), `runlog` (run log, stop conditions, durations, `stats`), `slot-context` (normal/burn/freeze mode), `inbox` (the owner's pinned "Needs you" issue), `digest` (sends it to the owner's phone daily), `workflows`, `sprint-metrics` (plan vs shipped, cycle time, QA first-pass rate), `demo-page` (build the demo page, read decisions). Python 3.9+ stdlib only; GitHub via REST with `GH_TOKEN` |
+| [scripts/](scripts/) | `vendor` (install into a product, self-update), `pr` (pull requests over REST), `backlog` (tracker adapter; `backlog next` is the development plan), `runlog` (run log, stop conditions, durations, `stats`), `slot-context` (normal/burn/freeze mode), `inbox` (the owner's pinned "Needs you" issue), `digest` (sends it to the owner's phone daily), `brief` (the team-chat briefing), `workflows`, `sprint-metrics` (plan vs shipped, cycle time, QA first-pass rate), `demo-page` (build the demo page, read decisions). Python 3.9+ stdlib only; GitHub via REST with `GH_TOKEN` |
 | [templates/](templates/) | `project.yml` contract, owner checklist, CI, security, branch-guard, deploy and owner-digest workflows, demo page |
 | [tests/](tests/) | Unit tests for the script logic |
 

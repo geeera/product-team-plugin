@@ -13,6 +13,10 @@ skills. Output is JSON on stdout; errors go to stderr with a non-zero exit.
                  --ask "what to answer" — anything else is the team's call (`backlog decide`)
   backlog ask N --owner-category C --ask "what to answer"
                  turn an existing issue into a policy-conform owner question (answer line on top, owner:* label)
+  backlog answer N --command approve|reject|go|no-go|override|done --owner-said "…" [--text T]
+                 the owner's answer given in the team chat (interactive only — scheduled runs never call it);
+                 allowed commands depend on the item: questions and designs approve/reject, the demo issue
+                 go/no-go/override, action items done
   backlog reversals [--days 14]  team decisions the owner answered with /reject since they were made
   backlog decide N (--body B | --body-file F) [--close]
                  record a team decision on the issue (label team-decided); --close closes a question it answers
@@ -38,7 +42,7 @@ from datetime import date, datetime, timedelta
 from urllib.parse import quote
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from ptlib import commands, gh, owner, picker, project  # noqa: E402
+from ptlib import brief, commands, gh, inbox, owner, picker, project  # noqa: E402
 from ptlib.calendar import KYIV, compute, pick_current_sprint  # noqa: E402
 from ptlib.labels import LABELS, STATUSES, KINDS, SEVERITIES  # noqa: E402
 
@@ -175,6 +179,21 @@ def cmd_ask(repo: str, args) -> None:
     labels = sorted({l["name"] for l in issue["labels"] if not l["name"].startswith(("owner:", "kind:"))}
                     | {"kind:question", f"owner:{args.owner_category}"})
     out(slim(gh.api(f"repos/{repo}/issues/{args.number}", "PATCH", {"body": body, "labels": labels})))
+
+
+def cmd_answer(repo: str, args) -> None:
+    issue = gh.api(f"repos/{repo}/issues/{args.number}")
+    if issue.get("state") != "open":
+        sys.exit(f"#{args.number} is closed; nothing is waiting for an answer there")
+    labels = [l["name"] for l in issue["labels"]]
+    kind = next((l[5:] for l in labels if l.startswith("kind:")), None)
+    section = inbox.classify({"labels": labels, "kind": kind})
+    try:
+        body = brief.answer_comment(args.command, args.text or "", args.owner_said or "", section or "")
+    except ValueError as exc:
+        sys.exit(f"#{args.number}: {exc}")
+    c = gh.api(f"repos/{repo}/issues/{args.number}/comments", "POST", {"body": body})
+    out({"issue": args.number, "answer": f"/{args.command}", "url": c["html_url"]})
 
 
 def cmd_reversals(repo: str, args) -> None:
@@ -317,6 +336,9 @@ def main() -> None:
     cr.add_argument("--label", action="append"); cr.add_argument("--milestone")
     cr.add_argument("--body"); cr.add_argument("--body-file")
     cr.add_argument("--owner-category", choices=sorted(owner.CATEGORIES)); cr.add_argument("--ask")
+    an2 = sub.add_parser("answer"); an2.add_argument("number", type=int)
+    an2.add_argument("--command", required=True, choices=list(brief.ANSWERABLE)); an2.add_argument("--text")
+    an2.add_argument("--owner-said", required=True)
     rv = sub.add_parser("reversals"); rv.add_argument("--days", type=int, default=14)
     ak = sub.add_parser("ask"); ak.add_argument("number", type=int)
     ak.add_argument("--owner-category", required=True, choices=sorted(owner.CATEGORIES)); ak.add_argument("--ask", required=True)
@@ -335,7 +357,7 @@ def main() -> None:
     args = p.parse_args()
 
     handlers = {
-        "init": cmd_init, "list": cmd_list, "show": cmd_show, "create": cmd_create, "move": cmd_move, "close": cmd_close, "decide": cmd_decide, "ask": cmd_ask, "reversals": cmd_reversals, "milestone": cmd_milestone,
+        "init": cmd_init, "list": cmd_list, "show": cmd_show, "create": cmd_create, "move": cmd_move, "close": cmd_close, "decide": cmd_decide, "ask": cmd_ask, "reversals": cmd_reversals, "answer": cmd_answer, "milestone": cmd_milestone,
         "label": cmd_label, "comment": cmd_comment, "link-pr": cmd_link_pr, "answers": cmd_answers,
         "sprint": cmd_sprint, "next": cmd_next,
     }

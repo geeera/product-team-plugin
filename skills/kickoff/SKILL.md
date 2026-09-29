@@ -42,6 +42,7 @@ has commits:
   `.claude/`) — cloud sessions load them from the clone; they never install plugins from repository settings.
 - `CLAUDE.md`: how to work in this repo — commands, structure, conventions, links to decisions.
 - `backlog init`; `backlog sprint create "Sprint 01" <demo day, two weeks out, a weekday>`; `inbox update`.
+- `runlog url` (creates the run log) and write its issue number to `team.run_log_issue` in `project.yml`.
 
 ## 5. First sprint = foundation
 Create `kind:chore` issues, `status:approved` (the owner approved the kickoff), milestone Sprint 01:

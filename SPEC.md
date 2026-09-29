@@ -82,7 +82,7 @@ Communication is from the phone.
   act as the owner's account.
 - **Agent identities** (2026-09-29, amends the above): two GitHub Apps — a team app every script and push acts as,
   and a review app only verdicts are posted as (`reference/identities.md`). Only the review bot's verdicts pass the
-  gate, and only comments by the owner's own login count as owner commands; the team chat records the owner's
+  gate, and only comments by the owner's own login, never edited by anyone else, count as owner commands; the team chat records the owner's
   answers with a dedicated `PT_OWNER_TOKEN`, and any session holding a credential of the owner counts as
   same-account. `pr push` goes straight to GitHub as the app and refuses URL rewrites. Keys stay in environment settings; roles inside one session still share
   them, so the environment split remains the boundary. Same-account mode stays supported as the default.

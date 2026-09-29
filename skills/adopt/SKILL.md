@@ -57,6 +57,7 @@ Also run the owner's `engineering-baseline:conformance-audit` if installed, to r
 - Every audit finding → `kind:finding` with severity; blockers get `release-blocker`. Anything only the owner
   or a local machine can do gets `needs:owner` / `needs:local`.
 - `scripts/inbox update` so the owner starts with one list.
+- `scripts/runlog url` (creates the run log) and write its issue number to `team.run_log_issue` in `project.yml`.
 - First sprint = **audit follow-ups and blockers only, no features**. Existing feature ideas the owner mentions
   become `status:proposed` for the first demo.
 

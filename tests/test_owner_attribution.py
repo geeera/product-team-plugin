@@ -32,27 +32,31 @@ OWNER, BOT = "geeera", "acme-team[bot]"
 RELAYED = "/approve\n\n_Answered by the owner in the team chat: «да»_\n"
 
 
+NO_EDITS = {"issue": None, "comments": {}}  # GitHub knows of no edits to any of these comments
+
+
 def comment(login, body, at="2026-09-29T10:00:00Z"):
-    return {"user": {"login": login}, "body": body, "created_at": at, "id": 1, "html_url": "https://x/1"}
+    return {"user": {"login": login}, "body": body, "created_at": at, "updated_at": at, "id": 1,
+            "html_url": "https://x/1"}
 
 
 class CommandAttributionTest(unittest.TestCase):
     def test_a_bot_comment_never_counts_as_an_owner_command(self):
         # Even a comment that claims to relay the owner's words: in app mode only the owner's login speaks for them.
-        found = commands.parse([comment(BOT, RELAYED), comment(BOT, "/go ship it")], OWNER)
+        found = commands.parse([comment(BOT, RELAYED), comment(BOT, "/go ship it")], OWNER, NO_EDITS)
         self.assertEqual(found, [])
 
     def test_the_owners_own_comment_counts(self):
-        found = commands.parse([comment(BOT, "/reject no"), comment(OWNER, RELAYED)], OWNER)
+        found = commands.parse([comment(BOT, "/reject no"), comment(OWNER, RELAYED)], OWNER, NO_EDITS)
         self.assertEqual([c["command"] for c in found], ["approve"])
 
     def test_team_decision_reversal_and_demo_decisions_need_the_owners_login(self):
         decided = comment(BOT, owner.decision_comment("use X"), at="2026-09-29T09:00:00Z")
-        self.assertEqual(owner.reversed_by_owner([decided, comment(BOT, "/reject why")], OWNER), {})
-        self.assertEqual(owner.reversed_by_owner([decided, comment(OWNER, "/reject why")], OWNER)["text"], "why")
+        self.assertEqual(owner.reversed_by_owner([decided, comment(BOT, "/reject why")], OWNER, NO_EDITS, [BOT]), {})
+        self.assertEqual(owner.reversed_by_owner([decided, comment(OWNER, "/reject why")], OWNER, NO_EDITS, [BOT])["text"], "why")
         block = '/demo-decisions\n```json\n{"decisions": {"release": {"decision": "go"}}}\n```'
-        self.assertIsNone(demo.decisions_from_comments([comment(BOT, block)], OWNER))
-        self.assertIsNotNone(demo.decisions_from_comments([comment(OWNER, block)], OWNER))
+        self.assertIsNone(demo.decisions_from_comments([comment(BOT, block)], OWNER, NO_EDITS))
+        self.assertIsNotNone(demo.decisions_from_comments([comment(OWNER, block)], OWNER, NO_EDITS))
 
 
 class AnswerCliTest(unittest.TestCase):
@@ -75,6 +79,8 @@ class AnswerCliTest(unittest.TestCase):
                  "side_effect" if isinstance(owner_token, Exception) else "return_value": owner_token}), \
              mock.patch.object(backlog.gh, "api_list", return_value=[comment(BOT, "/approve"), comment(OWNER, "/reject no")]), \
              mock.patch.object(backlog.gh, "owner_login", return_value=OWNER), \
+             mock.patch.object(backlog.provenance, "fetch", return_value=NO_EDITS), \
+             mock.patch.object(backlog.runlogissue, "acted_on", return_value=([], "")), \
              mock.patch.object(backlog.gh, "token_login", return_value=agents_login), \
              mock.patch.object(backlog.gh, "acts_as_owner", return_value=agents_login == OWNER), \
              mock.patch.object(sys, "stdout", stdout):
@@ -116,12 +122,12 @@ class RunLogAuthorsTest(unittest.TestCase):
     def test_a_log_opened_by_the_owner_accepts_the_team_bot_in_app_mode(self):
         with mock.patch.object(runlog.gh, "app_mode", return_value=True), \
              mock.patch.object(runlog.gh, "token_login", return_value=BOT):
-            bodies = [c["body"] for c in runlog.team_comments(self.ISSUE, self.COMMENTS)]
+            bodies = [c["body"] for c in runlog.team_comments(self.ISSUE, self.COMMENTS, NO_EDITS)]
         self.assertEqual(bodies, ["old run", "new run"])
 
     def test_same_account_mode_keeps_only_the_log_author(self):
         with mock.patch.object(runlog.gh, "app_mode", return_value=False):
-            bodies = [c["body"] for c in runlog.team_comments(self.ISSUE, self.COMMENTS)]
+            bodies = [c["body"] for c in runlog.team_comments(self.ISSUE, self.COMMENTS, NO_EDITS)]
         self.assertEqual(bodies, ["old run"])
 
 

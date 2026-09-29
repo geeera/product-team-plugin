@@ -13,6 +13,8 @@ _ITEM = re.compile(r"^- (?:#(\d+) )?\[(.+?)\]\((\S+?)\)(?: — (.+))?$")
 
 HEADER = {"en": "{product}: {n} need you", "ru": "{product}: нужно твоё внимание — {n}"}
 ANSWER = {"en": "Answer", "ru": "Ответ"}
+FOOTER = {"en": "Open the team chat and say \"what's new\" to go through these.",
+          "ru": "Открой чат команды и скажи «что нового» — разберём по одному."}
 FYI_KEYS = ("Decided by the team", "Решено командой")
 # Standing items the owner already knows about; they ride along but never trigger a push on their own.
 STANDING_KEYS = ("Security setup", "Безопасность")
@@ -50,6 +52,7 @@ def format_digest(product: str, sections: List[Tuple[str, List[dict]]], language
                 lines.append(f"  {ANSWER.get(language, ANSWER['en'])}: {item['ask']}")
             lines.append(f"  {item['url']}")
         lines.append("")
+    lines.append(FOOTER.get(language, FOOTER["en"]))
     return "\n".join(lines).rstrip() + "\n"
 
 

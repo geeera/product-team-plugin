@@ -41,7 +41,7 @@ installed at run time. `git push` works through the session's own remote.
 3. Print the same summary as the session's final message.
 
 ## Notify
-The owner gets one digest a day on the phone (`owner-digest.yml`: the pinned "Needs you" list). GitHub does not
+The owner talks to the team in the project's team chat (`team-chat` skill) and gets one digest a day on the phone (`owner-digest.yml`: the pinned "Needs you" list). GitHub does not
 notify the owner about comments the agents write as the owner's account, so a comment alone reaches nobody: put
 what needs the owner in the inbox (`inbox update`). Only for something that cannot wait until tomorrow (a release
 decision on demo day, a production incident, the team pausing itself) also run

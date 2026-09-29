@@ -88,6 +88,10 @@ Communication is from the phone.
   nothing else. `backlog` refuses any other question; the team decides the rest and records it (`backlog decide`,
   or a decision record), listed as FYI in the digest and reversible with `/reject`. Every question opens with the
   answer line.
+- **Team chat** (implements decision 17, 2026-09-29): the owner never works in GitHub issues. A pinned Claude Code
+  session per product is the conversation: "what's new" gives a briefing (`scripts/brief`) and walks through the
+  owner's decisions one at a time; plain answers become the commands the team reads (`backlog answer`, marked as
+  given in the chat); requests become issues. Scheduled runs cannot write into the chat, so the digest points to it.
 - **Daily digest**: GitHub does not notify the owner about comments written with the owner's own account, so the
   inbox goes to the phone once a day through Telegram or ntfy from GitHub Actions (`owner-digest.yml`), and at once
   for what cannot wait.

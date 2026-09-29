@@ -4,6 +4,14 @@ Products follow the `stable` channel (or a pinned tag, `team.plugin_ref` in `.pr
 first `slot-pm` of the day runs `vendor self-update` and opens a PR with the entries in between. Breaking changes (a renamed label, a changed script contract, a new required
 `project.yml` key) are marked **Breaking** with the migration step.
 
+## 0.9.0
+
+- **Team chat** (SPEC decision 17): the owner talks to the team in one pinned Claude Code session per product
+  instead of GitHub issues. "What's new" gives a briefing of what changed since last time and walks through the
+  owner's decisions one at a time; plain answers ("да", "нет, потому что…") are written as the commands the team
+  reads, marked as given in the chat; requests for work become issues. `team-chat` skill, `scripts/brief`,
+  `backlog answer`. `kickoff` and `adopt` walk the owner through creating the chat; the digest points to it.
+
 ## 0.8.0
 
 - **Decision policy** (`reference/decision-policy.md`): the owner decides only money, scope, release, access,

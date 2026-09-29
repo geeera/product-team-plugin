@@ -24,9 +24,9 @@ explicit error handling, tests when the change warrants it.
    assertions). Bug fix → failing regression test first.
 5. Run the contract commands from `.product-team/project.yml` (`lint`, `test`, `build`, `e2e` if cheap
    locally). All must pass before you push.
-6. Commit with `eval "$(${CLAUDE_PLUGIN_ROOT}/scripts/pr git-identity)" && git commit …` (one shell command),
-   push with `${CLAUDE_PLUGIN_ROOT}/scripts/pr push --branch <branch>` (never a bare `git push`: it pushes as
-   the team's GitHub App when one is configured), and open a PR to the base branch with
+6. Commit with `${CLAUDE_PLUGIN_ROOT}/scripts/pr commit -m "…"` and push with
+   `${CLAUDE_PLUGIN_ROOT}/scripts/pr push --branch <branch>` — never a bare `git commit`/`git push`: with the
+   team's GitHub App configured they commit and push as its bot — and open a PR to the base branch with
    `${CLAUDE_PLUGIN_ROOT}/scripts/pr create --base <base> --head <branch> --title … --body-file …`
    (GitHub REST; do not rely on the `gh` CLI) with `Closes #<issue>`, a short summary, how it was
    tested, and screenshots for UI changes if you can produce them.

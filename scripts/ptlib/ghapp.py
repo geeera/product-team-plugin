@@ -4,7 +4,7 @@ An app is configured by PT_<KIND>_APP_ID plus its private key, either PT_<KIND>_
 PT_<KIND>_APP_KEY (the PEM, raw or base64 — cloud environment variables are single-line). The stdlib has no RSA,
 so the app's JWT is signed by the `openssl` CLI. The JWT buys an installation token scoped to the product
 repository; tokens are cached per process until shortly before they expire. Key material is never logged, printed
-or kept on disk longer than one signature.
+or written to disk (an inline key reaches openssl through a pipe), and child processes never inherit it.
 """
 from __future__ import annotations
 
@@ -14,7 +14,6 @@ import json
 import os
 import re
 import subprocess
-import tempfile
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -28,6 +27,7 @@ JWT_BACKDATE = 60
 JWT_LIFETIME = 540
 # An installation token lives an hour; renew with margin so a long command never holds an expired one.
 REFRESH_MARGIN = 300
+PIPE_LIMIT = 16384  # smallest default pipe buffer (macOS); an RSA-4096 PEM is ~3.3 KB
 _APP_ID = re.compile(r"^(?:\d+|Iv[\w.]+)$")
 
 _tokens: Dict[Tuple[str, str], Tuple[str, float]] = {}
@@ -95,10 +95,10 @@ def _b64url(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
 
 
-def _openssl_sign(message: bytes, key_path: str, kind: str) -> bytes:
+def _openssl_sign(message: bytes, key_path: str, kind: str, pass_fds: Tuple[int, ...] = ()) -> bytes:
     try:
         proc = subprocess.run(["openssl", "dgst", "-sha256", "-sign", key_path], input=message,
-                              capture_output=True, check=False)
+                              capture_output=True, check=False, pass_fds=pass_fds, env=gh.child_env())
     except FileNotFoundError as exc:
         raise AppError("the `openssl` command is not installed; it is needed to sign the GitHub App's JWT "
                        "(install OpenSSL or LibreSSL, or unset PT_*_APP_ID to use a token instead)") from exc
@@ -111,19 +111,28 @@ def _openssl_sign(message: bytes, key_path: str, kind: str) -> bytes:
 
 
 def sign(message: bytes, cfg: AppConfig) -> bytes:
-    """RS256 signature of `message` with the app's key; an inline key lives in a 0600 temp file for one call."""
+    """RS256 signature of `message` with the app's key.
+
+    An inline key never touches the disk: openssl reads it from a pipe (/dev/fd/N) passed to it alone.
+    """
     if not cfg.key_inline.strip():
-        if not os.path.isfile(cfg.key_file):
+        path = os.path.expanduser(cfg.key_file)
+        if not os.path.isfile(path):
             raise AppError(f"PT_{cfg.kind.upper()}_APP_KEY_FILE does not point to a file: {cfg.key_file}")
-        return _openssl_sign(message, cfg.key_file, cfg.kind)
-    pem = _pem(cfg.key_inline, cfg.kind)
-    fd, path = tempfile.mkstemp(prefix="pt-app-", suffix=".pem")  # mkstemp creates it 0600
-    try:
-        with os.fdopen(fd, "wb") as f:
-            f.write(pem)
         return _openssl_sign(message, path, cfg.kind)
+    pem = _pem(cfg.key_inline, cfg.kind)
+    if len(pem) > PIPE_LIMIT:
+        # The whole key is written before openssl starts; beyond one pipe buffer that write would block.
+        raise AppError(f"PT_{cfg.kind.upper()}_APP_KEY is too large for a private key ({len(pem)} bytes)")
+    read_fd, write_fd = os.pipe()
+    try:
+        try:
+            os.write(write_fd, pem)
+        finally:
+            os.close(write_fd)
+        return _openssl_sign(message, f"/dev/fd/{read_fd}", cfg.kind, pass_fds=(read_fd,))
     finally:
-        os.unlink(path)
+        os.close(read_fd)
 
 
 def jwt(cfg: AppConfig, now: Optional[float] = None) -> str:

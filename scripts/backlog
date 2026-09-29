@@ -16,7 +16,8 @@ skills. Output is JSON on stdout; errors go to stderr with a non-zero exit.
   backlog answer N --command approve|reject|go|no-go|override|done --owner-said "…" [--text T]
                  the owner's answer given in the team chat (interactive only — scheduled runs never call it);
                  allowed commands depend on the item: questions and designs approve/reject, the demo issue
-                 go/no-go/override, action items done
+                 go/no-go/override, action items done. With the team GitHub App it posts with PT_OWNER_TOKEN
+                 (the owner's own token; reference/identities.md) and refuses without it
   backlog reversals [--days 14]  team decisions the owner answered with /reject since they were made
   backlog decide N (--body B | --body-file F) [--close]
                  record a team decision on the issue (label team-decided); --close closes a question it answers

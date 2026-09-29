@@ -19,7 +19,7 @@ Skip if `.claude/product-team/MANIFEST.json` does not exist. `PR` = `${CLAUDE_PL
      summary) and stop; `pending` → leave it for the next run. Never open a second update PR.
 2. No such PR → `python3 .claude/product-team/scripts/vendor self-update` (follows `team.plugin_ref` in
    `project.yml`: the `stable` channel or a pinned tag). On `updated: true`: branch
-   `chore/product-team-<version>` from `dev`, commit `.claude/` (`eval "$(PR git-identity)" && git commit …`),
+   `chore/product-team-<version>` from `dev`, commit `.claude/` with `PR commit -m …`,
    `PR push`, `PR create --base dev` titled
    `chore: product team <version>` with the CHANGELOG entries between the two versions as the body. The branch
    must be named exactly `chore/product-team-<version>` and contain only what `vendor` wrote — `pr merge --ci-only`

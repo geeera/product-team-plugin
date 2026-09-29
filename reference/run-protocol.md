@@ -10,7 +10,7 @@ repository and in Issues; nothing is remembered between runs.
 GitHub access goes through `PT/scripts/backlog`, `PT/scripts/pr`, `PT/scripts/runlog` and `PT/scripts/inbox`: they
 use the GitHub REST API with the team GitHub App's token when `PT_TEAM_APP_ID` is set, else the session's token
 (`GH_TOKEN`), so the `gh` CLI is not needed and must not be installed at run time. Commits and pushes go through
-`PT/scripts/pr git-identity` and `PT/scripts/pr push` (`reference/workflow.md`, `reference/identities.md`).
+`PT/scripts/pr commit` and `PT/scripts/pr push` (`reference/workflow.md`, `reference/identities.md`).
 
 ## Open
 1. `git fetch --all --prune`. Read `CLAUDE.md` and `.product-team/project.yml`. If the project file is missing,

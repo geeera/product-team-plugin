@@ -21,6 +21,9 @@ API = os.environ.get("PT_GITHUB_API", "https://api.github.com").rstrip("/")
 _NEXT = re.compile(r'<([^>]+)>;\s*rel="next"')
 _REMOTE = re.compile(r"github\.com[:/]+([^/\s]+)/([^/\s]+?)(?:\.git)?/?$")
 _token_cache: Optional[str] = None
+_cli_token_cache: Optional[str] = None
+# Identity secrets are stripped from every child process the scripts start.
+_SECRET_ENV = re.compile(r"^PT_(TEAM|REVIEW)_APP_KEY|^PT_OWNER_TOKEN$|^PT_REVIEW_TOKEN$")
 
 
 class GhError(RuntimeError):
@@ -36,15 +39,36 @@ def token() -> str:
     return personal_token()
 
 
+def child_env(**extra: str) -> dict:
+    """os.environ for a child process, without the identity secrets: git, openssl and gh never need them."""
+    env = {k: v for k, v in os.environ.items() if not _SECRET_ENV.match(k)}
+    env.update(extra)
+    return env
+
+
+def _gh_cli_token() -> str:
+    global _cli_token_cache
+    if _cli_token_cache is None:
+        _cli_token_cache = ""
+        if shutil.which("gh"):
+            proc = subprocess.run(["gh", "auth", "token"], capture_output=True, text=True, check=False, env=child_env())
+            _cli_token_cache = proc.stdout.strip() if proc.returncode == 0 else ""
+    return _cli_token_cache
+
+
 def personal_token() -> str:
-    """GH_TOKEN, GITHUB_TOKEN or `gh auth token` — in app mode that is the owner's own credential, if any."""
+    """GH_TOKEN, GITHUB_TOKEN or `gh auth token`: the agents' token when no team app is configured."""
     global _token_cache
     if _token_cache is None:
-        _token_cache = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN") or ""
-        if not _token_cache and shutil.which("gh"):
-            proc = subprocess.run(["gh", "auth", "token"], capture_output=True, text=True, check=False)
-            _token_cache = proc.stdout.strip() if proc.returncode == 0 else ""
+        _token_cache = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN") or _gh_cli_token()
     return _token_cache
+
+
+def personal_credentials() -> List[str]:
+    """Every personal credential present in this session (PT_OWNER_TOKEN, GH_TOKEN, GITHUB_TOKEN, `gh auth`)."""
+    found = [os.environ.get(name, "").strip() for name in ("PT_OWNER_TOKEN", "GH_TOKEN", "GITHUB_TOKEN")]
+    found.append(_gh_cli_token())
+    return list(dict.fromkeys(c for c in found if c))
 
 
 def _request(method: str, url: str, body: Optional[dict] = None, accept: str = "application/vnd.github+json",
@@ -139,7 +163,8 @@ def repo() -> str:
             return m.group(1)
     except FileNotFoundError:
         pass
-    proc = subprocess.run(["git", "remote", "get-url", "origin"], capture_output=True, text=True, check=False)
+    proc = subprocess.run(["git", "remote", "get-url", "origin"], capture_output=True, text=True, check=False,
+                          env=child_env())
     found = parse_remote(proc.stdout) if proc.returncode == 0 else None
     if not found:
         raise GhError("cannot tell the repository: set PT_REPO=owner/repo or `repo:` in .product-team/project.yml")
@@ -150,6 +175,7 @@ def review_token() -> Optional[str]:
     """The reviewers' token: the review app's, else PT_REVIEW_TOKEN (a reviewing account), else None (= token())."""
     from . import ghapp
     if ghapp.configured("review"):
+        review_login()  # refuses a review app that is really the team app
         return ghapp.installation_token("review", repo())
     return os.environ.get("PT_REVIEW_TOKEN") or None
 
@@ -167,9 +193,18 @@ def app_identity() -> dict:
 
 
 def review_login() -> Optional[str]:
-    """The review app's bot login when the review app is configured, else None."""
+    """The review app's bot login when the review app is configured, else None.
+
+    Two ids can name one app (numeric id and Iv… client id), so the bots are compared, not the configured ids.
+    """
     from . import ghapp
-    return ghapp.identity("review", repo())["login"] if ghapp.configured("review") else None
+    if not ghapp.configured("review"):
+        return None
+    login = ghapp.identity("review", repo())["login"]
+    if app_mode() and login.lower() == app_identity()["login"].lower():
+        raise GhError(f"PT_REVIEW_APP_ID and PT_TEAM_APP_ID are the same app ({login}): the review app must be a "
+                      "separate GitHub App, or the team could approve its own work")
+    return login
 
 
 def _user_login(credential: Optional[str] = None) -> Optional[str]:
@@ -188,29 +223,36 @@ def token_login() -> Optional[str]:
 
 
 def acts_as_owner(repo_name: str) -> bool:
-    """True when the agents act as the owner's account — or when that cannot be ruled out (fail closed).
+    """True when an agent in this session can write as the owner's account — or that cannot be ruled out.
 
-    In app mode the login is always known, so this is a plain comparison.
+    Same-account mode: the agents' own login is compared. App mode: the bot is not the owner, but any personal
+    credential in the session that resolves to the owner (PT_OWNER_TOKEN, GH_TOKEN, GITHUB_TOKEN, `gh auth`) lets
+    an agent post as them, so its presence fails closed too.
     """
+    owner = owner_login(repo_name).lower()
     login = token_login()
-    return login is None or login.lower() == owner_login(repo_name).lower()
+    if login is None or login.lower() == owner:
+        return True
+    if not app_mode():
+        return False
+    return any((_user_login(c) or "").lower() == owner for c in personal_credentials())
 
 
-def owner_token(repo_name: str) -> str:
-    """A token that writes as the repository owner, for relaying the owner's own words (`backlog answer`).
+def owner_token(repo_name: str) -> Optional[str]:
+    """The token that posts the owner's own words (`backlog answer`); None = the agents' token already is theirs.
 
-    Same-account mode: the agents' token is the owner's. App mode: the personal-token chain, and only when it
-    really is the owner's — a bot comment is never read as an owner command, so it would be lost.
+    App mode: only PT_OWNER_TOKEN, a credential the owner gives the team-chat session on purpose — never GH_TOKEN,
+    GITHUB_TOKEN or `gh auth`, which may be there for other reasons — and only when it resolves to the owner.
     """
     if not app_mode():
-        return token()
-    credential = personal_token()
+        return None
+    credential = os.environ.get("PT_OWNER_TOKEN", "").strip()
     owner = owner_login(repo_name)
     login = _user_login(credential) if credential else None
     if not login or login.lower() != owner.lower():
         raise GhError(f"the agents write as a GitHub App, so an owner answer must be posted with {owner}'s own "
-                      f"token (GH_TOKEN or `gh auth login` in this session; found: {login or 'none'}), "
-                      "or answered on GitHub directly")
+                      f"token in PT_OWNER_TOKEN (found: {login or 'none'}); or answer on GitHub directly "
+                      "(reference/identities.md)")
     return credential
 
 

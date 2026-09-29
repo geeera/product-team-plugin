@@ -56,18 +56,23 @@ For each app: GitHub → Settings → Developer settings → GitHub Apps → **N
 | Variable | Meaning |
 | -------- | ------- |
 | `PT_TEAM_APP_ID` | team app id (numeric) |
-| `PT_TEAM_APP_KEY_FILE` **or** `PT_TEAM_APP_KEY` | path to its `.pem`, **or** the PEM itself — base64 (one line, for cloud env vars) or raw |
-| `PT_REVIEW_APP_ID` | review app id; must differ from the team app |
+| `PT_TEAM_APP_KEY_FILE` **or** `PT_TEAM_APP_KEY` | path to its `.pem` (`~` is expanded), **or** the PEM itself — base64 (one line, for cloud env vars) or raw |
+| `PT_REVIEW_APP_ID` | review app id; must be a different app (checked by bot login, so a numeric id and an `Iv…` client id of one app are caught too) |
 | `PT_REVIEW_APP_KEY_FILE` **or** `PT_REVIEW_APP_KEY` | as above, for the review app |
+| `PT_OWNER_TOKEN` | only in the team-chat session: a fine-grained token of **your** account (this repository, Issues read/write) that `backlog answer` posts your answers with |
 
 Precedence: `gh.token()` uses the team app when `PT_TEAM_APP_ID` is set, otherwise `GH_TOKEN`, `GITHUB_TOKEN`,
 `gh auth token` as before. `gh.review_token()` uses the review app, otherwise `PT_REVIEW_TOKEN` (a reviewing machine
 account), otherwise none (verdicts go out with the team token). A half-configured app (id without key, bad key, app
-not installed) is an error, never a silent fallback to the owner's token.
+not installed) is an error, never a silent fallback to the owner's token. In app mode your answers are posted only
+with `PT_OWNER_TOKEN` — never with `GH_TOKEN`, `GITHUB_TOKEN` or `gh auth`, which may be in a session for other
+reasons.
 
-The app's JWT is signed with the `openssl` CLI (present in macOS and the cloud images). An inline key is written
-to a `0600` temp file for the one signature and deleted. Installation tokens live an hour; a script mints one on
-first use and reuses it until five minutes before it expires. Scripts never print key material or tokens.
+The app's JWT is signed with the `openssl` CLI (present in macOS and the cloud images). An inline key never touches
+the disk: openssl reads it from a pipe handed to that one process. Installation tokens live an hour; a script mints
+one on first use and reuses it until five minutes before it expires. Scripts never print key material or tokens,
+and the processes they start (git, openssl, gh) get an environment without `PT_*_APP_KEY*`, `PT_OWNER_TOKEN` and
+`PT_REVIEW_TOKEN`.
 
 ## Local setup
 
@@ -79,8 +84,8 @@ export PT_TEAM_APP_ID=123456
 export PT_TEAM_APP_KEY_FILE=~/.config/product-team/<product>-team.pem
 ```
 
-Keep the review key out of your everyday shell; set it only where reviews run. Keep `gh auth login` as yourself:
-the team chat uses your own token to record your answers (below).
+Keep the review key out of your everyday shell; set it only where reviews run. To answer through the team chat,
+also `export PT_OWNER_TOKEN=…` (your fine-grained token) in that shell only.
 
 ## Cloud setup (claude.ai/code environments)
 
@@ -91,12 +96,11 @@ base64 < <product>-team.pem | tr -d '\n'     # paste the output as PT_TEAM_APP_K
 ```
 
 - **Default environment** (routines `slot-pm`, `slot-dev`): `PT_TEAM_APP_ID` + `PT_TEAM_APP_KEY`. No review app, no
-  personal token.
+  personal token of yours (`PT_OWNER_TOKEN`, `GH_TOKEN`), no `gh auth` as you.
 - **`reviewers` environment** (routine `slot-qa`): the team app **and** `PT_REVIEW_APP_ID` + `PT_REVIEW_APP_KEY`.
-  Only this environment can post a verdict that counts.
-- **Team-chat environment** (if the team chat runs in the cloud): the team app plus `GH_TOKEN` = a fine-grained
-  token of **your** account for this repository (Issues read/write) — `backlog answer` posts your answers with it.
-  Never put your own token into the scheduled environments: an agent there could write as you again.
+  Only this environment can post a verdict that counts. No personal token either.
+- **Team-chat environment** (if the team chat runs in the cloud): the team app plus `PT_OWNER_TOKEN`. That session
+  can write as you, so it reports `same_account: true` (below) — keep it separate from the scheduled environments.
 
 Delete the downloaded `.pem` files once they are stored; rotate a key by generating a new one in the app's
 settings and deleting the old one there.
@@ -104,36 +108,54 @@ settings and deleting the old one there.
 ## What changes for the team
 
 - **Owner commands** count only when your login wrote them (`commands.parse`, the demo decisions block, reversals
-  of team decisions). A bot comment that quotes you is never read as your answer. `backlog answers` reports
-  `same_account: false` and the agents' login; the same-run caution in `slot-pm` and `demo-apply` applies only
-  while `same_account` is true.
-- **`backlog answer`** (team chat) posts with your own token (`gh auth token` / `GH_TOKEN`) and refuses when that
-  token is not yours — otherwise the answer would be the bot's and would not count.
+  of team decisions). A bot comment that quotes you is never read as your answer.
+- **`same_account`** (`backlog answers`, the inbox, the gate warning) is true when an agent in the session can write
+  as you: the agents' own identity is your account, **or**, in app mode, any personal credential in the session
+  (`PT_OWNER_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN`, `gh auth`) resolves to your login. Only a session with none of those
+  is false, and only then does the same-run caution in `slot-pm` and `demo-apply` fall away.
+- **`backlog answer`** (team chat) posts with `PT_OWNER_TOKEN` and refuses when it is missing or not yours —
+  otherwise the answer would be the bot's and would not count.
 - **Verdicts**: with the review app configured, `pr gate` counts only `<review-slug>[bot]`; the login list in
-  `project.yml` cannot widen that. Without the key in a session it falls back to `team.reviewer_logins`.
-- **Pushing**: `scripts/pr push [--branch B]` pushes as the team app. The token reaches git through `GIT_CONFIG_*`
-  environment variables — not argv, not `.git/config`, not the output — and the session's credential helper is
-  switched off for that call, so a rejected app token fails instead of pushing as you. It never forces and never
-  pushes `dev`, `stage` or `main`. Without a team app it is a plain `git push -u origin B`.
-- **Commit authorship**: `eval "$(scripts/pr git-identity)" && git commit …` authors the commit as
-  `<slug>[bot] <id+slug[bot]@users.noreply.github.com>`, linked to the bot on GitHub. It must be in the same shell
-  command as the commit (each agent command starts a fresh shell). Without a team app it prints nothing.
+  `project.yml` cannot widen that. Without the key in a session it falls back to `team.reviewer_logins`, read from
+  the PR's **base branch** (a PR cannot name its own reviewers). The gate fails when the review bot is the team bot or
+  when `team.reviewer_logins` lists the team bot.
+- **Commits**: `scripts/pr commit -m "…" [git commit args]` runs `git commit` as
+  `<slug>[bot] <id+slug[bot]@users.noreply.github.com>`, linked to the bot on GitHub. When the bot cannot be looked
+  up it commits nothing; `--author` is refused. Without a team app it is a plain `git commit`.
+- **Pushing**: `scripts/pr push [--branch B]` pushes team branches only (`feature/`, `fix/`, `hotfix/`, `chore/`,
+  `backmerge/`, `revert/`, `design/`, `docs/`), never forced, straight to `https://github.com/<repo>.git` as the team
+  app:
+  - the token reaches git only through `GIT_CONFIG_*` environment variables — not argv, not `.git/config`, not the
+    output — and credential helpers are off for the call, so a rejected token fails instead of pushing as you;
+  - global and system git config are ignored for the call (`GIT_CONFIG_GLOBAL=/dev/null`, `GIT_CONFIG_NOSYSTEM=1`):
+    that is where a session proxy's `insteadOf` rewrite lives, and a rewritten URL would lose the auth header and
+    let the proxy push with its own credentials while the script reported the bot;
+  - a repository-local `url.*.insteadOf`/`pushInsteadOf` that matches the URL is refused, and git's own resolution
+    of the URL must come back unchanged.
+
+  **Cloud sessions whose network only reaches GitHub through the session's git proxy** cannot push as the app:
+  `pr push` then fails loudly — it never falls back to the proxy. Allow `github.com` in the environment's network
+  settings. Without a team app `pr push` is a plain `git push -u origin B`.
 - Pushes by an app token trigger workflows (unlike Actions' `GITHUB_TOKEN`), so CI runs on the team's PRs as before.
 - The run log accepts entries from the log's author and from the team bot, so a log opened before the switch keeps
-  its history. The inbox's standing "Security setup" item disappears once the agents no longer act as you.
+  its history. The inbox's standing "Security setup" item disappears once no agent can act as you.
 
 ## What this does and does not isolate
 
 It does:
 - make the author of every comment, review, commit and push visible and checkable — self-approval and imitated owner
   commands stop counting;
-- keep your personal token out of the scheduled environments entirely;
+- keep your personal token out of the scheduled environments entirely, and flag any session that has one;
 - confine a leaked installation token to one repository and one hour.
 
 It does not:
-- separate roles **inside one session**. Every agent in a session sees the same environment variables, so in the
-  `reviewers` environment a developer agent started by `slot-qa` could read the review key and post a verdict.
-  Separation is between environments, not between subagents (SPEC: identity limits);
+- separate roles **inside one session**. Every agent in a session sees the same environment variables: in the
+  `reviewers` environment a developer agent started by `slot-qa` could read the review key and post a verdict, and
+  in the team-chat session any agent could use `PT_OWNER_TOKEN` to write as you. Separation is between
+  environments, not between subagents (SPEC: identity limits);
+- hide the keys from anything else in the session. The scripts strip them from the processes *they* start, but the
+  agents' own shell commands, the project's contract commands (`lint`, `test`, `build`), package scripts and
+  dependencies they run all inherit the session's environment and can read `PT_*_APP_KEY` and `PT_OWNER_TOKEN`;
 - protect the app keys from anyone who can edit the cloud environment or read your machine;
 - enforce anything server-side. Rulesets that require the review bot's approval need GitHub Pro or a public
   repository; `branch-guard.yml` still reports changes that reached `dev`, `stage` or `main` without a merged PR.
@@ -148,4 +170,7 @@ It does not:
 | GitHub rejected the JWT | wrong app id for this key, or the clock is off by more than a minute (`date -u`) |
 | is not installed on owner/repo | app settings → Install App → add the repository |
 | may not get a token | the installation does not include the repository, or a permission is missing |
-| an owner answer must be posted with …'s own token | `gh auth login` as yourself, or answer on GitHub |
+| are the same app | `PT_REVIEW_APP_ID` names the team app; create a separate review app |
+| an owner answer must be posted with …'s own token in PT_OWNER_TOKEN | set `PT_OWNER_TOKEN` in the team-chat session, or answer on GitHub |
+| refusing to push: … rewrites … / git would push to … | remove the repository-local `insteadOf`; in the cloud, allow direct `github.com` access |
+| git push as …[bot] … failed | the network cannot reach `github.com` directly, or the app lacks Contents/Workflows write |

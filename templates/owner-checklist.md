@@ -35,7 +35,9 @@ agents have their own identity).
    identity (review app, or `PT_REVIEW_TOKEN`) and point the `slot-qa` routine at it. Keep `slot-pm` and `slot-dev`
    in the default environment, which has no review identity — so a developer agent cannot post a counted verdict.
    (Every role inside one session shares that session's variables; separation only works between environments.)
-   Never put your own GitHub token into a scheduled environment once the team app is set up.
+   Never put your own GitHub token (`PT_OWNER_TOKEN`, `GH_TOKEN`) into a scheduled environment once the team app is
+   set up: the team would count as acting as you again. Only the team-chat session gets `PT_OWNER_TOKEN`, so your
+   answers there can be posted as you.
 3. **Your own commands.** While the agents' GitHub identity is your account (no team app), an agent can write a
    comment that looks like yours; the team therefore only takes a release **go** from the demo page or from a
    comment older than the current run. With the team app, only your login's comments count.

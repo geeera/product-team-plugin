@@ -26,6 +26,11 @@ def reviewer_logins(path: str = PROJECT_FILE) -> list:
             text = f.read()
     except FileNotFoundError:
         return []
+    return reviewer_logins_from_text(text)
+
+
+def reviewer_logins_from_text(text: str) -> list:
+    """reviewer_logins() of a project.yml given as text (e.g. read from the PR's base branch)."""
     m = re.search(r"^([ \t]*)reviewer_logins:[ \t]*(.*)$", text, re.MULTILINE)
     if not m:
         return []

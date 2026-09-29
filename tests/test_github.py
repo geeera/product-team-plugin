@@ -42,10 +42,10 @@ class ErrorTest(unittest.TestCase):
 
 class TokenTest(unittest.TestCase):
     def setUp(self):
-        gh._token_cache = None
+        gh._token_cache = gh._cli_token_cache = None
 
     def tearDown(self):
-        gh._token_cache = None
+        gh._token_cache = gh._cli_token_cache = None
 
     def test_env_token_wins_and_no_cli_is_needed(self):
         with mock.patch.dict("os.environ", {"GH_TOKEN": "t1", "GITHUB_TOKEN": "t2"}), \

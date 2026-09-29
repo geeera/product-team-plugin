@@ -25,7 +25,7 @@ Read first: `${CLAUDE_PLUGIN_ROOT}/reference/workflow.md`, `${CLAUDE_PLUGIN_ROOT
   (`stage` → `main` only with the owner's recorded **go**). Merge these with `scripts/pr merge N --method merge --ci-only`
   — squashing one long-lived branch into another makes them drift apart.
 - Branches you create (`backmerge/*`, a revert branch, workflow changes) are committed and pushed through
-  `${CLAUDE_PLUGIN_ROOT}/scripts/pr git-identity` and `pr push`, never a bare `git push` — with the team GitHub
+  `${CLAUDE_PLUGIN_ROOT}/scripts/pr commit` and `pr push`, never a bare `git commit`/`git push` — with the team GitHub
   App configured that is the team's identity, not the owner's (`${CLAUDE_PLUGIN_ROOT}/reference/identities.md`).
   Identity keys (`PT_*_APP_KEY`) live in the cloud environment settings only; never in a workflow, file or log.
 - When a secret or account is missing, add it to the owner checklist (`.product-team/owner-checklist.md`) and

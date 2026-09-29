@@ -22,6 +22,7 @@ _NEXT = re.compile(r'<([^>]+)>;\s*rel="next"')
 _REMOTE = re.compile(r"github\.com[:/]+([^/\s]+)/([^/\s]+?)(?:\.git)?/?$")
 _token_cache: Optional[str] = None
 _cli_token_cache: Optional[str] = None
+_DENIED = re.compile(r"→ HTTP 40[13]\b")
 # Identity secrets are stripped from every child process the scripts start.
 _SECRET_ENV = re.compile(r"^PT_(TEAM|REVIEW)_APP_KEY|^PT_OWNER_TOKEN$|^PT_REVIEW_TOKEN$")
 
@@ -213,10 +214,16 @@ def review_login() -> Optional[str]:
 
 
 def _user_login(credential: Optional[str] = None) -> Optional[str]:
+    """The login behind a credential; None when GitHub refuses it /user (401/403, e.g. an Actions token).
+
+    Any other failure (5xx, timeout, network) raises: it says nothing about whose credential it is.
+    """
     try:
         return (api("user", auth=credential) or {}).get("login") or None
-    except GhError:
-        return None  # e.g. an Actions token: no /user access
+    except GhError as exc:
+        if _DENIED.search(str(exc)):
+            return None
+        raise
 
 
 def token_login() -> Optional[str]:
@@ -235,12 +242,15 @@ def acts_as_owner(repo_name: str) -> bool:
     an agent post as them, so its presence fails closed too.
     """
     owner = owner_login(repo_name).lower()
-    login = token_login()
-    if login is None or login.lower() == owner:
-        return True
-    if not app_mode():
-        return False
-    return any((_user_login(c) or "").lower() == owner for c in personal_credentials())
+    try:
+        login = token_login()
+        if login is None or login.lower() == owner:
+            return True
+        if not app_mode():
+            return False
+        return any((_user_login(c) or "").lower() == owner for c in personal_credentials())
+    except GhError:
+        return True  # an outage cannot rule out that a credential here is the owner's
 
 
 def owner_token(repo_name: str) -> Optional[str]:

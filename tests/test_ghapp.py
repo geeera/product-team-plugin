@@ -383,6 +383,38 @@ class SameAccountFailClosedTest(IsolatedTest):
         with clean_env(**APP_ENV), mock.patch.object(gh, "api", side_effect=github({"cli-pat": "geeera"})):
             self.assertTrue(gh.acts_as_owner("o/r"))
 
+    def test_only_401_and_403_rule_a_credential_out(self):
+        for status in ("401", "403"):
+            with self.subTest(status=status), clean_env(GH_TOKEN="pat", **APP_ENV), \
+                 mock.patch.object(gh, "api", side_effect=self.failing_user(f"GET user → HTTP {status}: denied")):
+                self.assertFalse(gh.acts_as_owner("o/r"))
+
+    def test_an_outage_cannot_rule_out_the_owner(self):
+        for error in ("GET user → HTTP 502: bad gateway", "GET user failed: timed out", "GET user failed: [Errno 61]"):
+            with self.subTest(error=error), clean_env(GH_TOKEN="pat", **APP_ENV), \
+                 mock.patch.object(gh, "api", side_effect=self.failing_user(error)):
+                self.assertTrue(gh.acts_as_owner("o/r"))
+
+    def test_an_outage_in_same_account_mode_fails_closed_too(self):
+        with clean_env(GH_TOKEN="pat", PT_REPO="o/r"), \
+             mock.patch.object(gh, "api", side_effect=self.failing_user("GET user → HTTP 500: oops")):
+            self.assertTrue(gh.acts_as_owner("o/r"))
+
+    def test_user_login_raises_on_anything_but_denied(self):
+        with mock.patch.object(gh, "api", side_effect=gh.GhError("GET user → HTTP 503: down")):
+            with self.assertRaises(gh.GhError):
+                gh._user_login("pat")
+        with mock.patch.object(gh, "api", side_effect=gh.GhError("GET user → HTTP 403: nope")):
+            self.assertIsNone(gh._user_login("pat"))
+
+    @staticmethod
+    def failing_user(message):
+        def answer(path, method="GET", fields=None, auth=None):
+            if path == "repos/o/r":
+                return {"owner": {"login": "geeera"}}
+            raise gh.GhError(message)
+        return answer
+
     def test_credentials_of_someone_else_or_actions_do_not_count(self):
         with clean_env(GH_TOKEN="other", GITHUB_TOKEN="actions", **APP_ENV), \
              mock.patch.object(gh, "api", side_effect=github({"other": "someone-else"})):

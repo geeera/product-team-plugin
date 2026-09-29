@@ -22,7 +22,8 @@
   pr list [--base B] [--state open|closed|all]
   pr commit -m M [git commit args…]
                        `git commit` authored and committed by the team app's bot (plain `git commit` without a team
-                       app); fails without committing when the bot's identity cannot be looked up
+                       app); fails without committing when the bot's identity cannot be looked up; --amend/-C/-c
+                       also reset the author to the bot
   pr push [--branch B] push a feature/ fix/ hotfix/ chore/ backmerge/ revert/ design/ docs/ branch (default: the
                        current one), never forced. With the team GitHub App configured it pushes as the app straight
                        to GitHub and refuses URL rewrites (reference/identities.md); otherwise `git push -u origin B`
@@ -189,7 +190,7 @@ PUSHABLE = re.compile(r"^(feature|fix|hotfix|chore|backmerge|revert|design|docs)
 
 
 def check_pushable(branch: str) -> None:
-    if (not PUSHABLE.match(branch) or ".." in branch or "//" in branch or branch.endswith(("/", ".", ".lock"))
+    if (not PUSHABLE.fullmatch(branch) or ".." in branch or "//" in branch or branch.endswith(("/", ".", ".lock"))
             or "/." in branch):
         raise gh.GhError(f"refusing to push {branch!r}: only feature/, fix/, hotfix/, chore/, backmerge/, revert/, "
                          "design/ and docs/ branches are pushed; dev, stage, main and publishing branches move only "
@@ -282,11 +283,20 @@ def commit(git_args: list) -> int:
     """`git commit <git_args>` authored and committed by the team app's bot (plain git commit without the app).
 
     The identity is looked up before git runs, so a failed lookup never produces a commit under the wrong name.
+    Reusing a commit (--amend, -C, -c, --reuse-message, --reedit-message) would keep that commit's author, so
+    --reset-author is added: the result is the bot's commit.
     """
     identity = bot_identity_env()
-    if identity and any(a == "--author" or a.startswith("--author=") or a == "--reset-author" for a in git_args):
-        raise gh.GhError("pr commit sets the author itself; drop --author/--reset-author")
-    return subprocess.run(["git", "commit", *git_args], env=gh.child_env(**identity), check=False).returncode
+    args = list(git_args)
+    if identity:
+        if any(a == "--author" or a.startswith("--author=") for a in args):
+            raise gh.GhError("pr commit sets the author itself; drop --author")
+        if any(_REUSES_COMMIT.match(a) for a in args) and "--reset-author" not in args:
+            args.append("--reset-author")
+    return subprocess.run(["git", "commit", *args], env=gh.child_env(**identity), check=False).returncode
+
+
+_REUSES_COMMIT = re.compile(r"^(--amend|--reuse-message(=.*)?|--reedit-message(=.*)?|-[Cc].*)$", re.DOTALL)
 
 
 def show_json(rev: str, path: str) -> dict:
@@ -385,6 +395,9 @@ def main() -> None:
     sub.add_parser("git-identity")
     sub.add_parser("commit", add_help=False)  # parsed below: everything after `commit` belongs to git
     if sys.argv[1:2] == ["commit"]:
+        if sys.argv[2:3] in (["-h"], ["--help"]):
+            p.print_help()  # pr's own help; no identity lookup, no git
+            sys.exit(0)
         if not sys.argv[2:]:
             sys.exit("pr commit needs git commit arguments, e.g. pr commit -m \"message\"")
         try:

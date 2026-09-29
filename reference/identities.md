@@ -51,6 +51,10 @@ For each app: GitHub → Settings → Developer settings → GitHub Apps → **N
      reviewer_logins: ['<product>-review[bot]']   # quote it: [bot] is YAML flow syntax
    ```
 
+   Only the **review** bot belongs there (or a separate reviewing machine account) — never the team bot, your own
+   login or anyone who writes code. Sessions without the team app's key cannot tell which bot is the team's, so
+   the gate cannot catch a team bot listed here; with the key it refuses it.
+
 ## Environment contract
 
 | Variable | Meaning |
@@ -112,7 +116,8 @@ settings and deleting the old one there.
 - **`same_account`** (`backlog answers`, the inbox, the gate warning) is true when an agent in the session can write
   as you: the agents' own identity is your account, **or**, in app mode, any personal credential in the session
   (`PT_OWNER_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN`, `gh auth`) resolves to your login. Only a session with none of those
-  is false, and only then does the same-run caution in `slot-pm` and `demo-apply` fall away.
+  is false, and only then does the same-run caution in `slot-pm` and `demo-apply` fall away. Only a 401/403 from
+  GitHub rules a credential out; an outage (5xx, timeout, network) cannot, so it counts as `true`.
 - **`backlog answer`** (team chat) posts with `PT_OWNER_TOKEN` and refuses when it is missing or not yours —
   otherwise the answer would be the bot's and would not count.
 - **Verdicts**: with the review app configured, `pr gate` counts only `<review-slug>[bot]`; the login list in
@@ -121,7 +126,9 @@ settings and deleting the old one there.
   when `team.reviewer_logins` lists the team bot.
 - **Commits**: `scripts/pr commit -m "…" [git commit args]` runs `git commit` as
   `<slug>[bot] <id+slug[bot]@users.noreply.github.com>`, linked to the bot on GitHub. When the bot cannot be looked
-  up it commits nothing; `--author` is refused. Without a team app it is a plain `git commit`.
+  up it commits nothing; `--author` is refused. Reusing a commit (`--amend`, `-C`, `-c`, `--reuse-message`,
+  `--reedit-message`) adds `--reset-author`, so an amended commit of yours becomes the bot's. `pr commit --help`
+  shows `pr`'s help. Without a team app it is a plain `git commit`.
 - **Pushing**: `scripts/pr push [--branch B]` pushes team branches only (`feature/`, `fix/`, `hotfix/`, `chore/`,
   `backmerge/`, `revert/`, `design/`, `docs/`), never forced, straight to `https://github.com/<repo>.git` as the team
   app:

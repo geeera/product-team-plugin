@@ -239,6 +239,11 @@ class PushTest(unittest.TestCase):
                 self.run_push(branch=branch)
         self.assertEqual(self.pushes, [])
 
+    def test_a_trailing_newline_is_rejected(self):
+        for branch in ("feature/7-x\n", "feature/7-x\nmain", "fix/1\r"):
+            with self.subTest(branch=branch), self.assertRaisesRegex(pr.gh.GhError, "refusing to push"):
+                pr.check_pushable(branch)
+
     def test_every_prefix_the_team_uses_is_allowed(self):
         for branch in ("feature/7-x", "fix/8-y", "hotfix/9-z", "chore/product-team-0.10.0", "backmerge/stage-dev",
                        "revert/9-z", "design/12-onboarding", "docs/adr-3"):
@@ -290,9 +295,53 @@ class CommitTest(unittest.TestCase):
             self.run_commit(["-m", "x"], identity=pr.gh.GhError("app not installed"))
 
     def test_author_override_is_refused_in_app_mode(self):
-        for arg in ("--author=someone <s@x>", "--author", "--reset-author"):
+        for arg in ("--author=someone <s@x>", "--author"):
             with self.subTest(arg=arg), self.assertRaisesRegex(pr.gh.GhError, "sets the author itself"):
                 self.run_commit(["-m", "x", arg])
+
+    def test_reusing_a_commit_resets_its_author_to_the_bot(self):
+        for args in (["--amend", "--no-edit"], ["-C", "HEAD"], ["-CHEAD"], ["-c", "HEAD"], ["--reuse-message=HEAD"],
+                     ["--reuse-message", "HEAD"], ["--reedit-message=HEAD"]):
+            with self.subTest(args=args):
+                _, calls = self.run_commit(args)
+                self.assertEqual(calls[0][0], ["git", "commit", *args, "--reset-author"])
+        _, calls = self.run_commit(["--amend", "--reset-author", "--no-edit"])
+        self.assertEqual(calls[0][0], ["git", "commit", "--amend", "--reset-author", "--no-edit"])
+        _, calls = self.run_commit(["-m", "x"])
+        self.assertEqual(calls[0][0], ["git", "commit", "-m", "x"])
+        _, calls = self.run_commit(["--amend", "--no-edit"], app=False)
+        self.assertEqual(calls[0][0], ["git", "commit", "--amend", "--no-edit"])
+
+    @unittest.skipUnless(shutil.which("git"), "git is not installed")
+    def test_amending_an_owner_commit_makes_the_bot_its_author(self):
+        with tempfile.TemporaryDirectory() as repo:
+            env = dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
+            REAL_RUN(["git", "init", "-q", repo], check=True, capture_output=True, env=env)
+            REAL_RUN(["git", "-C", repo, "-c", "user.name=geeera", "-c", "user.email=owner@example.com", "commit", "-q",
+                      "--allow-empty", "-m", "owner"], check=True, capture_output=True, env=env)
+            cwd = os.getcwd()
+            os.chdir(repo)
+            try:
+                with mock.patch.object(pr.gh, "app_mode", return_value=True), \
+                     mock.patch.object(pr.gh, "app_identity", return_value=self.IDENT), \
+                     mock.patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}):
+                    self.assertEqual(pr.commit(["-q", "--amend", "--no-edit", "--allow-empty"]), 0)
+            finally:
+                os.chdir(cwd)
+            log = REAL_RUN(["git", "-C", repo, "log", "-1", "--format=%an <%ae>|%cn <%ce>"], capture_output=True,
+                           text=True, env=env, check=True).stdout.strip()
+        bot = "acme-team[bot] <9001+acme-team[bot]@users.noreply.github.com>"
+        self.assertEqual(log, f"{bot}|{bot}")
+
+    def test_commit_help_is_prs_own_and_looks_nothing_up(self):
+        stdout = io.StringIO()
+        with mock.patch.object(sys, "argv", ["pr", "commit", "--help"]), mock.patch.object(sys, "stdout", stdout), \
+             mock.patch.object(pr.gh, "app_identity", side_effect=AssertionError("identity lookup")), \
+             mock.patch.object(pr.subprocess, "run", side_effect=AssertionError("git ran")), \
+             self.assertRaises(SystemExit) as caught:
+            pr.main()
+        self.assertEqual(caught.exception.code, 0)
+        self.assertIn("pr commit -m M", stdout.getvalue())
 
     def test_without_the_team_app_it_is_a_plain_commit(self):
         _, calls = self.run_commit(["-m", "x"], app=False)

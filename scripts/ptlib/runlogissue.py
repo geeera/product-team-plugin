@@ -30,12 +30,23 @@ def choose(issues: List[dict], trusted: Iterable[str]) -> Optional[dict]:
 
 
 def find(repo: str) -> Optional[dict]:
-    """The run-log issue, or None when the team has none yet."""
+    """The run-log issue, or None only when no issue is labelled team:run-log at all (the team may create one)."""
+    trusted = gh.team_logins(repo)
     pinned = project.run_log_issue()
     if pinned:
-        return gh.api(f"repos/{repo}/issues/{pinned}")
+        issue = gh.api(f"repos/{repo}/issues/{pinned}")
+        if provenance.author_of(issue).lower() not in {t.lower() for t in trusted}:
+            raise AmbiguousLog(f"team.run_log_issue #{pinned} was opened by {provenance.author_of(issue) or 'nobody'}, "
+                               "not by the team or the owner: pin the team's own run log")
+        return issue
     found = gh.api_list(f"repos/{repo}/issues?state=all&labels={LABEL}&per_page=100")
-    return choose(found, gh.team_logins(repo))
+    chosen = choose(found, trusted)
+    if chosen is None and any("pull_request" not in i for i in found):
+        # Someone else's labelled issue is there: creating a second log beside it would fork the team's history.
+        numbers = ", ".join(f"#{i['number']}" for i in found if "pull_request" not in i)
+        raise AmbiguousLog(f"issues labelled {LABEL} ({numbers}) exist but none was opened by the team or the "
+                           "owner: pin team.run_log_issue in .product-team/project.yml")
+    return chosen
 
 
 def acted_on(repo: str) -> tuple:
@@ -52,4 +63,5 @@ def acted_on(repo: str) -> tuple:
         runs = runstate.parse_runs(provenance.screen(comments, team, history)[0])
     except gh.GhError as exc:
         return [], str(exc)
-    return [{"issue": issue, "comment_id": cid, "run_id": r["id"]} for r in runs for issue, cid in r["acted"]], ""
+    return [{"issue": issue, "comment_id": cid, "run_id": r["id"], "at": r["at"]}
+            for r in runs for issue, cid in r["acted"]], ""

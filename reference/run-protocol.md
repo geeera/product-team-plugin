@@ -41,7 +41,8 @@ use the GitHub REST API with the team GitHub App's token when `PT_TEAM_APP_ID` i
    the run could not do its job — a crash of one subtask that was handled is still `finished`). Duration is
    recorded automatically; add the counts the slot skill names (PRs opened, merged, blocked…), and
    `--acted <issue>:<comment_id>` for every owner command the run acted on (the `comment_id` from
-   `backlog answers`), so a command deleted later is noticed.
+   `backlog answers`), so a command deleted later is noticed: a slot that reads owner commands runs
+   `backlog vanished` once per run (not per issue — it reads the whole run log).
 3. Print the same summary as the session's final message.
 
 ## Notify

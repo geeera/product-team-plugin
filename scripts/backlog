@@ -31,6 +31,8 @@ skills. Output is JSON on stdout; errors go to stderr with a non-zero exit.
   backlog link-pr N PR                           record the PR on the issue
   backlog answers N                              owner commands (/approve, /reject, /go, …) on the issue; owner
                                                  comments someone else edited are listed under "ignored"
+  backlog vanished [--days 30]                   owner commands a run acted on (`runlog finish --acted`) that
+                                                 were deleted since — once per run, never acted on again
   backlog next [--now ISO]                       what a development run takes now: ordered dispatch list,
                                                  skipped issues with reasons, missing architect notes
   backlog sprint current|list
@@ -44,7 +46,7 @@ import os
 import sys
 
 sys.dont_write_bytecode = True  # the vendored copy lives in the product repo: no __pycache__ there
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from urllib.parse import quote
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -242,7 +244,8 @@ def cmd_decide(repo: str, args) -> None:
                  f"--handles-reversal {rejection.get('comment_id')}, or turn it into an owner question with "
                  "`backlog ask`")
     c = gh.api(f"repos/{repo}/issues/{args.number}/comments", "POST",
-               {"body": owner.decision_comment(text, str(rejection["comment_id"]) if rejection else None)})
+               {"body": owner.decision_comment(text, str(rejection["comment_id"]) if rejection else None,
+                                               rejection.get("url") or "" if rejection else "")})
     # A decided question is no longer the owner's: drop owner:* so it leaves "Questions" and shows as FYI only.
     labels = sorted({l for l in current if not l.startswith("owner:")} | {"team-decided"})
     patch = {"labels": labels}
@@ -334,18 +337,28 @@ def cmd_answers(repo: str, args) -> None:
     # app they cannot, and commands.parse already counts only the owner's login.
     same_account = gh.acts_as_owner(repo)
     trusted, _ = provenance.screen(comments, [owner], history)
-    # A command the team acted on that is gone now was deleted: the owner should know, nobody should act on it.
-    acted, acted_error = runlogissue.acted_on(repo)
-    present = {str(c.get("id")) for c in comments}
-    vanished = [a for a in acted if a["issue"] == args.number and str(a["comment_id"]) not in present]
     out({"owner": owner, "agents": gh.token_login(), "same_account": same_account,
          "commands": commands.parse(comments, owner, history),
          "ignored": commands.rejected(comments, owner, history),
          "done": [{"at": c.get("created_at"), "comment_id": c.get("id"), "url": c.get("html_url")}
                   for c in trusted if brief.DONE_MARKER in (c.get("body") or "")],
          "body": provenance.body_statement(issue, owner, history),
-         "history_error": history.get("error", ""),
-         "vanished": vanished, "vanished_check_error": acted_error})
+         "history_error": history.get("error", "")})
+
+
+def cmd_vanished(repo: str, args) -> None:
+    """Owner commands the team acted on (`runlog finish --acted`) that are gone now: deleted after the fact.
+
+    Once per run, not per issue: it reads the whole run log and one comment list per issue it names.
+    """
+    acted, error = runlogissue.acted_on(repo)
+    since = (datetime.now(timezone.utc) - timedelta(days=args.days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    recent = [a for a in acted if (a.get("at") or "") >= since]
+    vanished = []
+    for number in sorted({a["issue"] for a in recent}):
+        present = {str(c.get("id")) for c in gh.api_list(f"repos/{repo}/issues/{number}/comments?per_page=100")}
+        vanished += [a for a in recent if a["issue"] == number and str(a["comment_id"]) not in present]
+    out({"vanished": vanished, "checked": len(recent), "error": error})
 
 
 def cmd_next(repo: str, args) -> None:
@@ -412,6 +425,7 @@ def main() -> None:
     cm = sub.add_parser("comment"); cm.add_argument("number", type=int); cm.add_argument("--body"); cm.add_argument("--body-file")
     lp = sub.add_parser("link-pr"); lp.add_argument("number", type=int); lp.add_argument("pr", type=int)
     an = sub.add_parser("answers"); an.add_argument("number", type=int)
+    va = sub.add_parser("vanished"); va.add_argument("--days", type=int, default=30)
     nx = sub.add_parser("next"); nx.add_argument("--now")
     sp = sub.add_parser("sprint"); sp.add_argument("action", choices=["current", "list", "create"])
     sp.add_argument("title", nargs="?"); sp.add_argument("due", nargs="?")
@@ -423,7 +437,7 @@ def main() -> None:
 
     handlers = {
         "init": cmd_init, "list": cmd_list, "show": cmd_show, "create": cmd_create, "move": cmd_move, "close": cmd_close, "decide": cmd_decide, "ask": cmd_ask, "reversals": cmd_reversals, "answer": cmd_answer, "milestone": cmd_milestone,
-        "label": cmd_label, "edit": cmd_edit, "comment": cmd_comment, "link-pr": cmd_link_pr, "answers": cmd_answers,
+        "label": cmd_label, "edit": cmd_edit, "comment": cmd_comment, "link-pr": cmd_link_pr, "answers": cmd_answers, "vanished": cmd_vanished,
         "sprint": cmd_sprint, "next": cmd_next,
     }
     try:

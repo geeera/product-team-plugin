@@ -131,11 +131,16 @@ settings and deleting the old one there.
 - **Team decisions** are dated only by decision comments of the team's own logins that nobody else edited, so a
   marker posted or edited in by someone else cannot bury your `/reject`; `backlog decide` refuses a new decision
   while your reversal is open unless it names it (`--handles-reversal`).
-- **The run log** is pinned (`team.run_log_issue`) or the single labelled issue the team or you opened — an
-  issue someone else opens and labels is never the log.
+- **The run log** is pinned (`team.run_log_issue`, which must have been opened by the team or you) or the single
+  labelled issue the team or you opened. An issue someone else opens and labels is never the log, and while one
+  exists without a team log the scripts refuse rather than open a second log — pin the right one.
+- **Team decisions** count only as comments that *start* with the decision marker, so a status `--reason` or an
+  answer that quotes the marker is never one.
 - **Deleted commands**: GitHub keeps no trace of a deleted comment. Runs record the ids of the commands they acted
-  on (`runlog finish --acted`), and `backlog answers` lists under `vanished` any of them that is gone, for you to
+  on (`runlog finish --acted`), and `backlog vanished` (once per run) lists any of them that is gone, for you to
   look at — the team does not act on it again.
+- **Answered reversals**: a decision that answers your `/reject` says so on its first lines ("Answers your
+  /reject: <link>"), and the team-chat brief lists it under `answered_rejects`.
 - **`same_account`** (`backlog answers`, the inbox, the gate warning) is true when an agent in the session can write
   as you: the agents' own identity is your account, **or**, in app mode, any personal credential in the session
   (`PT_OWNER_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN`, `gh auth`) resolves to your login. Only a session with none of those
@@ -197,6 +202,12 @@ It does not:
   OAuth flow and stored encrypted in the console's `api` Worker — geeera/team-console ADR 0003). Every write with
   those *is* you, edits included; the console's app key alone (Issues write as `team-console-<env>[bot]`) is
   caught by this check like any other bot;
+- notice a command deleted **before** the team saw it: GitHub keeps no trace of a deleted comment, and only
+  commands a run acted on are recorded. A command someone deletes in between simply never happened for the team;
+- avoid false rejections of genuine comments: an issue comment's REST `updated_at` can also move without a body
+  edit (e.g. when it is hidden/minimized, and possibly with some reactions). GraphQL then shows no edit while REST
+  does, and the comment is ignored ("REST shows it edited but the edit history shows no edit") — failing closed.
+  Recovery: write the command again in a new comment;
 - protect what GitHub itself does not record: a revision someone deletes from a comment's history still shows who
   made it, but the check trusts GitHub's edit history as complete. A comment with more than 50 edits is ignored
   rather than half-checked;

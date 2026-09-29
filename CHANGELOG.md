@@ -31,9 +31,13 @@ first `slot-pm` of the day runs `vendor self-update` and opens a PR with the ent
   `team:run-log` issue the team or owner opened; several candidates → every `runlog` command (and `brief`) refuses.
   **Migration**: add `team.run_log_issue: <number>` to `.product-team/project.yml` (`runlog url` shows it). Rotation
   is documented in `reference/schedule-and-models.md`. `brief` reads only the team's unedited run-log entries.
-- Deleted owner commands: `runlog finish --acted ISSUE:COMMENT_ID` records the commands a run acted on;
-  `backlog answers` lists under `vanished` any that were deleted since (`vanished_check_error` when the log cannot
-  be read). `slot-pm` and `demo-apply` pass `--acted`.
+- Deleted owner commands: `runlog finish --acted ISSUE:COMMENT_ID` records the commands a run acted on; the new
+  `backlog vanished [--days 30]` (once per run) lists any that were deleted since. `slot-pm` and `demo-apply` pass
+  `--acted`.
+- Decision comments count only when they start with the marker. `decide --handles-reversal` writes "Answers your
+  /reject: <link>" into the decision, and `brief` lists such answers under `answered_rejects`.
+- A labelled run-log issue opened by anyone else, or a pinned `team.run_log_issue` not opened by the team or the
+  owner, makes the scripts refuse instead of opening a new log.
 - Same-account mode is unchanged: the agents are the owner's login there, so their edits look like the owner's
   (`reference/identities.md`, "does not isolate"), and so is anyone holding the owner's credentials, including the
   team console's owner user token.

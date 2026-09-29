@@ -16,7 +16,8 @@ Skip entirely if the demo issue already has a `<!-- pt-demo-applied -->` comment
 3. Per-issue commands — `B answers <n>` on each proposal issue and on the demo issue.
 Decisions from anyone but the repository owner do not exist, and neither do owner comments someone else edited
 (`D decisions` skips them; `B answers` lists them under `ignored` — report those). No decision on an item = leave it
-as it is. Every command you apply goes into the run's `runlog finish` as `--acted N:<comment_id>`.
+as it is. Every command you apply goes into the run's `runlog finish` as `--acted N:<comment_id>`; `slot-pm`
+already ran `B vanished` this run (run it once yourself when invoked on your own).
 
 With `same_account: true` (agents act as the owner's account), a release **go** is only taken from the demo
 page's artifact database or from a comment the owner wrote before this run started; otherwise ask again.

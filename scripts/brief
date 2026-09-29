@@ -79,8 +79,10 @@ def main() -> None:
         for i in touched:
             if "team-decided" in i["labels"]:
                 comments_i = gh.api_list(f"repos/{repo}/issues/{i['number']}/comments?per_page=100")
-                at = owner.team_decided_at(comments_i, team, provenance.fetch(repo, i["number"]))
-                decided.append(dict(i, decided_at=at or None))
+                history_i = provenance.fetch(repo, i["number"])
+                at = owner.team_decided_at(comments_i, team, history_i)
+                decided.append(dict(i, decided_at=at or None,
+                                    handled_reversals=owner.handled_reversals(comments_i, team, history_i)))
         result = brief.summary(since, [i for i in touched if i["closed_at"]], prs, decided,
                                runstate.parse_runs(comments), [i for i in open_issues if LOG_LABEL not in i["labels"]
                                                                and "team:inbox" not in i["labels"]],

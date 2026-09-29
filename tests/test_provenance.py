@@ -270,11 +270,26 @@ class TeamDecisionDateTest(unittest.TestCase):
         self.assertEqual(owner.reversed_by_owner(comments, OWNER, h, [BOT])["text"], "use Y")
         self.assertEqual(owner.team_decided_at(comments, [BOT, OWNER], h), "2026-09-29T09:00:00Z")
 
-    def test_the_teams_own_later_decision_answers_it(self):
-        later = rest(3, BOT, owner.decision_comment("use Y", "2"), at="2026-09-29T12:00:00Z")
+    def test_the_teams_own_later_decision_answers_it_visibly(self):
+        later = rest(3, BOT, owner.decision_comment("use Y", "2", "https://x/r2"), at="2026-09-29T12:00:00Z")
         comments = [self.DECIDED, self.REJECT, later]
         self.assertIn("pt-reversal-handled id=2", later["body"])
-        self.assertEqual(owner.reversed_by_owner(comments, OWNER, history(*(node(c) for c in comments)), [BOT]), {})
+        self.assertIn("**Answers your /reject:** https://x/r2", later["body"])
+        h = history(*(node(c) for c in comments))
+        self.assertEqual(owner.reversed_by_owner(comments, OWNER, h, [BOT]), {})
+        handled = owner.handled_reversals(comments, [BOT], h)
+        self.assertEqual([x["reject_comment_id"] for x in handled], [2])
+        summary = brief.summary(None, [], [], [{"number": 7, "title": "t", "url": "u", "decided_at": later["created_at"],
+                                                "handled_reversals": handled}], [], [], None, False)
+        self.assertEqual([(a["number"], a["reject_comment_id"]) for a in summary["answered_rejects"]], [(7, 2)])
+
+    def test_a_status_reason_quoting_the_marker_is_not_a_decision(self):
+        # `backlog move/close --reason` and relayed answers are team comments whose body does not start with it.
+        moved = rest(3, BOT, f"**Status → `blocked`**: {owner.DECISION_MARKER} still X", at="2026-09-29T12:00:00Z")
+        comments = [self.DECIDED, self.REJECT, moved]
+        h = history(*(node(c) for c in comments))
+        self.assertEqual(owner.reversed_by_owner(comments, OWNER, h, [BOT])["text"], "use Y")
+        self.assertFalse(owner.is_decision(moved["body"]))
 
 
 class DecideCliTest(unittest.TestCase):
@@ -325,7 +340,7 @@ class DecideCliTest(unittest.TestCase):
 
 
 class AnswersCliTest(unittest.TestCase):
-    def run_answers(self, comments, graphql, acted=([], "")):
+    def run_answers(self, comments, graphql):
         def api(path, method="GET", fields=None, auth=None):
             if path == "repos/o/r/issues/7" and method == "GET":
                 return {"user": {"login": BOT}, "body": "ask", "labels": [], "created_at": CREATED,
@@ -338,7 +353,7 @@ class AnswersCliTest(unittest.TestCase):
              mock.patch.object(backlog.gh, "api", side_effect=api), \
              mock.patch.object(backlog.gh, "api_list", return_value=comments), \
              mock.patch.object(backlog.gh, "graphql", **graphql), \
-             mock.patch.object(backlog.runlogissue, "acted_on", return_value=acted), \
+             mock.patch.object(backlog.runlogissue, "acted_on", side_effect=AssertionError("once per run only")), \
              mock.patch.object(backlog.gh, "owner_login", return_value=OWNER), \
              mock.patch.object(backlog.gh, "token_login", return_value=BOT), \
              mock.patch.object(backlog.gh, "acts_as_owner", return_value=False), \
@@ -357,7 +372,7 @@ class AnswersCliTest(unittest.TestCase):
         self.assertEqual([d["comment_id"] for d in data["done"]], [3])
         self.assertFalse(data["body"]["owner_statement"])
         self.assertEqual(data["history_error"], "")
-        self.assertEqual(data["vanished"], [])
+        self.assertNotIn("vanished", data)
 
     def test_history_outage_is_reported(self):
         data = self.run_answers([rest(1, OWNER, "/go", edited=True)],
@@ -366,18 +381,42 @@ class AnswersCliTest(unittest.TestCase):
         self.assertIn("timeout", data["history_error"])
         self.assertIn("timeout", data["ignored"][0]["reason"])
 
-    def test_a_deleted_command_the_team_acted_on_is_flagged(self):
-        c = rest(2, OWNER, "/approve")
-        acted = ([{"issue": 7, "comment_id": 1, "run_id": "r1"}, {"issue": 7, "comment_id": 2, "run_id": "r1"},
-                  {"issue": 8, "comment_id": 5, "run_id": "r1"}], "")
-        data = self.run_answers([c], {"return_value": graphql_page([node(c)])}, acted)
-        self.assertEqual(data["vanished"], [{"issue": 7, "comment_id": 1, "run_id": "r1"}])
+
+
+class VanishedCliTest(unittest.TestCase):
+    NOW = "2099-01-01T00:00:00Z"  # every entry below is recent
+
+    def run_vanished(self, acted, comments_by_issue):
+        listed = []
+
+        def api_list(path):
+            listed.append(path)
+            number = int(path.split("/issues/")[1].split("/")[0])
+            return comments_by_issue.get(number, [])
+
+        stdout = io.StringIO()
+        with mock.patch.object(sys, "argv", ["backlog", "vanished"]), \
+             mock.patch.object(backlog.gh, "repo", return_value="o/r"), \
+             mock.patch.object(backlog.gh, "api_list", side_effect=api_list), \
+             mock.patch.object(backlog.runlogissue, "acted_on", return_value=acted), \
+             mock.patch.object(sys, "stdout", stdout):
+            backlog.main()
+        return json.loads(stdout.getvalue()), listed
+
+    def test_a_deleted_command_the_team_acted_on_is_flagged_once_per_issue_read(self):
+        acted = ([{"issue": 7, "comment_id": 1, "run_id": "r1", "at": self.NOW},
+                  {"issue": 7, "comment_id": 2, "run_id": "r1", "at": self.NOW},
+                  {"issue": 8, "comment_id": 5, "run_id": "r2", "at": self.NOW},
+                  {"issue": 9, "comment_id": 6, "run_id": "r0", "at": "2020-01-01T00:00:00Z"}], "")
+        data, listed = self.run_vanished(acted, {7: [rest(2, OWNER, "/approve")], 8: [rest(5, OWNER, "/go")]})
+        self.assertEqual([(v["issue"], v["comment_id"]) for v in data["vanished"]], [(7, 1)])
+        self.assertEqual(data["checked"], 3)  # the entry older than --days is not re-checked
+        self.assertEqual(len(listed), 2)
 
     def test_an_unreadable_run_log_is_reported_not_guessed(self):
-        c = rest(2, OWNER, "/approve")
-        data = self.run_answers([c], {"return_value": graphql_page([node(c)])}, ([], "run log unreadable: 502"))
+        data, _ = self.run_vanished(([], "run log unreadable: 502"), {})
         self.assertEqual(data["vanished"], [])
-        self.assertIn("502", data["vanished_check_error"])
+        self.assertIn("502", data["error"])
 
 
 class ActedRecordTest(unittest.TestCase):
@@ -410,7 +449,7 @@ class ActedRecordTest(unittest.TestCase):
              mock.patch.object(gh, "token_login", return_value=BOT), \
              mock.patch.object(project, "run_log_issue", return_value=0):
             acted, error = runlogissue.acted_on("o/r")
-        self.assertEqual((acted, error), ([{"issue": 7, "comment_id": 11, "run_id": "r1"}], ""))
+        self.assertEqual((acted, error), ([{"issue": 7, "comment_id": 11, "run_id": "r1", "at": CREATED}], ""))
 
     def test_finish_writes_the_acted_marker(self):
         started = rest(1, BOT, "<!-- pt-run id=20260929T100000Z-slot-pm slot=slot-pm state=started -->")
@@ -460,10 +499,38 @@ class RunLogChoiceTest(unittest.TestCase):
             self.assertEqual(project.run_log_issue(path), 22)
             self.assertEqual(project.run_log_issue(os.path.join(tmp, "missing.yml")), 0)
         with mock.patch.object(project, "run_log_issue", return_value=22), \
-             mock.patch.object(gh, "api", return_value={"number": 22}) as api, \
+             mock.patch.object(gh, "team_logins", return_value={OWNER, BOT}), \
+             mock.patch.object(gh, "api", return_value={"number": 22, "user": {"login": BOT}}) as api, \
              mock.patch.object(gh, "api_list", side_effect=AssertionError("no search when pinned")):
             self.assertEqual(runlogissue.find("o/r")["number"], 22)
         api.assert_called_once_with("repos/o/r/issues/22")
+
+    def test_a_pinned_issue_someone_else_opened_is_refused(self):
+        with mock.patch.object(project, "run_log_issue", return_value=22), \
+             mock.patch.object(gh, "team_logins", return_value={OWNER, BOT}), \
+             mock.patch.object(gh, "api", return_value={"number": 22, "user": {"login": STRANGER}}), \
+             self.assertRaises(runlogissue.AmbiguousLog) as caught:
+            runlogissue.find("o/r")
+        self.assertIn(STRANGER, str(caught.exception))
+
+    def test_only_foreign_labelled_issues_refuse_instead_of_opening_a_new_log(self):
+        foreign = [self.issue(40, STRANGER, CREATED)]
+        with mock.patch.object(sys, "argv", ["runlog", "start", "slot-dev"]), \
+             mock.patch.object(runlog.gh, "repo", return_value="o/r"), \
+             mock.patch.object(runlog.gh, "api", side_effect=AssertionError("must not create a log")), \
+             mock.patch.object(runlog.gh, "api_list", return_value=foreign), \
+             mock.patch.object(runlog.gh, "owner_login", return_value=OWNER), \
+             mock.patch.object(runlog.gh, "token_login", return_value=BOT), \
+             mock.patch.object(runlog.runlogissue.project, "run_log_issue", return_value=0), \
+             self.assertRaises(SystemExit) as caught:
+            runlog.main()
+        self.assertIn("pin team.run_log_issue", str(caught.exception))
+
+    def test_no_labelled_issue_at_all_lets_the_team_create_its_log(self):
+        with mock.patch.object(project, "run_log_issue", return_value=0), \
+             mock.patch.object(gh, "team_logins", return_value={OWNER, BOT}), \
+             mock.patch.object(gh, "api_list", return_value=[]):
+            self.assertIsNone(runlogissue.find("o/r"))
 
     def test_runlog_refuses_to_start_on_an_ambiguous_log(self):
         issues = [self.issue(3, OWNER, "2026-09-01T00:00:00Z"), self.issue(40, BOT, "2026-09-30T00:00:00Z")]

@@ -54,8 +54,18 @@ PR_FILES_LIMIT = 3000  # GET /pulls/N/files returns at most this many files
 
 def glob_regex(pattern: str) -> "re.Pattern[str]":
     """A path glob as a regex over the whole repo-relative path: `**` crosses directories, `*` and `?` do not,
-    a trailing `/` means everything below, and a pattern without `/` matches the file name in any directory."""
-    pattern = pattern.strip().lstrip("/")
+    a trailing `/` means everything below, and a pattern without `/` matches the file name in any directory.
+    Case-insensitive. ValueError for syntax it does not support (`{a,b}`, `[abc]`, `!negation`): silently reading
+    them literally would match nothing and drop a required review."""
+    pattern = pattern.strip()
+    while pattern.startswith("./"):
+        pattern = pattern[2:]
+    if pattern.startswith("!") or "{" in pattern or "[" in pattern:
+        raise ValueError(f"review.code_paths: {pattern!r} is not supported; use plain globs with *, ** and ? "
+                         "(one pattern per alternative, no negation)")
+    pattern = pattern.lstrip("/")
+    if not pattern:
+        raise ValueError("review.code_paths has an empty pattern")
     if pattern.endswith("/"):
         pattern += "**"
     if "/" not in pattern:
@@ -77,7 +87,7 @@ def glob_regex(pattern: str) -> "re.Pattern[str]":
         else:
             out.append(re.escape(pattern[i]))
             i += 1
-    return re.compile("".join(out) + r"\Z", re.DOTALL)
+    return re.compile("".join(out) + r"\Z", re.DOTALL | re.IGNORECASE)
 
 
 def code_changes(paths: Iterable[str], code_paths: Iterable[str]) -> List[str]:

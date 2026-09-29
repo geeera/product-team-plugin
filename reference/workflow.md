@@ -57,8 +57,12 @@ review:
   `project.yml` itself needs SECURITY). Without the block, QA and REVIEW are required on every PR (the behaviour
   before 0.10.2). SECURITY is never configurable: `pr security-check` decides it.
 - `code_paths` are globs over repository paths: `**` crosses directories, `*` does not, a pattern without `/`
-  matches a file name anywhere (`*.ts`). A renamed file counts by its old path too. `code` without `code_paths`
-  uses broad defaults (common source roots and source-file extensions).
+  matches a file name anywhere (`*.ts`), matching ignores case and a leading `./`. Brace sets (`{a,b}`),
+  character classes (`[ab]`) and negation (`!x`) are refused, not guessed. A renamed file counts by its old path
+  too. `code` without `code_paths` uses broad defaults (common source roots; source, script, infrastructure,
+  markup, style and build-config files anywhere).
+- `max_rework_rounds` is **guidance for the orchestrator** (`slot-qa`, `slot-dev`), **not enforced by the gate**:
+  `pr gate` only reports it under `policy`; it never passes or fails a PR because of it.
 - `pr gate` explains itself: `why` says for each of QA, REVIEW and SECURITY whether it is required and why;
   `policy` shows the rule in force. Start only the reviewers the gate requires.
 
@@ -119,13 +123,18 @@ Owner commands in issue comments are case-insensitive and must be written by the
 (the repository's `owner.login`); commands from anyone else are ignored, and so is an owner comment anyone else
 ever edited (`reference/identities.md`). Reactions are never approvals.
 
-A command counts only as the **first word of a line** of the owner's own text: not inside a code block or inline
-code, a `>` quote or an HTML comment, and not in a team comment. **Team comments** on issues start with a bold role
+A command counts only as the **first word of a line** of the owner's own text (indented by at most three spaces,
+one tab or non-breaking spaces): not inside a code block or inline code, a `>` quote or an HTML comment, and — in
+same-account mode — not in a team comment. An owner comment that looks like a command but is not read as one is
+listed by `backlog answers` under `ignored` with `kind: not_read` and the reason (`inside code/quote/comment`,
+`starts with a team note header`, `indented 4+ spaces`, `not at line start`, `not a command word`), so a dropped
+command is never silent; `kind: edited` marks the security case above. **Team comments** on issues start with a bold role
 header — `**Architect note**`, `**PM grooming**`, `**UX spec**`, `**UI design**`, `**Security threat model**`,
 `**QA finding**`, `**Developer note**`, `**DevOps note**`, `**Analyst note**`, `**Team note**` (the roles are listed
 in `scripts/ptlib/commands.py`, `AGENT_NOTE_ROLES`) — or a script's `<!-- pt-… -->` marker. In same-account mode
-agents post as the owner's login, so without the header a quoted `/approve` would read as the owner's. Every
-agent starts each issue comment with its header; write example commands in backticks.
+agents post as the owner's login, so without the header a quoted `/approve` would read as the owner's; with the
+team's GitHub App they cannot post as the owner, and the header does not affect parsing. Every agent starts each
+issue comment with its header; write example commands in backticks.
 
 ## Findings and release gates
 

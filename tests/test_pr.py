@@ -125,7 +125,12 @@ class BaseProjectTextTest(unittest.TestCase):
     def test_reads_project_yml_from_the_base_branch_not_the_working_tree(self):
         with mock.patch.object(pr.gh, "raw", return_value="team:\n  reviewer_logins: ['acme-review[bot]']\n") as raw:
             self.assertIn("acme-review[bot]", pr.base_project_text("o/r", "dev"))
-        self.assertEqual(raw.call_args[0][0], "repos/o/r/contents/.product-team/project.yml?ref=dev")
+        self.assertEqual(raw.call_args[0][0], "repos/o/r/contents/.product-team/project.yml?ref=refs/heads/dev")
+
+    def test_the_base_is_read_as_a_full_branch_ref(self):
+        with mock.patch.object(pr.gh, "raw", return_value="") as raw:
+            pr.base_project_text("o/r", "release/1.0 x")
+        self.assertTrue(raw.call_args[0][0].endswith("?ref=refs/heads/release/1.0%20x"))
 
     def test_no_project_yml_on_the_base_means_empty_config(self):
         with mock.patch.object(pr.gh, "raw", side_effect=pr.gh.GhError("GET … → HTTP 404: Not Found")):
@@ -233,7 +238,7 @@ class RequiredVerdictsGateTest(unittest.TestCase):
              mock.patch.object(pr.gh, "app_mode", return_value=False), \
              mock.patch.object(pr.gh, "acts_as_owner", return_value=False):
             result = pr.gate("o/r", 5)
-        self.assertIn("ref=dev", raw.call_args[0][0])
+        self.assertTrue(raw.call_args[0][0].endswith("?ref=refs/heads/dev"))
         self.assertEqual(result["required"], ["QA", "REVIEW", "SECURITY"])
 
 

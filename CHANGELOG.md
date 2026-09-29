@@ -8,8 +8,12 @@ first `slot-pm` of the day runs `vendor self-update` and opens a PR with the ent
 
 - **Proportional reviews.** A new `review:` block in `.product-team/project.yml` says which verdicts a PR needs:
   `qa` and `reviewer` are `always`, `code` (only when the PR changes a path matching `code_paths`) or `never`;
-  `max_rework_rounds` caps rework rounds for non-blockers. `pr gate` / `pr merge` read it from the PR's **base**
-  branch, like `team.reviewer_logins`, so a PR cannot relax its own gate. SECURITY is unchanged (`pr
+  `max_rework_rounds` is guidance for orchestrators on rework rounds for non-blockers (reported by `pr gate`, not
+  enforced by it). `pr gate` / `pr merge` read the block from the PR's **base** branch (`ref=refs/heads/<base>`),
+  like `team.reviewer_logins`, so a PR cannot relax its own gate. `code_paths` globs match case-insensitively,
+  ignore a leading `./` and refuse `{a,b}`, `[ab]` and `!negation`; default `code_paths` also cover scripts,
+  Terraform, HTML/CSS, Astro/Svelte and build configs. A second `review:` block or key, or an unclosed quote,
+  is an error; `#` inside quotes is text. SECURITY is unchanged (`pr
   security-check` decides). `pr gate` now answers `why` (for QA, REVIEW and SECURITY: required or not, and why)
   and `policy`. An unreadable block fails the gate. **No block = the old behaviour** (QA and REVIEW on every PR):
   existing products change only when they add the block. **Migration** (optional): copy the `review:` block from
@@ -22,11 +26,14 @@ first `slot-pm` of the day runs `vendor self-update` and opens a PR with the ent
 - **Evidence before review**: developers run the real flow end to end (not only unit tests) and paste the evidence
   in the PR body under **How it was verified**; QA treats a behaviour change without it as an unmet criterion.
 - **Owner commands are read only from the owner's own prose** (from QA in geeera/team-console): a command counts
-  only as the first token of a line (at most three spaces indented) outside fenced code blocks, inline code,
-  blockquotes and HTML comments, and not in a comment that starts with a team note header (`**Architect note**`,
-  `**PM grooming**`, … — `commands.AGENT_NOTE_ROLES`) or a script marker (`<!-- pt-… -->`). Every agent now starts
-  its issue comments with its header. `/go-live` or `/approved` are no longer read as `/go` / `/approve`.
-  **Breaking** for owners who indent commands four spaces or put them after other text on the line.
+  only as the first token of a line (indented by at most three spaces, a tab or NBSPs; a lone `\r` ends a line)
+  outside fenced code blocks, inline code, blockquotes and HTML comments. In same-account mode (`gh.acts_as_owner`)
+  a comment that starts with a team note header (`**Architect note**`, `**PM grooming**`, … —
+  `commands.AGENT_NOTE_ROLES`) or a script marker (`<!-- pt-… -->`) holds no command; with the team app it is
+  parsed normally. Every agent now starts its issue comments with its header. `/go-live` is no longer read as
+  `/go`. **Breaking** for owners who indent commands four or more spaces or fence/quote them — but never
+  silently: `backlog answers` lists every owner comment 0.10.1 would have read a command from and 0.10.2 does not
+  under `ignored` with `kind: not_read` and the reason; edited comments there now carry `kind: edited`.
 - **Owner commands on pull requests**: the edit-history read (`provenance.fetch`) uses
   `repository.issueOrPullRequest(number:)`, so a PR number is checked like an issue instead of failing; anything
   else still fails closed.

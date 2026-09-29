@@ -40,7 +40,8 @@ review:
   qa: always                 # always | code | never — QA on every PR
   reviewer: code             # always | code | never — `code`: only when the PR changes a path in code_paths
   code_paths: ["apps/**", "libs/**", "packages/**", "src/**"]   # kickoff/adopt set the project's source roots
-  max_rework_rounds: 1       # after this many rework rounds only blockers go back; the rest become follow-up issues
+  max_rework_rounds: 1       # guidance for the orchestrator, not enforced by the gate: after this many rework
+                             # rounds only blockers go back; the rest become follow-up issues
 
 team:
   # Release channel the daily self-update follows: `stable` (every release) or a tag such as v0.3.0 (pinned).

@@ -188,6 +188,30 @@ class ReviewPolicyTest(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     project.review_policy_from_text(text)
 
+    def test_a_second_review_block_or_key_is_an_error(self):
+        for text in ("review:\n  reviewer: code\nowner:\n  x: 1\nreview:\n  reviewer: always\n",
+                     "review:\n  reviewer: code\nreview: {}\n",
+                     "review:\n  reviewer: code\n  reviewer: always\n"):
+            with self.subTest(text=text):
+                with self.assertRaises(ValueError):
+                    project.review_policy_from_text(text)
+
+    def test_hash_inside_quotes_is_text_and_outside_is_a_comment(self):
+        text = ("review:\n  reviewer: 'code'   # note\n"
+                "  code_paths: [\"apps/#web/**\", 'libs/**', \"a,b/**\"]  # a comment, with a comma\n")
+        policy = project.review_policy_from_text(text)
+        self.assertEqual(policy["reviewer"], "code")
+        self.assertEqual(policy["code_paths"], ["apps/#web/**", "libs/**", "a,b/**"])
+        block = "review:\n  code_paths:\n    - \"apps/#1/**\"   # first\n    - libs/**#literal\n"
+        self.assertEqual(project.review_policy_from_text(block)["code_paths"], ["apps/#1/**", "libs/**#literal"])
+
+    def test_an_unclosed_quote_is_an_error(self):
+        for text in ("review:\n  code_paths: [\"apps/**]\n", "review:\n  reviewer: 'code\n",
+                     "review:\n  code_paths:\n    - \"apps/**\n"):
+            with self.subTest(text=text):
+                with self.assertRaises(ValueError):
+                    project.review_policy_from_text(text)
+
     def test_the_template_parses_to_reviewer_code(self):
         text = (Path(__file__).resolve().parents[1] / "templates" / "project.yml").read_text()
         policy = project.review_policy_from_text(text)
@@ -223,6 +247,30 @@ class CodePathsTest(unittest.TestCase):
         roles, why = review.required_verdicts(policy, ["docs/a.md"] * review.PR_FILES_LIMIT, [])
         self.assertIn("REVIEW", roles)
         self.assertIn("3000", why["REVIEW"]["why"])
+
+    def test_default_code_paths_cover_scripts_infra_markup_and_config(self):
+        paths = ["deploy/run.sh", "Makefile", "infra/main.tf", "web/index.html", "web/a.css", "web/b.scss",
+                 "x/mod.mts", "x/mod.cts", "site/page.astro", "ui/App.svelte", "ui/App.svelte.ts",
+                 "vite.config.ts", "tailwind.config.js", "tsconfig.json", "tsconfig.base.json", "SRC/Main.PY",
+                 "tools/Build.SH"]
+        self.assertEqual(review.code_changes(paths, project.DEFAULT_CODE_PATHS), paths)
+        self.assertEqual(review.code_changes(["docs/a.md", "README.md", ".github/CODEOWNERS", "notes.txt"],
+                                             project.DEFAULT_CODE_PATHS), [])
+
+    def test_matching_is_case_insensitive_and_dot_slash_is_ignored(self):
+        self.assertTrue(review.glob_regex("apps/**").match("Apps/Web/Page.TSX"))
+        self.assertTrue(review.glob_regex("./apps/**").match("apps/x.ts"))
+        self.assertTrue(review.glob_regex("././libs/").match("libs/x.ts"))
+
+    def test_unsupported_glob_syntax_is_an_error(self):
+        for pattern in ("apps/{web,api}/**", "src/[ab].ts", "!docs/**", "", "./"):
+            with self.subTest(pattern=pattern):
+                with self.assertRaises(ValueError):
+                    review.glob_regex(pattern)
+        with self.assertRaises(ValueError):
+            project.review_policy_from_text("review:\n  reviewer: code\n  code_paths: [\"apps/{web,api}/**\"]\n")
+        with self.assertRaises(ValueError):
+            project.review_policy_from_text("review:\n  reviewer: code\n  code_paths:\n    - '!docs/**'\n")
 
     def test_gate_takes_the_roles(self):
         self.assertTrue(review.gate([rv("QA: APPROVED")], HEAD, False, roles=["QA"])["passed"])

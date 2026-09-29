@@ -86,13 +86,14 @@ def freeze_days(path: str = PROJECT_FILE) -> int:
 
 
 REVIEW_MODES = ("always", "code", "never")
-# `code` without `code_paths`: the usual source roots plus source files anywhere. Broad on purpose: a false
-# positive costs one review, a false negative merges unreviewed code.
+# `code` without `code_paths`: the usual source roots plus source, build and style files anywhere. Broad on purpose:
+# a false positive costs one review, a false negative merges unreviewed code. Matched case-insensitively.
 DEFAULT_CODE_PATHS = (
     "apps/**", "libs/**", "packages/**", "src/**", "lib/**", "app/**", "server/**", "client/**", "services/**",
-    "api/**", "*.ts", "*.tsx", "*.js", "*.jsx", "*.mjs", "*.cjs", "*.vue", "*.svelte", "*.py", "*.go", "*.rs",
-    "*.java", "*.kt", "*.kts", "*.swift", "*.m", "*.dart", "*.rb", "*.php", "*.cs", "*.c", "*.cc", "*.cpp", "*.h",
-    "*.sql",
+    "api/**", "*.ts", "*.tsx", "*.mts", "*.cts", "*.js", "*.jsx", "*.mjs", "*.cjs", "*.vue", "*.svelte*", "*.astro",
+    "*.html", "*.css", "*.scss", "*.py", "*.go", "*.rs", "*.java", "*.kt", "*.kts", "*.swift", "*.m", "*.dart",
+    "*.rb", "*.php", "*.cs", "*.c", "*.cc", "*.cpp", "*.h", "*.sql", "*.sh", "*.tf", "Makefile", "*.config.*",
+    "tsconfig*.json",
 )
 _REVIEW_KEYS = ("qa", "reviewer", "code_paths", "max_rework_rounds")
 
@@ -103,17 +104,51 @@ def default_review_policy() -> dict:
             "max_rework_rounds": 1}
 
 
-def _scalar(raw: str) -> str:
-    return raw.split("#", 1)[0].strip().strip("'\"")
+def _split_outside_quotes(raw: str, what: str) -> tuple:
+    """(value without its trailing ` # comment`, the value's top-level comma positions). A `#` inside quotes is
+    text; an unclosed quote raises."""
+    quote, commas = "", []
+    for i, ch in enumerate(raw):
+        if quote:
+            if ch == quote:
+                quote = ""
+        elif ch in "'\"":
+            quote = ch
+        elif ch == "#" and (i == 0 or raw[i - 1] in " \t"):
+            return raw[:i].rstrip(), commas
+        elif ch == ",":
+            commas.append(i)
+    if quote:
+        raise ValueError(f"review.{what} has an unclosed quote: {raw.strip()!r}")
+    return raw.rstrip(), commas
+
+
+def _unquote(item: str, what: str) -> str:
+    item = item.strip()
+    if item[:1] in ("'", '"'):
+        if len(item) < 2 or item[-1] != item[0]:
+            raise ValueError(f"review.{what}: cannot read {item!r}")
+        return item[1:-1]
+    return item
+
+
+def _scalar(raw: str, what: str) -> str:
+    value, _ = _split_outside_quotes(raw, what)
+    return _unquote(value, what) if value.strip() else ""
 
 
 def _glob_list(inline: str, following: list) -> list:
     """An inline `["a", b]` list, or `- a` lines under an empty `key:`."""
-    inline = inline.split("#", 1)[0].strip()
-    if inline:
-        if not (inline.startswith("[") and inline.endswith("]")):
-            raise ValueError(f"review.code_paths must be a list like [\"apps/**\", \"libs/**\"], got {inline!r}")
-        return [x.strip().strip("'\"") for x in inline[1:-1].split(",") if x.strip().strip("'\"")]
+    value, _ = _split_outside_quotes(inline, "code_paths")
+    value = value.strip()
+    if value:
+        if not (value.startswith("[") and value.endswith("]")):
+            raise ValueError(f"review.code_paths must be a list like [\"apps/**\", \"libs/**\"], got {value!r}")
+        body = value[1:-1]
+        _, commas = _split_outside_quotes(body, "code_paths")
+        bounds = [-1] + commas + [len(body)]
+        items = [body[a + 1:b] for a, b in zip(bounds, bounds[1:])]
+        return [x for x in (_unquote(i, "code_paths") for i in items if i.strip()) if x]
     items = []
     for line in following:
         if not line.strip() or line.lstrip().startswith("#"):
@@ -121,26 +156,33 @@ def _glob_list(inline: str, following: list) -> list:
         m = re.match(r"^[ \t]+-[ \t]*(.*)$", line)
         if not m:
             break
-        items.append(_scalar(m.group(1)))
+        items.append(_scalar(m.group(1), "code_paths"))
     return [x for x in items if x]
 
 
 def review_policy_from_text(text: str) -> dict:
     """The top-level `review:` block of a project.yml given as text: which verdicts a PR needs besides SECURITY.
 
-    ValueError when the block is present but a value cannot be read: guessing could drop a required verdict.
+    ValueError when the block is present but cannot be read unambiguously (a bad value, an unsupported glob, a
+    second `review:` block): guessing could drop a required verdict.
     """
+    from . import review  # glob syntax lives with the matcher
+
     lines = (text or "").splitlines()
-    start = next((i for i, line in enumerate(lines) if re.match(r"^review:[ \t]*(#.*)?$", line)), None)
+    starts = [i for i, line in enumerate(lines) if re.match(r"^review:[ \t]*(#.*)?$", line)]
     policy = default_review_policy()
-    if start is None:
+    if not starts:
         return policy
+    if len(starts) > 1 or any(re.match(r"^review:", line) for i, line in enumerate(lines) if i not in starts):
+        raise ValueError("project.yml has more than one top-level `review:` key (or one with an inline value); "
+                         "keep a single block")
     block = []
-    for line in lines[start + 1:]:
+    for line in lines[starts[0] + 1:]:
         if line.strip() and not line[0].isspace() and not line.startswith("#"):
             break
         block.append(line)
     policy["configured"] = True
+    seen = set()
     for i, line in enumerate(block):
         m = re.match(r"^[ \t]+([A-Za-z_]+):[ \t]*(.*)$", line)
         if not m:
@@ -148,8 +190,11 @@ def review_policy_from_text(text: str) -> dict:
         key, value = m.group(1), m.group(2)
         if key not in _REVIEW_KEYS:
             raise ValueError(f"review.{key} is not a known setting (known: {', '.join(_REVIEW_KEYS)})")
+        if key in seen:
+            raise ValueError(f"review.{key} is set twice")
+        seen.add(key)
         if key in ("qa", "reviewer"):
-            mode = _scalar(value)
+            mode = _scalar(value, key)
             if mode not in REVIEW_MODES:
                 raise ValueError(f"review.{key} must be one of {', '.join(REVIEW_MODES)}, not {mode!r}")
             policy[key] = mode
@@ -158,9 +203,11 @@ def review_policy_from_text(text: str) -> dict:
             if not paths:
                 raise ValueError("review.code_paths is set but empty or unreadable; list globs such as "
                                  "[\"apps/**\", \"libs/**\"]")
+            for path in paths:
+                review.glob_regex(path)  # raises for syntax the matcher does not support
             policy[key] = paths
         else:
-            number = _scalar(value)
+            number = _scalar(value, key)
             if not number.isdigit():
                 raise ValueError(f"review.max_rework_rounds must be a whole number, not {number!r}")
             policy[key] = int(number)

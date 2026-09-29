@@ -50,6 +50,14 @@ class ReversalTest(unittest.TestCase):
                     self.c("geeera", owner.decision_comment("x"), "2026-09-28T10:00:00Z")]
         self.assertEqual(owner.reversed_by_owner(comments, "geeera", NO_EDITS, []), {})
 
+    def test_a_reject_in_a_team_note_counts_only_as_a_github_app(self):
+        comments = [self.c("geeera", owner.decision_comment("x"), "2026-09-28T10:00:00Z"),
+                    self.c("geeera", "**PM grooming**\n/reject use Y", "2026-09-28T12:00:00Z")]
+        # Same account: the note may be an agent's, posted as the owner — never the owner's reversal.
+        self.assertEqual(owner.reversed_by_owner(comments, "geeera", NO_EDITS, [], same_account=True), {})
+        self.assertEqual(owner.reversed_by_owner(comments, "geeera", NO_EDITS, [], same_account=False)["text"],
+                         "use Y")
+
     def test_no_decision_no_reversal(self):
         self.assertEqual(owner.reversed_by_owner([self.c("geeera", "/reject x", "2026-09-28T10:00:00Z")], "geeera", NO_EDITS, []), {})
 

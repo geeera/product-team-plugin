@@ -37,7 +37,8 @@ For each linked open PR, oldest first:
    - any `CHANGES REQUESTED` → apply the **review triage** (`reference/workflow.md`): only a real bug, a real
      vulnerability or an unmet acceptance criterion blocks. File every non-blocking item as a follow-up issue
      (`B create --kind finding` with a severity, or `--kind chore`) linked from the PR. Count the rework rounds
-     this PR already had (`review-failed` = one, `tier-up` = two): once they reach `policy.max_rework_rounds`
+     this PR already had (`review-failed` = one, `tier-up` = two): once they reach `policy.max_rework_rounds` (guidance
+     for you — the gate itself does not enforce it)
      from `PR gate`, the PR goes back only while a blocker remains — otherwise ask the reviewer that objected for a
      new verdict on the same head that lists the non-blockers as follow-ups, and merge when the gate passes.
      Going back: `B move N in-progress`, `B label N +qa:changes-requested` (the label stands for

@@ -619,6 +619,7 @@ class RunLogTest(unittest.TestCase):
              mock.patch.object(runlog.gh, "graphql", **graphql), \
              mock.patch.object(runlog.gh, "owner_login", return_value=OWNER), \
              mock.patch.object(runlog.gh, "app_mode", return_value=True), \
+             mock.patch.object(runlog.gh, "acts_as_owner", return_value=False), \
              mock.patch.object(runlog.gh, "token_login", return_value=BOT), \
              mock.patch.object(runlog.runlogissue.project, "run_log_issue", return_value=0), \
              mock.patch.object(sys, "stdout", stdout), self.assertRaises(SystemExit) as caught:

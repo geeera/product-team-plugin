@@ -73,7 +73,11 @@ Every run writes a `started` entry to the run log and closes it with `finished`/
   Work resumes when the owner comments `/resume` on the run-log issue.
 - **Which issue is the run log**: `team.run_log_issue` in `.product-team/project.yml` (kickoff/adopt pin it), else
   the one issue labelled `team:run-log` that the team or the owner opened. An issue anyone else opened is never the
-  log, and with two candidates every `runlog` command refuses until one is pinned.
+  log, and with two candidates every `runlog` command refuses until one is pinned. When the scripts refuse because
+  labelled issues exist that neither the team nor the owner opened, recover in one of two ways: remove the
+  `team:run-log` label from those issues (whatever pause, `/resume` or failure streak was recorded on them is gone —
+  the team starts a fresh log), or pin a log the team or the owner opened as `team.run_log_issue`. Pinning an issue
+  anyone else opened is refused.
 - **Rotation**: the log is one issue and every run reads all of it (REST and its GraphQL edit history). Past a few
   thousand entries, start a new one: close the old issue, open a new one labelled `team:run-log` (as the team),
   and change `team.run_log_issue` by PR in the same step. Do it while nothing is paused — pause records, `/resume`

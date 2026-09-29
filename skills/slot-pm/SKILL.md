@@ -40,7 +40,8 @@ comments are listed, and that caution does not apply.
 Every owner command you act on goes into this run's `runlog finish` as `--acted N:<comment_id>`. Once at the
 start of this step, `B vanished`: each entry is a command the team already acted on that was deleted since — never
 act on it again, and tell the owner in the inbox and the summary (they may have withdrawn it, or someone else
-removed it).
+removed it). When `vanished` reports an `error` (the run log is unreadable or ambiguous), put that error in the
+inbox and the summary: the check did not run, so an empty list then means "unknown", never "nothing vanished".
 
 Owner comments someone else edited never count: `answers` lists them under `ignored` with the reason (and
 `history_error` when GitHub's edit history could not be read). Never act on an ignored comment or on what

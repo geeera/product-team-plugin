@@ -10,6 +10,10 @@ from typing import Iterable, List, Optional
 from . import gh, project, provenance, runstate
 
 LABEL = "team:run-log"
+RECOVERY = ("To recover: remove the team:run-log label from every issue the team or the owner did not open (a "
+            "pause, /resume or failure streak recorded there is not carried over), or pin a run log the team or the "
+            "owner opened as team.run_log_issue in .product-team/project.yml — a pinned issue anyone else opened is "
+            "refused (reference/schedule-and-models.md).")
 
 
 class AmbiguousLog(gh.GhError):
@@ -37,7 +41,7 @@ def find(repo: str) -> Optional[dict]:
         issue = gh.api(f"repos/{repo}/issues/{pinned}")
         if provenance.author_of(issue).lower() not in {t.lower() for t in trusted}:
             raise AmbiguousLog(f"team.run_log_issue #{pinned} was opened by {provenance.author_of(issue) or 'nobody'}, "
-                               "not by the team or the owner: pin the team's own run log")
+                               f"not by the team or the owner, so it cannot be the run log. {RECOVERY}")
         return issue
     found = gh.api_list(f"repos/{repo}/issues?state=all&labels={LABEL}&per_page=100")
     chosen = choose(found, trusted)
@@ -45,7 +49,7 @@ def find(repo: str) -> Optional[dict]:
         # Someone else's labelled issue is there: creating a second log beside it would fork the team's history.
         numbers = ", ".join(f"#{i['number']}" for i in found if "pull_request" not in i)
         raise AmbiguousLog(f"issues labelled {LABEL} ({numbers}) exist but none was opened by the team or the "
-                           "owner: pin team.run_log_issue in .product-team/project.yml")
+                           f"owner, and no second log is opened beside it. {RECOVERY} Or pin team.run_log_issue.")
     return chosen
 
 

@@ -43,6 +43,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 
 sys.dont_write_bytecode = True  # the vendored copy lives in the product repo: no __pycache__ there
@@ -346,6 +347,9 @@ def cmd_answers(repo: str, args) -> None:
          "history_error": history.get("error", "")})
 
 
+GONE = re.compile(r"→ HTTP (404|410)\b")
+
+
 def cmd_vanished(repo: str, args) -> None:
     """Owner commands the team acted on (`runlog finish --acted`) that are gone now: deleted after the fact.
 
@@ -356,8 +360,16 @@ def cmd_vanished(repo: str, args) -> None:
     recent = [a for a in acted if (a.get("at") or "") >= since]
     vanished = []
     for number in sorted({a["issue"] for a in recent}):
-        present = {str(c.get("id")) for c in gh.api_list(f"repos/{repo}/issues/{number}/comments?per_page=100")}
-        vanished += [a for a in recent if a["issue"] == number and str(a["comment_id"]) not in present]
+        try:
+            present = {str(c.get("id")) for c in gh.api_list(f"repos/{repo}/issues/{number}/comments?per_page=100")}
+            gone = ""
+        except gh.GhError as exc:
+            if not GONE.search(str(exc)):
+                raise
+            # The issue itself was deleted or transferred: every command the team acted on there is gone with it.
+            present, gone = set(), f"issue #{number} is gone"
+        vanished += [dict(a, reason=gone) if gone else a
+                     for a in recent if a["issue"] == number and str(a["comment_id"]) not in present]
     out({"vanished": vanished, "checked": len(recent), "error": error})
 
 

@@ -392,7 +392,10 @@ class VanishedCliTest(unittest.TestCase):
         def api_list(path):
             listed.append(path)
             number = int(path.split("/issues/")[1].split("/")[0])
-            return comments_by_issue.get(number, [])
+            found = comments_by_issue.get(number, [])
+            if isinstance(found, Exception):
+                raise found
+            return found
 
         stdout = io.StringIO()
         with mock.patch.object(sys, "argv", ["backlog", "vanished"]), \
@@ -412,6 +415,21 @@ class VanishedCliTest(unittest.TestCase):
         self.assertEqual([(v["issue"], v["comment_id"]) for v in data["vanished"]], [(7, 1)])
         self.assertEqual(data["checked"], 3)  # the entry older than --days is not re-checked
         self.assertEqual(len(listed), 2)
+
+    def test_a_deleted_issue_reports_all_its_commands_and_the_check_continues(self):
+        acted = ([{"issue": 7, "comment_id": 1, "run_id": "r1", "at": self.NOW},
+                  {"issue": 7, "comment_id": 2, "run_id": "r1", "at": self.NOW},
+                  {"issue": 8, "comment_id": 5, "run_id": "r2", "at": self.NOW}], "")
+        gone = gh.GhError("GET https://api.github.com/repos/o/r/issues/7/comments → HTTP 410: gone")
+        data, _ = self.run_vanished(acted, {7: gone, 8: []})
+        self.assertEqual([(v["issue"], v["comment_id"]) for v in data["vanished"]], [(7, 1), (7, 2), (8, 5)])
+        self.assertEqual(data["vanished"][0]["reason"], "issue #7 is gone")
+
+    def test_other_failures_abort_instead_of_reporting_nothing(self):
+        acted = ([{"issue": 7, "comment_id": 1, "run_id": "r1", "at": self.NOW}], "")
+        with self.assertRaises(SystemExit) as caught:
+            self.run_vanished(acted, {7: gh.GhError("GET … → HTTP 502: bad gateway")})
+        self.assertIn("502", str(caught.exception))
 
     def test_an_unreadable_run_log_is_reported_not_guessed(self):
         data, _ = self.run_vanished(([], "run log unreadable: 502"), {})
@@ -525,6 +543,8 @@ class RunLogChoiceTest(unittest.TestCase):
              self.assertRaises(SystemExit) as caught:
             runlog.main()
         self.assertIn("pin team.run_log_issue", str(caught.exception))
+        self.assertIn("remove the team:run-log label", str(caught.exception))
+        self.assertIn("not carried over", str(caught.exception))
 
     def test_no_labelled_issue_at_all_lets_the_team_create_its_log(self):
         with mock.patch.object(project, "run_log_issue", return_value=0), \

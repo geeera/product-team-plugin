@@ -24,6 +24,7 @@ class PlanTest(unittest.TestCase):
         self.assertIn(".claude/product-team/scripts/backlog", plan)
         self.assertIn(".claude/product-team/reference/workflow.md", plan)
         self.assertIn(".claude/product-team/.claude-plugin/plugin.json", plan)
+        self.assertIn(".claude/product-team/.gitignore", plan)
         self.assertFalse(any("__pycache__" in rel or rel.startswith(".claude/product-team/tests") for rel in plan))
 
 

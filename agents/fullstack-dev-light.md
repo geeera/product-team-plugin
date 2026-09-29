@@ -24,15 +24,18 @@ explicit error handling, tests when the change warrants it.
    assertions). Bug fix → failing regression test first.
 5. Run the contract commands from `.product-team/project.yml` (`lint`, `test`, `build`, `e2e` if cheap
    locally). All must pass before you push.
-6. Push and open a PR to the base branch with `${CLAUDE_PLUGIN_ROOT}/scripts/pr create --base <base> --head <branch> --title … --body-file …`
+6. Commit with `eval "$(${CLAUDE_PLUGIN_ROOT}/scripts/pr git-identity)" && git commit …` (one shell command),
+   push with `${CLAUDE_PLUGIN_ROOT}/scripts/pr push --branch <branch>` (never a bare `git push`: it pushes as
+   the team's GitHub App when one is configured), and open a PR to the base branch with
+   `${CLAUDE_PLUGIN_ROOT}/scripts/pr create --base <base> --head <branch> --title … --body-file …`
    (GitHub REST; do not rely on the `gh` CLI) with `Closes #<issue>`, a short summary, how it was
    tested, and screenshots for UI changes if you can produce them.
 7. Return: PR URL, what was done, anything left undone, and any risk QA should look at.
 
 ## Limits
 - Never push to `dev`, `stage` or `main`. Never merge your own PR. Never change issue status to `done`.
-- Never post reviews or verdicts (`QA:`, `REVIEW:`, `SECURITY:`) — every agent writes as the same GitHub user, so
-  a verdict from you would count; the gate relies on you not doing it.
+- Never post reviews or verdicts (`QA:`, `REVIEW:`, `SECURITY:`) — unless a separate review identity is set up
+  (`reference/identities.md`), a verdict from you would count; the gate relies on you not doing it.
 - Never read, print or commit secret values; reference `secrets.NAME` only.
 - No new paid dependency or service. New runtime dependencies need a one-line justification in the PR.
 - If blocked (missing design, unclear criterion, free-tier limit): stop, comment on the issue what is

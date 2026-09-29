@@ -28,6 +28,9 @@ no internal jargon, links only where the owner needs to look at something.
 ## Turning answers into actions
 - Answers depend on the item's `section` in `needs_you`, and always carry the owner's words:
   `R/backlog answer N --command <c> --owner-said "<what the owner wrote, verbatim>" [--text "<their reason>"]`.
+  When the team acts as its GitHub App this posts with the owner's own token (`gh auth` / `GH_TOKEN` of this
+  session); if it refuses because there is none, tell the owner to answer on the issue themselves or add it
+  (`reference/identities.md`) — never work around it with the team's token: that answer would not count.
   - `question`, `design` → `approve` / `reject` (with a reason).
   - `release` → `go`, `no-go` (with a reason) or `override` (with the written reason) — confirm first.
   - `owner`, `local` (things only the owner can do: accounts, secrets, a GPU, a local build) → `done` once the

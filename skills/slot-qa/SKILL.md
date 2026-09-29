@@ -17,8 +17,8 @@ step 2 for any PRs to `dev` that are still open.
 ## 2. Review PRs (`status:qa` issues)
 For each linked open PR, oldest first:
 1. **Mergeable?** `PR view <pr>` → `merge_state`. `dirty` (conflicts) → the developer agent merges the base into
-   the branch locally (no force-push; generated files are regenerated, not hand-merged) and pushes; review it in
-   a later slot. `behind` alone is fine — GitHub merges it as is, and updating the branch would make every
+   the branch locally (no force-push; generated files are regenerated, not hand-merged) and pushes with
+   `PR push`; review it in a later slot. `behind` alone is fine — GitHub merges it as is, and updating the branch would make every
    existing verdict stale.
 2. `PR checks <pr>` — pending: skip (next slot); red: comment the failing job on the PR,
    `B move N in-progress --reason "CI red: <job>"`, `B label N +qa:changes-requested`.

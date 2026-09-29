@@ -20,12 +20,19 @@
                        `--ci-only` skips the verdicts and is only for those branch operations and the
                        `chore/product-team-*` self-update PR
   pr list [--base B] [--state open|closed|all]
+  pr push [--branch B] push a feature/fix/hotfix branch (default: the current one), never forced, never dev/stage/
+                       main. With the team GitHub App configured it pushes as the app (reference/identities.md);
+                       otherwise it is a plain `git push -u origin B`
+  pr git-identity      `export GIT_AUTHOR_…/GIT_COMMITTER_…` lines that make commits authored by the team app's bot;
+                       prints nothing without a team app. Use in the same shell as the commit:
+                       eval "$(pr git-identity)" && git commit -m "…"
 
 Output is JSON (the diff is plain text).
 """
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 import sys
@@ -36,6 +43,7 @@ from urllib.parse import quote
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import re  # noqa: E402
 
+import shlex  # noqa: E402
 import subprocess  # noqa: E402
 import tempfile  # noqa: E402
 from pathlib import Path  # noqa: E402
@@ -117,15 +125,17 @@ def gate(repo: str, n: int) -> dict:
     reasons = security_check(repo, n)
     reviews = gh.api_list(f"repos/{repo}/pulls/{n}/reviews?per_page=100")
     try:
-        logins = project.reviewer_logins()
+        logins, warning = review.allowed_reviewers(project.reviewer_logins(), gh.review_login())
     except ValueError as exc:
         return {"passed": False, "missing": [str(exc)], "required": [], "verdicts": {}, "ci": {}, "security_reasons": []}
     result = review.gate(reviews, info["head_sha"], bool(reasons), logins)
     result["ci"] = ci(repo, info["head_sha"])
     result["security_reasons"] = reasons[:10]
+    result["reviewers"] = logins
     if not logins:
-        result["warning"] = ("same-account mode: any agent can post a verdict; set team.reviewer_logins to a "
-                             "separate reviewing account (owner checklist)")
+        warning = review.unguarded_warning(gh.acts_as_owner(repo))
+    if warning:
+        result["warning"] = warning
     if result["ci"]["state"] != "pass":
         result["missing"].insert(0, f"CI: {result['ci']['state']}")
         result["passed"] = False
@@ -137,6 +147,67 @@ def git(*args: str, cwd: str = ".") -> bytes:
     if proc.returncode != 0:
         raise gh.GhError(f"git {' '.join(args)}: {proc.stderr.decode(errors='replace').strip()[:200]}")
     return proc.stdout
+
+
+def git_host() -> str:
+    """The web host git pushes to: github.com, or the GitHub Enterprise host behind PT_GITHUB_API."""
+    if gh.API == "https://api.github.com":
+        return "https://github.com"
+    m = re.match(r"^(https://[^/]+)/api/v3$", gh.API)
+    if not m:
+        raise gh.GhError(f"cannot tell the git host from PT_GITHUB_API={gh.API}")
+    return m.group(1)
+
+
+def current_branch() -> str:
+    name = git("rev-parse", "--abbrev-ref", "HEAD").decode().strip()
+    if name == "HEAD":
+        raise gh.GhError("detached HEAD: check out the branch to push, or pass --branch")
+    return name
+
+
+def push(repo: str, branch: str) -> dict:
+    """Push a local branch (never forced, never a long-lived one) — as the team app when it is configured.
+
+    The app's token goes to git through GIT_CONFIG_* environment variables: not in argv (visible to every process),
+    not in .git/config, not in the output. The session's credential helper is switched off for the call, so a
+    rejected app token fails instead of quietly pushing as the owner.
+    """
+    if branch in LONG_LIVED:
+        raise gh.GhError(f"never push to {branch}: every change to a long-lived branch arrives as a merged PR")
+    sha = git("rev-parse", "--verify", f"refs/heads/{branch}").decode().strip()
+    refspec = f"refs/heads/{branch}:refs/heads/{branch}"
+    if not gh.app_mode():
+        git("push", "-u", "origin", refspec)
+        return {"branch": branch, "sha": sha, "as": "session remote (no team app configured)"}
+    token = gh.token()
+    login = gh.token_login()
+    host = git_host()
+    basic = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+    header = f"AUTHORIZATION: basic {basic}"
+    scoped = f"http.{host}/.extraheader"
+    env = dict(os.environ, GIT_TERMINAL_PROMPT="0", GIT_CONFIG_COUNT="3",
+               # An empty value first drops headers inherited from repo config (actions/checkout leaves one).
+               GIT_CONFIG_KEY_0=scoped, GIT_CONFIG_VALUE_0="",
+               GIT_CONFIG_KEY_1=scoped, GIT_CONFIG_VALUE_1=header,
+               GIT_CONFIG_KEY_2="credential.helper", GIT_CONFIG_VALUE_2="")
+    proc = subprocess.run(["git", "push", f"{host}/{repo}.git", refspec], capture_output=True, env=env, check=False)
+    if proc.returncode != 0:
+        detail = proc.stderr.decode(errors="replace").replace(token, "***").replace(basic, "***").strip()
+        raise gh.GhError(f"git push as {login} failed: {detail[-400:]}")
+    return {"branch": branch, "sha": sha, "as": login}
+
+
+def git_identity_lines() -> list:
+    """`export` lines that make new commits authored by the team app's bot; [] without a team app."""
+    if not gh.app_mode():
+        return []
+    ident = gh.app_identity()
+    lines = []
+    for role in ("AUTHOR", "COMMITTER"):
+        lines.append(f"export GIT_{role}_NAME={shlex.quote(ident['name'])}")
+        lines.append(f"export GIT_{role}_EMAIL={shlex.quote(ident['email'])}")
+    return lines
 
 
 def show_json(rev: str, path: str) -> dict:
@@ -231,6 +302,8 @@ def main() -> None:
     m.add_argument("--method", required=True, choices=["squash", "merge", "rebase"]); m.add_argument("--delete-branch", action="store_true")
     m.add_argument("--ci-only", action="store_true")
     ls = sub.add_parser("list"); ls.add_argument("--base"); ls.add_argument("--state", default="open", choices=["open", "closed", "all"])
+    sub.add_parser("push").add_argument("--branch")
+    sub.add_parser("git-identity")
     args = p.parse_args()
 
     try:
@@ -263,6 +336,14 @@ def main() -> None:
             out({"required": bool(reasons), "reasons": reasons})
         elif args.cmd == "gate":
             out(gate(repo, args.number))
+        elif args.cmd == "push":
+            out(push(repo, args.branch or current_branch()))
+        elif args.cmd == "git-identity":
+            lines = git_identity_lines()
+            if lines:
+                print("\n".join(lines))
+            else:
+                print("no team app configured: commits keep this machine's git identity", file=sys.stderr)
         elif args.cmd == "merge":
             info = view(repo, args.number)
             if args.ci_only:

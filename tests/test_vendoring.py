@@ -159,6 +159,9 @@ class PluginRefTest(unittest.TestCase):
                 "team:\n  reviewer_logins: [bot-a, 'bot-b']\n": ["bot-a", "bot-b"],
                 "team:\n  reviewer_logins:\n    - bot-a\n    - \"bot-b\"  # note\n  plugin_ref: stable\n": ["bot-a", "bot-b"],
                 "team:\n  reviewer_logins:\n\n    - bot-a\nowner:\n  timezone: x\n": ["bot-a"],
+                "team:\n  reviewer_logins: ['acme-review[bot]']\n": ["acme-review[bot]"],
+                "team:\n  reviewer_logins: [bot-a, acme-review[bot]]\n": ["bot-a", "acme-review[bot]"],
+                "team:\n  reviewer_logins:\n    - acme-review[bot]\n": ["acme-review[bot]"],
             }
             for text, expected in cases.items():
                 with self.subTest(text=text):
@@ -168,7 +171,8 @@ class PluginRefTest(unittest.TestCase):
     def test_unreadable_reviewer_logins_fail_closed(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "project.yml"
-            for text in ("team:\n  reviewer_logins: [\n    a,\n    b]\n", "team:\n  reviewer_logins:\n- a\n"):
+            for text in ("team:\n  reviewer_logins: [\n    a,\n    b]\n", "team:\n  reviewer_logins:\n- a\n",
+                         "team:\n  reviewer_logins: [acme[bot], 'x y']\n"):
                 with self.subTest(text=text):
                     path.write_text(text)
                     with self.assertRaises(ValueError):

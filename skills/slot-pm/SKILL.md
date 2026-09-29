@@ -19,7 +19,8 @@ Skip if `.claude/product-team/MANIFEST.json` does not exist. `PR` = `${CLAUDE_PL
      summary) and stop; `pending` → leave it for the next run. Never open a second update PR.
 2. No such PR → `python3 .claude/product-team/scripts/vendor self-update` (follows `team.plugin_ref` in
    `project.yml`: the `stable` channel or a pinned tag). On `updated: true`: branch
-   `chore/product-team-<version>` from `dev`, commit `.claude/`, `PR create --base dev` titled
+   `chore/product-team-<version>` from `dev`, commit `.claude/` (`eval "$(PR git-identity)" && git commit …`),
+   `PR push`, `PR create --base dev` titled
    `chore: product team <version>` with the CHANGELOG entries between the two versions as the body. The branch
    must be named exactly `chore/product-team-<version>` and contain only what `vendor` wrote — `pr merge --ci-only`
    re-generates the release and compares it byte for byte. Migration steps of **Breaking** entries that touch
@@ -33,6 +34,8 @@ Skip if `.claude/product-team/MANIFEST.json` does not exist. `PR` = `${CLAUDE_PL
 `B answers` reports `same_account: true` while the agents use the owner's GitHub account: then an agent could
 have written a comment that looks like the owner's. Keep going (it is the owner's chosen setup), but never act on
 an owner command that appeared in the same run in which an agent commented on that issue, and say so in the summary.
+With `same_account: false` (the team acts as its GitHub App, `agents` names its bot) only the owner's own
+comments are listed, and that caution does not apply.
 
 - **Designs**: for each issue labelled `design:awaiting-approval`, `B answers N` (only commands newer than the
   design-link comment count):

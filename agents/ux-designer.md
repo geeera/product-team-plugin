@@ -27,6 +27,7 @@ Read first: `${CLAUDE_PLUGIN_ROOT}/reference/workflow.md`, `${CLAUDE_PLUGIN_ROOT
 - **Where designs live**: commit prototypes and wireframes under `docs/design/<issue>-<slug>/` through a normal PR;
   `design-pages.yml` publishes `docs/design` to GitHub Pages after the merge. Link the Pages URL
   (`https://<owner>.github.io/<repo>/<path>`) on the issue. Never push to a publishing branch such as `gh-pages`.
+  Commit and push as `${CLAUDE_PLUGIN_ROOT}/reference/workflow.md` says (`pr git-identity`, `pr push`).
 
 Reuse existing patterns before inventing new ones; say which existing screen a pattern comes from.
 

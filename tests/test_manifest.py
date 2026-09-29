@@ -27,6 +27,8 @@ class ManifestTest(unittest.TestCase):
         market = json.loads((ROOT / ".claude-plugin/marketplace.json").read_text())
         self.assertEqual(plugin["name"], market["plugins"][0]["name"])
         self.assertRegex(plugin["version"], r"^\d+\.\d+\.\d+$")
+        # Two places name the version; a stale marketplace entry would advertise the wrong release.
+        self.assertEqual(market["plugins"][0].get("version", plugin["version"]), plugin["version"])
 
     def test_changelog_has_the_current_version(self):
         version = json.loads((ROOT / ".claude-plugin/plugin.json").read_text())["version"]

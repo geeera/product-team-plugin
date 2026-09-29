@@ -27,6 +27,10 @@ Routines point at the product repository only (one repository per routine) and r
 `/slot-qa`. No setup script and no `gh` CLI are needed: the scripts call the GitHub REST API with the session's
 token.
 
+**Give the agents their own identity** (recommended before the first release): by default they act as your GitHub
+account. Two GitHub Apps — one the team writes and pushes as, one only reviews are posted as — make self-approval
+and imitated owner commands stop counting. Setup and the exact permissions: [reference/identities.md](reference/identities.md).
+
 **On your machine**, for `kickoff`/`adopt` or trying things out:
 
 ```bash
@@ -62,8 +66,8 @@ Full schedule, caps and model pinning: [reference/schedule-and-models.md](refere
 | ---- | ---- |
 | [agents/](agents/) | Roles, each pinned to a model: `pm`, `architect`, `ux-designer`, `ui-designer`, `fullstack-dev` (with tier variants `-light` on Sonnet and `-heavy` on Fable, picked from the architect's `tier:*` label), `reviewer`, `qa`, `security`, `devops`, `analyst`, plus model variants `qa-runner` (Sonnet) and `scribe` (Haiku). Products add their own specialists in `.claude/agents/` and route issues to them with `agent:<name>` |
 | [skills/](skills/) | Procedures: `kickoff`, `adopt`, `foundation`, `slot-pm`, `slot-dev`, `slot-qa`, `qa-regression`, `hotfix`, `demo-prep`, `demo-apply`, `pause`, `resume`, `team-chat`, `backlog` |
-| [reference/](reference/) | Rules the roles share: decision policy (what the owner decides, what the team decides), workflow (branches, hotfix, labels, approvals, gates, budget), schedule and models, run protocol, stack contract, deploy recipes, design system, QA checklists |
-| [scripts/](scripts/) | `vendor` (install into a product, self-update), `pr` (pull requests over REST), `backlog` (tracker adapter; `backlog next` is the development plan), `runlog` (run log, stop conditions, durations, `stats`), `slot-context` (normal/burn/freeze mode), `inbox` (the owner's pinned "Needs you" issue), `digest` (sends it to the owner's phone daily), `brief` (the team-chat briefing), `workflows`, `sprint-metrics` (plan vs shipped, cycle time, QA first-pass rate), `demo-page` (build the demo page, read decisions). Python 3.9+ stdlib only; GitHub via REST with `GH_TOKEN` |
+| [reference/](reference/) | Rules the roles share: decision policy (what the owner decides, what the team decides), workflow (branches, hotfix, labels, approvals, gates, budget), schedule and models, run protocol, identities (the team's own GitHub Apps), stack contract, deploy recipes, design system, QA checklists |
+| [scripts/](scripts/) | `vendor` (install into a product, self-update), `pr` (pull requests over REST, `pr push` as the team app), `backlog` (tracker adapter; `backlog next` is the development plan), `runlog` (run log, stop conditions, durations, `stats`), `slot-context` (normal/burn/freeze mode), `inbox` (the owner's pinned "Needs you" issue), `digest` (sends it to the owner's phone daily), `brief` (the team-chat briefing), `workflows`, `sprint-metrics` (plan vs shipped, cycle time, QA first-pass rate), `demo-page` (build the demo page, read decisions). Python 3.9+ stdlib only; GitHub via REST with the team GitHub App or `GH_TOKEN` |
 | [templates/](templates/) | `project.yml` contract, owner checklist, CI, security, branch-guard, deploy and owner-digest workflows, demo page |
 | [tests/](tests/) | Unit tests for the script logic |
 

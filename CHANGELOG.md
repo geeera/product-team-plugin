@@ -4,6 +4,28 @@ Products follow the `stable` channel (or a pinned tag, `team.plugin_ref` in `.pr
 first `slot-pm` of the day runs `vendor self-update` and opens a PR with the entries in between. Breaking changes (a renamed label, a changed script contract, a new required
 `project.yml` key) are marked **Breaking** with the migration step.
 
+## 0.10.0
+
+- **Agents on their own GitHub identities** (`reference/identities.md`): an optional **team app** every script and
+  push acts as, and a **review app** only verdicts are posted as. Configure with `PT_TEAM_APP_ID` +
+  `PT_TEAM_APP_KEY_FILE` / `PT_TEAM_APP_KEY` (base64 or raw PEM) and the same `PT_REVIEW_APP_*` variables. The app
+  JWT is signed with the `openssl` CLI; installation tokens are scoped to the product repository and cached until
+  shortly before they expire. `GH_TOKEN` / `GITHUB_TOKEN` / `gh auth token` and `PT_REVIEW_TOKEN` keep working when
+  no app is configured; a half-configured app is an error, never a silent fallback to the owner's token.
+- `pr gate` / `pr merge`: with the review app configured only its bot's verdicts count. `team.reviewer_logins`
+  accepts `name[bot]` logins (quote them) and now rejects anything that is not a GitHub login. The gate's
+  same-account warning appears only when the agents really act as the owner.
+- Owner answers: with the team app, `backlog answers` reports `same_account: false` and the agents' bot login, and
+  only the owner's own comments count. `backlog answer` (team chat) then posts with the owner's own token and
+  refuses when the session has none.
+- `pr push [--branch B]` pushes as the team app (token only in `GIT_CONFIG_*` env, never argv, `.git/config` or
+  output; never forced; never `dev`/`stage`/`main`), plain `git push -u origin B` otherwise. `pr git-identity`
+  prints the `GIT_AUTHOR_*`/`GIT_COMMITTER_*` exports for the bot. Developers, designers, devops, `slot-pm`
+  (self-update) and `slot-qa` commit and push through them.
+- The run log accepts entries from the team bot on a log opened by the owner, so switching keeps its history.
+- Migration (optional): create the two apps and set the variables per the owner checklist; add
+  `'<product>-review[bot]'` to `team.reviewer_logins`.
+
 ## 0.9.3
 
 - Designs are published by `design-pages.yml` (GitHub Actions → Pages) from `docs/design` after a PR is merged;

@@ -55,6 +55,14 @@ skills load only in single-repository sessions), with local times
 converted to the routine's timezone. Creating routines is the owner's action (or `/schedule` on their
 confirmation).
 
+## Identities
+Until the owner sets them up, the agents act as the owner's GitHub account (**same-account mode**): verdicts and the
+owner's commands are conventions an agent could imitate. Recommend the two GitHub Apps from
+`${CLAUDE_PLUGIN_ROOT}/reference/identities.md` (team app for everything, review app only in the `reviewers`
+environment that runs `slot-qa`) before the first release; walk the owner through creating them if they agree, and
+keep the checklist item open otherwise. Never ask for or handle the private keys yourself — the owner pastes them
+into the environment settings.
+
 ## Team chat
 The owner talks to the team in **one chat per project** (SPEC decision 17), not in GitHub issues. Sessions cannot
 be created for the owner, so walk them through it once, in their language:

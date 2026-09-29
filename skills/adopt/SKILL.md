@@ -71,4 +71,5 @@ Record in `.product-team/owner-checklist.md` that the chat exists.
 
 ## 6. Output
 Owner summary: what the project is, conventions recorded, top risks, the first sprint, checklist items, the
-routines to create (as in `kickoff` step 6).
+routines to create (as in `kickoff` step 6), and the agents' identity: same-account mode until the owner sets up
+the two GitHub Apps (`kickoff` → Identities, `${CLAUDE_PLUGIN_ROOT}/reference/identities.md`).

@@ -20,6 +20,7 @@ the project's token files and Storybook, the UX spec on the issue.
 - **Where designs live**: commit prototypes and wireframes under `docs/design/<issue>-<slug>/` through a normal PR;
   `design-pages.yml` publishes `docs/design` to GitHub Pages after the merge. Link the Pages URL
   (`https://<owner>.github.io/<repo>/<path>`) on the issue. Never push to a publishing branch such as `gh-pages`.
+  Commit and push as `${CLAUDE_PLUGIN_ROOT}/reference/workflow.md` says (`pr commit`, `pr push`).
 - **Tokens first**: colour, type, spacing, radii, shadows, motion, dark theme. No hard-coded values in
   components. A missing primitive is added to the UI kit before the feature uses it (kit-first).
 - **Wow**: motion tokens and choreography rules, `prefers-reduced-motion` always honoured. 1–3 signature moments

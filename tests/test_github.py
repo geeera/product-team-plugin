@@ -1,4 +1,9 @@
+try:  # first: no test may read real credentials or run `gh auth token` (tests/_isolation.py)
+    from . import _isolation  # noqa: F401
+except ImportError:  # `unittest discover -s tests` imports test modules without their package
+    import _isolation  # noqa: F401
 import json
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -32,7 +37,8 @@ class PaginationTest(unittest.TestCase):
 
 class ErrorTest(unittest.TestCase):
     def test_timeouts_and_non_json_become_gh_errors(self):
-        with mock.patch("urllib.request.urlopen", side_effect=TimeoutError("read timed out")):
+        with mock.patch("urllib.request.urlopen", side_effect=TimeoutError("read timed out")), \
+             mock.patch.object(gh, "token", return_value=""):
             with self.assertRaises(gh.GhError):
                 gh.api("repos/o/r")
         with mock.patch.object(gh, "_request", return_value=("<html>proxy error</html>", {})):
@@ -42,19 +48,38 @@ class ErrorTest(unittest.TestCase):
 
 class TokenTest(unittest.TestCase):
     def setUp(self):
-        gh._token_cache = None
+        gh._token_cache = gh._cli_token_cache = None
 
     def tearDown(self):
-        gh._token_cache = None
+        gh._token_cache = gh._cli_token_cache = None
 
+    # Token values are compared as booleans: a failing assertion must never print a credential.
     def test_env_token_wins_and_no_cli_is_needed(self):
         with mock.patch.dict("os.environ", {"GH_TOKEN": "t1", "GITHUB_TOKEN": "t2"}), \
-             mock.patch("shutil.which", return_value=None):
-            self.assertEqual(gh.token(), "t1")
+             mock.patch.object(gh.shutil, "which", return_value=None), \
+             mock.patch.object(gh, "_run_gh_auth_token") as cli:
+            self.assertTrue(gh.token() == "t1", "GH_TOKEN should win")
+        cli.assert_not_called()
 
     def test_missing_token_and_cli_means_unauthenticated(self):
         with mock.patch.dict("os.environ", {}, clear=True), mock.patch.object(gh.shutil, "which", return_value=None):
-            self.assertEqual(gh.token(), "")
+            self.assertTrue(gh.token() == "", "expected no token")
+
+    def test_cli_token_is_used_when_the_env_has_none(self):
+        fake = mock.Mock(returncode=0, stdout="fake-cli-token\n")
+        with mock.patch.dict("os.environ", {}, clear=True), \
+             mock.patch.object(gh.shutil, "which", return_value="/usr/bin/gh"), \
+             mock.patch.object(gh, "_run_gh_auth_token", return_value=fake):
+            self.assertTrue(gh.token() == "fake-cli-token", "expected the (mocked) CLI token")
+
+    def test_suite_guard_trips_on_an_unmocked_gh_auth_token(self):
+        with mock.patch.dict("os.environ", {}, clear=True), \
+             mock.patch.object(gh.shutil, "which", return_value="/usr/bin/gh"):
+            with self.assertRaises(_isolation.RealCredentialAccess):
+                gh.token()
+
+    def test_suite_removed_real_credentials_from_the_environment(self):
+        self.assertFalse([k for k in os.environ if _isolation.CREDENTIAL_ENV.match(k)])
 
 
 def run(name, status="completed", conclusion="success", started="2026-09-27T10:00:00Z"):

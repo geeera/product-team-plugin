@@ -28,6 +28,11 @@ no internal jargon, links only where the owner needs to look at something.
 ## Turning answers into actions
 - Answers depend on the item's `section` in `needs_you`, and always carry the owner's words:
   `R/backlog answer N --command <c> --owner-said "<what the owner wrote, verbatim>" [--text "<their reason>"]`.
+  When the team acts as its GitHub App this posts with `PT_OWNER_TOKEN`, a token of the owner's own account that
+  only this chat's session has (never `GH_TOKEN` or `gh auth`). If it refuses because it is missing, tell the owner
+  to answer on the issue themselves or set it up (`reference/identities.md`) — never work around it with any other
+  token: an answer from the team's bot would not count. Use it for nothing else; while it is present
+  `backlog answers` reports `same_account: true`, because any agent here could write as the owner.
   - `question`, `design` → `approve` / `reject` (with a reason).
   - `release` → `go`, `no-go` (with a reason) or `override` (with the written reason) — confirm first.
   - `owner`, `local` (things only the owner can do: accounts, secrets, a GPU, a local build) → `done` once the

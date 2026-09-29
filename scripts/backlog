@@ -16,7 +16,8 @@ skills. Output is JSON on stdout; errors go to stderr with a non-zero exit.
   backlog answer N --command approve|reject|go|no-go|override|done --owner-said "…" [--text T]
                  the owner's answer given in the team chat (interactive only — scheduled runs never call it);
                  allowed commands depend on the item: questions and designs approve/reject, the demo issue
-                 go/no-go/override, action items done
+                 go/no-go/override, action items done. With the team GitHub App it posts with PT_OWNER_TOKEN
+                 (the owner's own token; reference/identities.md) and refuses without it
   backlog reversals [--days 14]  team decisions the owner answered with /reject since they were made
   backlog decide N (--body B | --body-file F) [--close]
                  record a team decision on the issue (label team-decided); --close closes a question it answers
@@ -198,7 +199,8 @@ def cmd_answer(repo: str, args) -> None:
         body = brief.answer_comment(args.command, args.text or "", args.owner_said or "", section or "")
     except ValueError as exc:
         sys.exit(f"#{args.number}: {exc}")
-    c = gh.api(f"repos/{repo}/issues/{args.number}/comments", "POST", {"body": body})
+    # Commands count only when the owner's login wrote them; in app mode that needs the owner's own token.
+    c = gh.api(f"repos/{repo}/issues/{args.number}/comments", "POST", {"body": body}, auth=gh.owner_token(repo))
     out({"issue": args.number, "answer": f"/{args.command}", "url": c["html_url"]})
 
 
@@ -307,9 +309,11 @@ def cmd_link_pr(repo: str, args) -> None:
 def cmd_answers(repo: str, args) -> None:
     owner = gh.owner_login(repo)
     comments = gh.api_list(f"repos/{repo}/issues/{args.number}/comments?per_page=100")
-    # When the agents act as the owner's account, an agent can write a comment that looks like the owner's.
+    # When the agents act as the owner's account, an agent can write a comment that looks like the owner's; as an
+    # app they cannot, and commands.parse already counts only the owner's login.
     same_account = gh.acts_as_owner(repo)
-    out({"owner": owner, "same_account": same_account, "commands": commands.parse(comments, owner)})
+    out({"owner": owner, "agents": gh.token_login(), "same_account": same_account,
+         "commands": commands.parse(comments, owner)})
 
 
 def cmd_next(repo: str, args) -> None:

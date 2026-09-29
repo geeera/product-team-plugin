@@ -1,3 +1,7 @@
+try:  # first: no test may read real credentials or run `gh auth token` (tests/_isolation.py)
+    from . import _isolation  # noqa: F401
+except ImportError:  # `unittest discover -s tests` imports test modules without their package
+    import _isolation  # noqa: F401
 import sys
 import unittest
 from pathlib import Path
@@ -111,6 +115,36 @@ class GateTest(unittest.TestCase):
     def test_only_configured_reviewer_logins_count(self):
         reviews = [dict(rv("QA: APPROVED"), user={"login": "owner"}), dict(rv("REVIEW: APPROVED"), user={"login": "team-bot"})]
         self.assertEqual(review.gate(reviews, HEAD, False, ["team-bot"])["missing"], ["QA: no verdict"])
+
+
+class ReviewAppTest(unittest.TestCase):
+    BOT = "acme-review[bot]"
+
+    def test_review_app_is_the_only_reviewer_even_if_project_yml_lists_more(self):
+        self.assertEqual(review.allowed_reviewers(["someone", self.BOT], self.BOT), ([self.BOT], ""))
+
+    def test_warns_when_project_yml_would_disagree_without_the_key(self):
+        allowed, warning = review.allowed_reviewers(["old-machine-account"], self.BOT)
+        self.assertEqual(allowed, [self.BOT])
+        self.assertIn(self.BOT, warning)
+
+    def test_without_the_review_app_project_yml_decides(self):
+        self.assertEqual(review.allowed_reviewers([self.BOT], None), ([self.BOT], ""))
+        self.assertEqual(review.allowed_reviewers([], None), ([], ""))
+
+    def test_gate_counts_only_the_review_bots_verdicts(self):
+        team, owner = {"login": "acme-team[bot]"}, {"login": "geeera"}
+        reviews = [dict(rv("QA: APPROVED"), user=team), dict(rv("REVIEW: APPROVED"), user=owner),
+                   dict(rv("QA: APPROVED"), user={"login": self.BOT})]
+        allowed, _ = review.allowed_reviewers([], self.BOT)
+        result = review.gate(reviews, HEAD, False, allowed)
+        self.assertEqual(result["missing"], ["REVIEW: no verdict"])
+        self.assertEqual(set(result["verdicts"]), {"QA"})
+
+    def test_unguarded_warning_names_same_account_only_when_it_is(self):
+        self.assertIn("same-account mode", review.unguarded_warning(True))
+        self.assertNotIn("same-account", review.unguarded_warning(False))
+        self.assertIn("review app", review.unguarded_warning(False))
 
 
 if __name__ == "__main__":

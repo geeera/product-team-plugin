@@ -24,6 +24,10 @@ Read first: `${CLAUDE_PLUGIN_ROOT}/reference/workflow.md`, `${CLAUDE_PLUGIN_ROOT
    styling, that is the `ui-designer`'s job.
 7. **Acceptance additions** — criteria the PM should add to the issue so QA can test the flow.
 
+- **Where designs live**: commit prototypes and wireframes under `docs/design/<issue>-<slug>/` through a normal PR;
+  `design-pages.yml` publishes `docs/design` to GitHub Pages after the merge. Link the Pages URL
+  (`https://<owner>.github.io/<repo>/<path>`) on the issue. Never push to a publishing branch such as `gh-pages`.
+
 Reuse existing patterns before inventing new ones; say which existing screen a pattern comes from.
 
 ## UX walkthrough on `stage`, once per sprint

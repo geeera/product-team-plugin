@@ -15,7 +15,7 @@ Parallelise only where marked.
 1. **Architecture skeleton** (`architect`): project structure per the stack decision and the owner's baseline
    (Feature-Sliced Design on the frontend, shared-first), error handling, config/env access, logging, API
    conventions, one vertical "hello" slice proving the layers. Decision records for each non-obvious choice.
-2. **CI + security** (`devops`, parallel with 3): `ci.yml`, `security.yml`, `branch-guard.yml` and `owner-digest.yml` from
+2. **CI + security** (`devops`, parallel with 3): `ci.yml`, `security.yml`, `branch-guard.yml`, `owner-digest.yml` and `design-pages.yml` (public repos) from
    `${CLAUDE_PLUGIN_ROOT}/templates/workflows/` filled for the stack; `Dockerfile`; commands written into
    `.product-team/project.yml`.
 3. **Tokens** (`ui-designer`, parallel with 2): the complete token set from `design-system.md` for the chosen visual

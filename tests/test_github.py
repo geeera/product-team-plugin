@@ -284,5 +284,41 @@ class ChecksTest(unittest.TestCase):
         self.assertEqual(checks.summarise([], statuses)["state"], "pass")
 
 
+BLOCKED = gh.GhError('POST https://api.github.com/graphql → HTTP 403: {"message":"GitHub GraphQL is not available '
+                     'from Claude Code sessions; use the REST API"}')
+
+
+class GraphqlUnavailableTest(unittest.TestCase):
+    """Claude Code cloud sessions answer every GraphQL call with the 403 above: recognised once, never retried."""
+
+    def setUp(self):
+        gh._graphql_unavailable = None
+        self.addCleanup(setattr, gh, "_graphql_unavailable", None)
+
+    def test_the_cloud_403_is_a_distinct_error_cached_for_the_process(self):
+        with mock.patch.object(gh, "api", side_effect=BLOCKED) as api:
+            with self.assertRaises(gh.GraphqlUnavailable) as first:
+                gh.graphql("query { viewer { login } }", {})
+            with self.assertRaises(gh.GraphqlUnavailable) as second:
+                gh.graphql("query { viewer { login } }", {})
+        self.assertEqual(api.call_count, 1)
+        self.assertIn("GraphQL is not available from Claude Code sessions", str(first.exception))
+        self.assertEqual(str(first.exception), str(second.exception))
+        self.assertIsInstance(first.exception, gh.GhError)
+
+    def test_other_403s_and_failures_are_plain_errors_and_not_cached(self):
+        answers = [gh.GhError("POST https://api.github.com/graphql → HTTP 403: API rate limit exceeded"),
+                   gh.GhError("POST https://api.github.com/graphql → HTTP 502: bad gateway"),
+                   {"data": {"viewer": {"login": "x"}}}]
+        with mock.patch.object(gh, "api", side_effect=answers) as api:
+            for _ in range(2):
+                with self.assertRaises(gh.GhError) as caught:
+                    gh.graphql("q", {})
+                self.assertNotIsInstance(caught.exception, gh.GraphqlUnavailable)
+            self.assertEqual(gh.graphql("q", {}), {"viewer": {"login": "x"}})
+        self.assertEqual(api.call_count, 3)
+        self.assertIsNone(gh._graphql_unavailable)
+
+
 if __name__ == "__main__":
     unittest.main()

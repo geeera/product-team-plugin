@@ -60,6 +60,10 @@ class DecideTest(unittest.TestCase):
         self.assertEqual(decision["decision"], "proceed")
 
 
+def entry(cid, rid, state, at, slot="slot-dev", extra=""):
+    return {"id": cid, "created_at": at, "body": f"<!-- pt-run id={rid} slot={slot} state={state} -->\n{extra}"}
+
+
 class ParseRunsTest(unittest.TestCase):
     def test_reads_markers_and_ignores_other_comments(self):
         comments = [
@@ -68,6 +72,91 @@ class ParseRunsTest(unittest.TestCase):
             {"id": 3, "created_at": "2026-09-26T02:00:00Z", "body": "owner chatter"},
         ]
         self.assertEqual([r["id"] for r in runstate.parse_runs(comments)], ["a", "b"])
+
+    def test_a_started_and_a_finish_entry_merge_into_one_run_dated_by_its_start(self):
+        metrics = runstate.metrics_marker({"minutes": 7, "prs": 1})
+        comments = [entry(1, "r1", "started", "2026-09-26T10:00:00Z"),
+                    entry(2, "r1", "finished", "2026-09-26T10:07:00Z", extra=metrics)]
+        runs = runstate.parse_runs(comments)
+        self.assertEqual(len(runs), 1)
+        run = runs[0]
+        self.assertEqual((run["state"], run["at"], run["finished_at"], run["comment_id"]),
+                         ("finished", "2026-09-26T10:00:00Z", "2026-09-26T10:07:00Z", 2))
+        self.assertEqual(run["metrics"], {"minutes": 7, "prs": 1})
+
+    def test_the_latest_entry_of_a_run_wins(self):
+        comments = [entry(1, "r1", "started", "2026-09-26T10:00:00Z"),
+                    entry(2, "r1", "failed", "2026-09-26T10:05:00Z"),
+                    entry(3, "r1", "finished", "2026-09-26T10:09:00Z")]
+        self.assertEqual(runstate.parse_runs(comments)[0]["state"], "finished")
+
+    def test_a_patched_old_format_entry_still_parses_as_one_run(self):
+        # Before 0.10.3 `finish` rewrote the started comment in place: one comment, created at the start time.
+        old = entry(1, "r1", "finished", "2026-09-26T10:00:00Z", extra=runstate.metrics_marker({"minutes": 9}))
+        old["updated_at"] = "2026-09-26T10:09:00Z"
+        run = runstate.parse_runs([old])[0]
+        self.assertEqual((run["state"], run["at"], run["metrics"]), ("finished", "2026-09-26T10:00:00Z", {"minutes": 9}))
+
+    def test_an_untrusted_entry_never_creates_a_run(self):
+        edited = entry(1, "r1", "finished", "2026-09-26T10:00:00Z",
+                       extra=runstate.metrics_marker({"minutes": 9}) + "\n" + runstate.acted_marker([[7, 11]]))
+        self.assertEqual(runstate.parse_runs([], untrusted=[edited]), [])
+
+    def test_an_untrusted_entry_changes_nothing_but_the_trust_of_a_run_it_postdates(self):
+        started = entry(1, "r1", "started", "2026-09-26T10:00:00Z", slot="slot-dev")
+        forged = entry(2, "r1", "finished", "2026-09-26T10:07:00Z", slot="slot-qa",
+                       extra=runstate.metrics_marker({"minutes": 1}) + "\n" + runstate.acted_marker([[7, 11]]))
+        run = runstate.parse_runs([started], untrusted=[forged])[0]
+        self.assertEqual((run["state"], run["slot"], run["at"], run["comment_id"], run["trusted"]),
+                         ("started", "slot-dev", "2026-09-26T10:00:00Z", 1, False))
+        self.assertEqual((run["metrics"], run["acted"], run["finished_at"]), ({}, [], None))
+        # An untrusted entry older than the run's latest trusted word is simply superseded.
+        earlier = entry(3, "r1", "failed", "2026-09-26T09:59:00Z")
+        self.assertTrue(runstate.parse_runs([started], untrusted=[earlier])[0]["trusted"])
+
+
+class UnknownRunsTest(unittest.TestCase):
+    """Untrusted entries (edited; no edit history to vouch for them) must neither pause the team for good nor let
+    a second run start beside one still in progress."""
+
+    def test_a_forged_edit_carrying_the_in_progress_run_id_does_not_end_it(self):
+        started = entry(1, "r1", "started", "2026-09-26T11:00:00Z")
+        forged = entry(2, "r1", "finished", "2026-09-26T11:30:00Z")
+        runs = runstate.parse_runs([started], untrusted=[forged])
+        self.assertEqual(runstate.effective_state(runs[0], NOW), "started")
+        self.assertEqual(runstate.decide(runs, "slot-dev", NOW, False)["decision"], "overlap")
+        # Once the overlap window has passed the dead run counts as failed, as any dangling start does.
+        self.assertEqual(runstate.effective_state(runs[0], NOW + runstate.OVERLAP_WINDOW), "failed")
+
+    def test_an_untrusted_started_entry_alone_is_not_an_overlap(self):
+        runs = runstate.parse_runs([], untrusted=[entry(1, "r1", "started", "2026-09-26T11:00:00Z")])
+        self.assertEqual(runstate.decide(runs, "slot-dev", NOW, False)["decision"], "proceed")
+
+    def test_an_ended_run_someone_edited_afterwards_is_unknown_and_breaks_a_failure_streak(self):
+        comments = [entry(1, "a", "failed", "2026-09-25T01:00:00Z"), entry(2, "b", "failed", "2026-09-25T15:00:00Z"),
+                    entry(3, "c", "failed", "2026-09-25T20:00:00Z")]
+        edited_b = [entry(4, "b", "failed", "2026-09-25T16:00:00Z")]
+        runs = runstate.parse_runs(comments, edited_b)
+        self.assertEqual([runstate.effective_state(r, NOW) for r in runs], ["failed", "unknown", "failed"])
+        self.assertEqual(runstate.decide(runs, "slot-dev", NOW, False)["decision"], "proceed")
+        self.assertEqual(runstate.decide(runstate.parse_runs(comments), "slot-dev", NOW, False)["decision"], "pause")
+
+    def test_old_patched_log_in_rest_only_mode_shows_only_its_unedited_entries(self):
+        # team-console #22 before 0.10.3: finished runs were edited in place (invisible without GraphQL) and runs
+        # that died on the usage limit stayed `started` (unedited, trusted, counted as failed once stale).
+        dead = [entry(n, f"dead{n}", "started", f"2026-09-2{n}T20:00:00Z") for n in (1, 3)]
+        patched = [entry(n, f"ok{n}", "finished", f"2026-09-2{n}T20:00:00Z") for n in (2, 4)]
+        runs = runstate.parse_runs(dead, untrusted=patched)
+        self.assertEqual([(r["id"], r["state"]) for r in runs], [("dead1", "started"), ("dead3", "started")])
+        self.assertEqual(runstate.decide(runs, "slot-dev", NOW, False)["decision"], "proceed")
+
+    def test_stats_count_unknown_runs_separately(self):
+        runs = runstate.parse_runs([entry(1, "a", "failed", "2026-09-25T01:00:00Z"),
+                                    entry(2, "b", "finished", "2026-09-25T16:00:00Z")],
+                                   untrusted=[entry(3, "b", "finished", "2026-09-25T17:00:00Z")])
+        since = datetime(2026, 9, 12, tzinfo=timezone.utc)
+        self.assertEqual(runstate.stats(runs, NOW, since)["slot-dev"],
+                         {"runs": 2, "failed": 1, "unknown": 1, "totals": {}, "median_minutes": None})
 
 
 class OwnerPauseTest(unittest.TestCase):
@@ -138,7 +227,7 @@ class MetricsTest(unittest.TestCase):
         ]
         since = datetime(2026, 9, 12, tzinfo=timezone.utc)
         self.assertEqual(runstate.stats(runs, NOW, since),
-                         {"slot-dev": {"runs": 3, "failed": 1, "totals": {"prs": 3}, "median_minutes": 50}})
+                         {"slot-dev": {"runs": 3, "failed": 1, "unknown": 0, "totals": {"prs": 3}, "median_minutes": 50}})
 
 
 if __name__ == "__main__":

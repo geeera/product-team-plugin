@@ -122,12 +122,12 @@ class RunLogAuthorsTest(unittest.TestCase):
     def test_a_log_opened_by_the_owner_accepts_the_team_bot_in_app_mode(self):
         with mock.patch.object(runlog.gh, "app_mode", return_value=True), \
              mock.patch.object(runlog.gh, "token_login", return_value=BOT):
-            bodies = [c["body"] for c in runlog.team_comments(self.ISSUE, self.COMMENTS, NO_EDITS)]
+            bodies = [c["body"] for c in runlog.team_comments(self.ISSUE, self.COMMENTS, NO_EDITS)[0]]
         self.assertEqual(bodies, ["old run", "new run"])
 
     def test_same_account_mode_keeps_only_the_log_author(self):
         with mock.patch.object(runlog.gh, "app_mode", return_value=False):
-            bodies = [c["body"] for c in runlog.team_comments(self.ISSUE, self.COMMENTS, NO_EDITS)]
+            bodies = [c["body"] for c in runlog.team_comments(self.ISSUE, self.COMMENTS, NO_EDITS)[0]]
         self.assertEqual(bodies, ["old run"])
 
 

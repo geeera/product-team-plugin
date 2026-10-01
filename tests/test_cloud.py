@@ -265,7 +265,7 @@ class CloudSessionTest(unittest.TestCase):
         code, out, _ = self.start()
         self.assertEqual((code, out["decision"]), (0, "proceed"))
 
-    def test_old_patched_entries_are_unknown_and_block_nothing(self):
+    def test_old_patched_entries_are_invisible_and_block_nothing(self):
         # The log as team-console #22 looks after 0.10.0–0.10.2: finish rewrote the started comment in place.
         old = self.github.comment(1, BOT, "<!-- pt-run id=20260925T200000Z-slot-dev slot=slot-dev state=finished -->"
                                   "\n<!-- pt-metrics {\"minutes\": 40} -->", at="2026-09-25T20:00:00Z", edited=True)
@@ -275,7 +275,8 @@ class CloudSessionTest(unittest.TestCase):
             self.github.comment(1, BOT, f"<!-- pt-run id=202609{day}T200000Z-slot-dev slot=slot-dev state=started -->",
                                 at=f"2026-09-{day}T20:00:00Z")
         _, status, _ = self.run_cli(runlog, "status")
-        self.assertEqual([r["state"] for r in status["runs"]], ["unknown", "unknown", "started", "started", "started"])
+        self.assertEqual([(r["state"], r["effective"]) for r in status["runs"]], [("started", "failed")] * 3)
+        self.assertNotIn(old["id"], [r["comment_id"] for r in status["runs"]])
         self.assertEqual(status["history"], "rest-only")
         code, out, _ = self.start()
         self.assertEqual((code, out["decision"]), (3, "pause"))  # three dead runs in a row are a real streak
@@ -283,9 +284,16 @@ class CloudSessionTest(unittest.TestCase):
         code, out, _ = self.start()
         self.assertEqual((code, out["decision"]), (0, "proceed"))
         _, stats, _ = self.run_cli(runlog, "stats", "--days", "30")
-        self.assertEqual(stats["slots"]["slot-dev"]["unknown"], 2)
+        self.assertEqual((stats["slots"]["slot-dev"]["runs"], stats["slots"]["slot-dev"]["unknown"]), (4, 0))
         self.assertEqual(stats["slots"]["slot-dev"]["median_minutes"], None)  # nothing read from edited entries
-        self.assertNotIn(old["id"], [r["comment_id"] for r in status["runs"] if r["state"] != "unknown"])
+
+    def test_a_forged_edit_with_the_in_progress_run_id_keeps_the_overlap(self):
+        _, started, _ = self.start()
+        # A team entry someone rewrote to carry the running id and say it finished: untrusted over REST.
+        self.github.comment(1, BOT, f"<!-- pt-run id={started['run_id']} slot=slot-dev state=finished -->", edited=True)
+        code, out, _ = self.start()
+        self.assertEqual((code, out["decision"]), (3, "overlap"))
+        self.assertIn(started["run_id"], out["reason"])
 
     def test_backlog_owner_commands_unedited_count_edited_do_not(self):
         issue = self.github.create_issue(BOT, "Use R2?", ["kind:question", "owner:money"])

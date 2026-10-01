@@ -1,11 +1,12 @@
 """Run-log state machine: overlap guard and the 3-failures-in-a-row pause.
 
 The log is append-only: a run is a `started` comment and, later, a `finished` or `failed` comment with the same
-run id (`runlog finish` never edits the started one). `parse_runs` merges the entries of one id; the latest wins.
-Entries the caller could not trust (edited, and the edit history unavailable or showing an outsider — see
-provenance) are not dropped silently: they become state `unknown`, which neither blocks the next run as an
-overlap nor counts as a failure, and which breaks a failure streak, so an untrusted entry can never pause the
-team for good. Nothing else is read from an untrusted entry (no metrics, no acted-on commands).
+run id (`runlog finish` never edits the started one). `parse_runs` merges the trusted entries of one id; the
+latest wins. An entry the caller could not trust (edited, and the edit history unavailable or showing an
+outsider — see provenance) supplies nothing: it never creates a run and never changes a run's slot, start or
+state. It only flags a trusted run of the same id it postdates (`trusted: False`), whose effective state is then
+`unknown` — not a failure, and a streak-breaker, so an edited entry can never pause the team for good — unless
+the run is still `started`: then the overlap guard holds, because nothing an edited entry says ends a run.
 """
 from __future__ import annotations
 
@@ -27,31 +28,36 @@ UNKNOWN = "unknown"
 FINAL = ("finished", "failed")
 
 
-def _entries(comments: Iterable[dict], trusted: bool) -> List[dict]:
+def _entries(comments: Iterable[dict]) -> List[dict]:
     found = []
     for c in comments:
         m = MARKER.search(c.get("body") or "")
         if m:
-            body = (c.get("body") or "") if trusted else ""
-            found.append({"id": m.group(1), "slot": m.group(2), "state": m.group(3) if trusted else UNKNOWN,
-                          "at": c.get("created_at"), "comment_id": c.get("id"), "trusted": trusted,
-                          "metrics": _metrics_of(body), "acted": _acted_of(body)})
-    return found
+            body = c.get("body") or ""
+            found.append({"id": m.group(1), "slot": m.group(2), "state": m.group(3), "at": c.get("created_at"),
+                          "comment_id": c.get("id"), "metrics": _metrics_of(body), "acted": _acted_of(body)})
+    return sorted(found, key=lambda e: e["at"] or "")
 
 
 def parse_runs(comments: List[dict], untrusted: Iterable[dict] = ()) -> List[dict]:
-    """Runs, oldest first, one per run id: `at` is the first entry's time (the start), `comment_id`, `state`,
-    `metrics` and `acted` come from the latest entry. untrusted: team comments screened out (provenance.screen's
-    rejected list); their entries only make the run `unknown` when they are its latest word."""
-    entries = sorted(_entries(comments, True) + _entries(untrusted, False), key=lambda e: e["at"] or "")
+    """Runs, oldest first, one per run id, from trusted entries only: `at` and `slot` from the first, `state`,
+    `comment_id`, `metrics`, `acted` and `finished_at` from the latest. untrusted: team comments screened out
+    (provenance.partition); one that postdates a run's latest trusted entry sets `trusted: False` (see above)."""
     runs: Dict[str, dict] = {}
-    for e in entries:
+    for e in _entries(comments):
         run = runs.get(e["id"])
+        finished_at = e["at"] if e["state"] in FINAL else None
         if run is None:
-            runs[e["id"]] = dict(e, finished_at=e["at"] if e["state"] in FINAL else None)
-            continue
-        run.update(state=e["state"], comment_id=e["comment_id"], metrics=e["metrics"], acted=e["acted"],
-                   trusted=e["trusted"], finished_at=e["at"] if e["state"] in FINAL else None)
+            runs[e["id"]] = dict(e, trusted=True, finished_at=finished_at)
+        else:
+            run.update(state=e["state"], comment_id=e["comment_id"], metrics=e["metrics"], acted=e["acted"],
+                       finished_at=finished_at, last_at=e["at"])
+    for e in _entries(untrusted):
+        run = runs.get(e["id"])
+        if run is not None and (e["at"] or "") >= (run.get("last_at") or run["at"] or ""):
+            run["trusted"] = False
+    for run in runs.values():
+        run.pop("last_at", None)
     return sorted(runs.values(), key=lambda r: r["at"] or "")
 
 
@@ -60,10 +66,11 @@ def _ts(value: str) -> datetime:
 
 
 def effective_state(run: dict, now: datetime) -> str:
-    """A `started` run older than the overlap window died (usually on the usage limit): count it as failed."""
-    if run["state"] == "started" and now - _ts(run["at"]) >= OVERLAP_WINDOW:
-        return "failed"
-    return run["state"]
+    """A `started` run older than the overlap window died (usually on the usage limit): count it as failed. A run
+    an untrusted entry postdates is `unknown` once it ended; while `started` it still counts as in progress."""
+    if run["state"] == "started":
+        return "failed" if now - _ts(run["at"]) >= OVERLAP_WINDOW else "started"
+    return run["state"] if run.get("trusted", True) else UNKNOWN
 
 
 def decide(runs: List[dict], slot: str, now: datetime, paused: bool, reset_at: str = "") -> dict:

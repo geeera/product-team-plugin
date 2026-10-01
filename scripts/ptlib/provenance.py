@@ -13,13 +13,10 @@ every script keeps working in it; the one thing REST can never verify is an issu
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta
 from typing import Dict, Iterable, List, Optional, Tuple
 
 from . import gh
 
-# REST `updated_at` of a never-edited comment equals `created_at`; a second of slack absorbs rounding.
-TOLERANCE = timedelta(seconds=2)
 EDITS_PER_ITEM = 50
 
 _ACTOR = "{ __typename login }"
@@ -133,22 +130,14 @@ def _fetch(repo: str, number: int, with_full_id: bool) -> dict:
     return {"issue": issue_record, "comments": comments}
 
 
-def _ts(value: str) -> Optional[datetime]:
-    try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except (AttributeError, ValueError):
-        return None
-
-
 def rest_unedited(item: dict) -> bool:
-    """True only when REST timestamps prove the item was never edited; a missing or odd timestamp proves nothing."""
+    """True only when REST timestamps prove a comment was never edited: `updated_at` is exactly `created_at`.
+
+    No slack: GitHub stamps both from the same write, and any tolerance would let an edit made within it count.
+    A missing timestamp proves nothing.
+    """
     created, updated = item.get("created_at"), item.get("updated_at")
-    if not created or not updated:
-        return False
-    if created == updated:
-        return True
-    a, b = _ts(created), _ts(updated)
-    return a is not None and b is not None and abs(b - a) <= TOLERANCE
+    return bool(created) and created == updated
 
 
 def author_of(item: dict) -> str:
@@ -169,11 +158,13 @@ def edit_problem(item: dict, record: Optional[dict], allowed: Iterable[str], his
     """
     allowed_lower = {a.lower() for a in allowed if a}
     if record is None:
-        if rest_unedited(item):
+        # Only a comment's timestamps can clear it; an issue body's updated_at moves with every label and comment.
+        if is_comment and rest_unedited(item):
             return ""
         why = f"its edit history could not be fetched ({history_error})" if history_error else \
             "GitHub returned no edit history for it"
-        return f"it may have been edited and {why}"
+        return f"it may have been edited and {why}" if is_comment else \
+            f"an issue body cannot be verified without its edit history ({why})"
     if record.get("author") and record["author"].lower() != author_of(item).lower():
         return f"GitHub names two authors for it ({author_of(item)}, {record['author']})"
     if not record["edited"]:

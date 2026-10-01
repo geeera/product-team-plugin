@@ -121,7 +121,8 @@ settings and deleting the old one there.
   edit history (GraphQL `userContentEdits`, `lastEditedAt` + `editor`): a comment edited by any other login, by a
   deleted account, or with more edits than one page of history shows, is ignored, and `backlog answers` lists it
   under `ignored` with the reason. When the history cannot be fetched (`history: rest-only`, see below) only
-  comments whose REST `updated_at` equals `created_at` (two seconds of slack) count — **a comment you edited
+  comments whose REST `updated_at` is exactly `created_at` (no slack: an edit made within any tolerance would
+  count) count — **a comment you edited
   yourself included**, because REST cannot say who edited it; the rest are ignored, `history_error` says why, and
   the fix is always the same: write the command again in a new comment. The same check covers the issue body
   (`backlog answers` → `body.owner_statement`, and `body.edited_at`/`editors`: an approval given before someone
@@ -135,12 +136,16 @@ settings and deleting the old one there.
   (`history: rest-only` in `runlog start`/`finish`/`status`, `backlog answers` and `backlog vanished`): everything
   works, and the trust rule is the one above — unedited counts, edited does not, whoever edited. What that means
   in practice: the run log is append-only (`finish` adds a comment, so no team entry is ever edited); an entry
-  that *was* edited makes its run `unknown` (neither an overlap nor a failure, and it breaks a failure streak, so
-  an old edited entry can never pause the team for good); an edited pause record is no record (`runlog
-  pause-record` → `null`; pause again); an issue **body** can never be verified over REST (its `updated_at` moves
-  with every label), so `body.owner_statement` is `false` there — a question's text is read from the issue, but
-  approvals come only from comments. Pinning the inbox issue is a GraphQL mutation: in the cloud it is skipped
-  with a warning and the issue is found by its `team:inbox` label instead.
+  that *was* edited supplies nothing — it never creates a run, never changes a run's start or slot, and only
+  flags the run of the same id it postdates as `trusted: false`, which makes an ended run `unknown` (not a
+  failure; it breaks a failure streak, so an old edited entry can never pause the team for good) and leaves a
+  run still `started` in progress (the overlap guard holds); entries 0.10.2 and older edited in place are simply
+  not runs here; an edited pause record is no record (`runlog pause-record` → `null`; pause again); an issue
+  **body** is never an owner statement without the edit history (its `updated_at` moves with every label, so REST
+  cannot clear it even when the timestamps happen to match): `body.owner_statement` is `false`, `body.body` is
+  `null` and `body.reason` says so — a question's text is read from the issue, but approvals come only from
+  comments. Pinning the inbox issue is a GraphQL mutation: in the cloud it is skipped with a warning and the
+  issue is found by its `team:inbox` label instead.
 - **Team decisions** are dated only by decision comments of the team's own logins that nobody else edited, so a
   marker posted or edited in by someone else cannot bury your `/reject`; `backlog decide` refuses a new decision
   while your reversal is open unless it names it (`--handles-reversal`).

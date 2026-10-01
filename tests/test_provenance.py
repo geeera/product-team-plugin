@@ -213,12 +213,22 @@ class OwnerCommandTest(unittest.TestCase):
         self.assertEqual(commands.parse([rest(1, OWNER, "/go", edited=True)], OWNER, h), [])
         self.assertEqual(len(commands.parse([rest(2, OWNER, "/go")], OWNER, h)), 1)
 
-    def test_timestamps_within_the_tolerance_count_as_unedited_and_missing_ones_do_not(self):
-        close = dict(rest(1, OWNER, "/go"), updated_at="2026-09-29T10:00:01Z")
-        self.assertTrue(provenance.rest_unedited(close))
+    def test_only_exactly_equal_timestamps_count_as_unedited(self):
+        # An edit made within any tolerance would count: a comment can be rewritten a second after it is posted.
+        self.assertTrue(provenance.rest_unedited(rest(1, OWNER, "/go")))
+        for gap in ("2026-09-29T10:00:01Z", "2026-09-29T10:00:02Z"):
+            with self.subTest(updated_at=gap):
+                quick_edit = dict(rest(1, OWNER, "/go"), updated_at=gap)
+                self.assertFalse(provenance.rest_unedited(quick_edit))
+                self.assertEqual(commands.parse([quick_edit], OWNER, unavailable()), [])
         self.assertFalse(provenance.rest_unedited({"created_at": CREATED}))
         self.assertEqual(commands.parse([{"id": 3, "user": {"login": OWNER}, "body": "/go", "created_at": CREATED}],
                                         OWNER, unavailable()), [])
+
+    def test_with_graphql_a_one_second_gap_is_a_disagreement_not_an_edit_to_forgive(self):
+        c = dict(rest(1, OWNER, "/go"), updated_at="2026-09-29T10:00:01Z")
+        self.assertEqual(commands.parse([c], OWNER, history(node(c))), [])
+        self.assertIn("REST shows it edited", commands.rejected([c], OWNER, history(node(c)))[0]["reason"])
 
     def test_graphql_history_wins_over_rest_timestamps(self):
         c = rest(1, OWNER, "/go")
@@ -278,8 +288,13 @@ class OtherOwnerInputTest(unittest.TestCase):
         self.assertIn(BOT, edited["editors"])
         bot_issue = dict(issue, user={"login": BOT})
         self.assertIn("not by", provenance.body_statement(bot_issue, OWNER, history(issue_author=BOT))["reason"])
-        # An issue's REST updated_at moves with labels and comments: without GraphQL the body is unverified.
-        self.assertFalse(provenance.body_statement(issue, OWNER, unavailable())["owner_statement"])
+        # An issue's REST updated_at moves with labels and comments: without GraphQL the body is never the
+        # owner's, even when the two timestamps happen to be equal.
+        for rest_issue in (issue, dict(issue, updated_at=CREATED)):
+            statement = provenance.body_statement(rest_issue, OWNER, unavailable())
+            self.assertFalse(statement["owner_statement"])
+            self.assertIn("cannot be verified without its edit history", statement["reason"])
+            self.assertIsNone(statement["body"])
 
 
 class TeamDecisionDateTest(unittest.TestCase):

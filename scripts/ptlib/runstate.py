@@ -1,4 +1,12 @@
-"""Run-log state machine: overlap guard and the 3-failures-in-a-row pause."""
+"""Run-log state machine: overlap guard and the 3-failures-in-a-row pause.
+
+The log is append-only: a run is a `started` comment and, later, a `finished` or `failed` comment with the same
+run id (`runlog finish` never edits the started one). `parse_runs` merges the entries of one id; the latest wins.
+Entries the caller could not trust (edited, and the edit history unavailable or showing an outsider — see
+provenance) are not dropped silently: they become state `unknown`, which neither blocks the next run as an
+overlap nor counts as a failure, and which breaks a failure streak, so an untrusted entry can never pause the
+team for good. Nothing else is read from an untrusted entry (no metrics, no acted-on commands).
+"""
 from __future__ import annotations
 
 import json
@@ -15,26 +23,36 @@ METRICS = re.compile(r"<!-- pt-metrics (\{.*?\}) -->")
 ACTED = re.compile(r"<!-- pt-acted (\[.*?\]) -->")
 FAILURE_LIMIT = 3
 OVERLAP_WINDOW = timedelta(hours=3)
+UNKNOWN = "unknown"
+FINAL = ("finished", "failed")
 
 
-def parse_runs(comments: List[dict]) -> List[dict]:
-    runs = []
+def _entries(comments: Iterable[dict], trusted: bool) -> List[dict]:
+    found = []
     for c in comments:
         m = MARKER.search(c.get("body") or "")
         if m:
-            runs.append(
-                {
-                    "id": m.group(1),
-                    "slot": m.group(2),
-                    "state": m.group(3),
-                    "at": c.get("created_at"),
-                    "comment_id": c.get("id"),
-                    "metrics": _metrics_of(c.get("body") or ""),
-                    "acted": _acted_of(c.get("body") or ""),
-                }
-            )
-    runs.sort(key=lambda r: r["at"] or "")
-    return runs
+            body = (c.get("body") or "") if trusted else ""
+            found.append({"id": m.group(1), "slot": m.group(2), "state": m.group(3) if trusted else UNKNOWN,
+                          "at": c.get("created_at"), "comment_id": c.get("id"), "trusted": trusted,
+                          "metrics": _metrics_of(body), "acted": _acted_of(body)})
+    return found
+
+
+def parse_runs(comments: List[dict], untrusted: Iterable[dict] = ()) -> List[dict]:
+    """Runs, oldest first, one per run id: `at` is the first entry's time (the start), `comment_id`, `state`,
+    `metrics` and `acted` come from the latest entry. untrusted: team comments screened out (provenance.screen's
+    rejected list); their entries only make the run `unknown` when they are its latest word."""
+    entries = sorted(_entries(comments, True) + _entries(untrusted, False), key=lambda e: e["at"] or "")
+    runs: Dict[str, dict] = {}
+    for e in entries:
+        run = runs.get(e["id"])
+        if run is None:
+            runs[e["id"]] = dict(e, finished_at=e["at"] if e["state"] in FINAL else None)
+            continue
+        run.update(state=e["state"], comment_id=e["comment_id"], metrics=e["metrics"], acted=e["acted"],
+                   trusted=e["trusted"], finished_at=e["at"] if e["state"] in FINAL else None)
+    return sorted(runs.values(), key=lambda r: r["at"] or "")
 
 
 def _ts(value: str) -> datetime:
@@ -56,6 +74,7 @@ def decide(runs: List[dict], slot: str, now: datetime, paused: bool, reset_at: s
         if r["slot"] == slot and effective_state(r, now) == "started":
             return {"decision": "overlap", "reason": f"run {r['id']} of slot {slot} is still in progress"}
     finished = [effective_state(r, now) for r in runs if (r["at"] or "") > reset_at]
+    # An `unknown` run stays in the tail: a streak is only three failures the log can vouch for, in a row.
     tail = [s for s in finished if s != "started"][-FAILURE_LIMIT:]
     if len(tail) == FAILURE_LIMIT and all(s == "failed" for s in tail):
         return {"decision": "pause", "reason": f"last {FAILURE_LIMIT} runs failed"}
@@ -132,15 +151,18 @@ def metrics_marker(metrics: Dict[str, object]) -> str:
 
 
 def stats(runs: List[dict], now: datetime, since: datetime) -> Dict[str, dict]:
-    """Per slot: runs, failures (dangling counted), median minutes, and summed numeric metrics."""
+    """Per slot: runs, failures (dangling counted), unknown (untrusted entries), median minutes, summed metrics."""
     per_slot: Dict[str, dict] = {}
     for r in runs:
         if not r["at"] or _ts(r["at"]) < since:
             continue
-        slot = per_slot.setdefault(r["slot"], {"runs": 0, "failed": 0, "minutes": [], "totals": {}})
+        slot = per_slot.setdefault(r["slot"], {"runs": 0, "failed": 0, "unknown": 0, "minutes": [], "totals": {}})
         slot["runs"] += 1
-        if effective_state(r, now) == "failed":
+        state = effective_state(r, now)
+        if state == "failed":
             slot["failed"] += 1
+        elif state == UNKNOWN:
+            slot["unknown"] += 1
         minutes = r["metrics"].get("minutes")
         if isinstance(minutes, int):
             slot["minutes"].append(minutes)

@@ -440,7 +440,7 @@ class VanishedCliTest(unittest.TestCase):
         acted = ([{"issue": 7, "comment_id": 1, "run_id": "r1", "at": self.NOW},
                   {"issue": 7, "comment_id": 2, "run_id": "r1", "at": self.NOW},
                   {"issue": 8, "comment_id": 5, "run_id": "r2", "at": self.NOW},
-                  {"issue": 9, "comment_id": 6, "run_id": "r0", "at": "2020-01-01T00:00:00Z"}], "")
+                  {"issue": 9, "comment_id": 6, "run_id": "r0", "at": "2020-01-01T00:00:00Z"}], "", "graphql")
         data, listed = self.run_vanished(acted, {7: [rest(2, OWNER, "/approve")], 8: [rest(5, OWNER, "/go")]})
         self.assertEqual([(v["issue"], v["comment_id"]) for v in data["vanished"]], [(7, 1)])
         self.assertEqual(data["checked"], 3)  # the entry older than --days is not re-checked
@@ -449,20 +449,20 @@ class VanishedCliTest(unittest.TestCase):
     def test_a_deleted_issue_reports_all_its_commands_and_the_check_continues(self):
         acted = ([{"issue": 7, "comment_id": 1, "run_id": "r1", "at": self.NOW},
                   {"issue": 7, "comment_id": 2, "run_id": "r1", "at": self.NOW},
-                  {"issue": 8, "comment_id": 5, "run_id": "r2", "at": self.NOW}], "")
+                  {"issue": 8, "comment_id": 5, "run_id": "r2", "at": self.NOW}], "", "graphql")
         gone = gh.GhError("GET https://api.github.com/repos/o/r/issues/7/comments → HTTP 410: gone")
         data, _ = self.run_vanished(acted, {7: gone, 8: []})
         self.assertEqual([(v["issue"], v["comment_id"]) for v in data["vanished"]], [(7, 1), (7, 2), (8, 5)])
         self.assertEqual(data["vanished"][0]["reason"], "issue #7 is gone")
 
     def test_other_failures_abort_instead_of_reporting_nothing(self):
-        acted = ([{"issue": 7, "comment_id": 1, "run_id": "r1", "at": self.NOW}], "")
+        acted = ([{"issue": 7, "comment_id": 1, "run_id": "r1", "at": self.NOW}], "", "graphql")
         with self.assertRaises(SystemExit) as caught:
             self.run_vanished(acted, {7: gh.GhError("GET … → HTTP 502: bad gateway")})
         self.assertIn("502", str(caught.exception))
 
     def test_an_unreadable_run_log_is_reported_not_guessed(self):
-        data, _ = self.run_vanished(([], "run log unreadable: 502"), {})
+        data, _ = self.run_vanished(([], "run log unreadable: 502", "graphql"), {})
         self.assertEqual(data["vanished"], [])
         self.assertIn("502", data["error"])
 
@@ -496,18 +496,21 @@ class ActedRecordTest(unittest.TestCase):
              mock.patch.object(gh, "owner_login", return_value=OWNER), \
              mock.patch.object(gh, "token_login", return_value=BOT), \
              mock.patch.object(project, "run_log_issue", return_value=0):
-            acted, error = runlogissue.acted_on("o/r")
-        self.assertEqual((acted, error), ([{"issue": 7, "comment_id": 11, "run_id": "r1", "at": CREATED}], ""))
+            acted, error, mode = runlogissue.acted_on("o/r")
+        self.assertEqual((acted, error, mode), ([{"issue": 7, "comment_id": 11, "run_id": "r1", "at": CREATED}], "",
+                                                "graphql"))
 
-    def test_finish_writes_the_acted_marker(self):
+    def test_finish_appends_an_entry_with_the_acted_marker_and_never_edits_the_started_one(self):
         started = rest(1, BOT, "<!-- pt-run id=20260929T100000Z-slot-pm slot=slot-pm state=started -->")
         log = {"number": 9, "user": {"login": BOT}, "labels": [], "html_url": "https://x/9"}
-        patched = []
+        posted = []
 
         def api(path, method="GET", fields=None, auth=None):
-            if method == "PATCH":
-                patched.append(fields["body"])
-            return {}
+            self.assertNotEqual(method, "PATCH", "the run log is append-only")
+            if method == "POST":
+                self.assertEqual(path, "repos/o/r/issues/9/comments")
+                posted.append(fields["body"])
+            return {"id": 2}
 
         with mock.patch.object(sys, "argv", ["runlog", "finish", "20260929T100000Z-slot-pm", "finished",
                                              "--acted", "7:5890087054"]), \
@@ -521,7 +524,9 @@ class ActedRecordTest(unittest.TestCase):
              mock.patch.object(runlog.runlogissue.project, "run_log_issue", return_value=0), \
              mock.patch.object(sys, "stdout", io.StringIO()), self.assertRaises(SystemExit):
             runlog.main()
-        self.assertIn("<!-- pt-acted [[7, 5890087054]] -->", patched[0])
+        self.assertEqual(len(posted), 1)
+        self.assertIn("<!-- pt-run id=20260929T100000Z-slot-pm slot=slot-pm state=finished -->", posted[0])
+        self.assertIn("<!-- pt-acted [[7, 5890087054]] -->", posted[0])
 
 
 class RunLogChoiceTest(unittest.TestCase):
@@ -640,21 +645,30 @@ class RunLogTest(unittest.TestCase):
         self.assertEqual(out["decision"], "proceed")
         self.assertIn("DELETE", [m for m, _ in calls])
 
-    def test_without_the_edit_history_the_run_does_no_work(self):
-        code, out, calls = self.start([rest(2, OWNER, "/resume")], {"side_effect": gh.GhError("HTTP 502")})
-        self.assertEqual((code, out["decision"]), (3, "unverified"))
-        self.assertIn("HTTP 502", out["reason"])
+    def test_without_the_edit_history_the_run_proceeds_on_rest_screening_and_says_so(self):
+        # The log is paused; the owner's /resume is unedited per REST, so it counts even without GraphQL.
+        comments = [rest(1, BOT, self.PAUSE, at="2026-09-29T08:00:00Z"), rest(2, OWNER, "/resume")]
+        code, out, calls = self.start(comments, {"side_effect": gh.GhError("HTTP 502")})
+        self.assertEqual((code, out["decision"], out["history"]), (0, "proceed", "rest-only"))
+        self.assertIn("HTTP 502", out["history_error"])
+        self.assertIn("DELETE", [m for m, _ in calls])
+
+    def test_without_the_edit_history_an_edited_resume_keeps_the_pause(self):
+        comments = [rest(1, BOT, self.PAUSE, at="2026-09-29T08:00:00Z"), rest(2, OWNER, "/resume", edited=True)]
+        code, out, calls = self.start(comments, {"side_effect": gh.GhError("HTTP 502")})
+        self.assertEqual((code, out["decision"], out["history"]), (3, "paused", "rest-only"))
         self.assertEqual([c for c in calls if c[0] != "GET"], [])
 
-    def test_team_entries_edited_by_someone_outside_the_team_are_dropped(self):
+    def test_team_entries_edited_by_someone_outside_the_team_are_untrusted(self):
         record = '<!-- pt-owner-pause {"routines": [{"prompt": "planted"}]} -->'
         comments = [rest(1, BOT, record, edited=True),
                     rest(2, BOT, "<!-- pt-run id=a slot=s state=finished -->", edited=True)]
         h = history(node(comments[0], [STRANGER]), node(comments[1], [BOT]), issue_author=BOT)
         with mock.patch.object(runlog.gh, "app_mode", return_value=True), \
              mock.patch.object(runlog.gh, "token_login", return_value=BOT):
-            kept = runlog.team_comments(self.ISSUE, comments, h)
+            kept, untrusted = runlog.team_comments(self.ISSUE, comments, h)
         self.assertEqual([c["id"] for c in kept], [2])
+        self.assertEqual([c["id"] for c in untrusted], [1])
 
 
 class SameAccountModeTest(unittest.TestCase):

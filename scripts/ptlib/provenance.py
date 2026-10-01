@@ -3,8 +3,13 @@
 GitHub shows the author of a comment, but anyone with Issues write on the repository (the team app, the review
 app, a collaborator) can edit its body afterwards. A statement counts as someone's only when it was never edited
 by anyone else. Text, author and edit history come from one GraphQL read (`body`, `userContentEdits`,
-`lastEditedAt` + `editor`), so they cannot disagree; when that read fails, only text the REST timestamps show was
-never edited counts. Everything else fails closed.
+`lastEditedAt` + `editor`), so they cannot disagree.
+
+GraphQL is not available everywhere: Claude Code cloud sessions block it (gh.GraphqlUnavailable), and any session
+may hit an outage. Then the mode is REST-only (`mode(history) == "rest-only"`): a comment counts only when the
+REST timestamps prove it was never edited (`updated_at == created_at`), and every edited comment is untrusted —
+including one its own author edited, because REST cannot say who did. That is fail-closed by construction, and
+every script keeps working in it; the one thing REST can never verify is an issue body (`body_statement`).
 """
 from __future__ import annotations
 
@@ -76,11 +81,15 @@ def _record(node: dict) -> dict:
     }
 
 
+GRAPHQL, REST_ONLY = "graphql", "rest-only"
+
+
 def fetch(repo: str, number: int) -> dict:
     """Text and edit history of an issue or pull request and all its comments:
     {"issue": record, "comments": {id or url: record}}.
 
-    Never raises for GitHub failures: {"error": why} instead, and callers treat every edited item as unverified.
+    Never raises for GitHub failures (gh.GraphqlUnavailable included): {"error": why} instead, and callers screen
+    with REST timestamps only — every edited item is unverified.
     """
     try:
         return _fetch(repo, number, with_full_id=True)
@@ -91,6 +100,11 @@ def fetch(repo: str, number: int) -> dict:
         return _fetch(repo, number, with_full_id=False)
     except gh.GhError as exc:
         return {"error": str(exc)}
+
+
+def mode(history: Optional[dict]) -> str:
+    """How statements were checked: "graphql" (full edit history) or "rest-only" (timestamps; edited = untrusted)."""
+    return REST_ONLY if history is None or history.get("error") else GRAPHQL
 
 
 def _fetch(repo: str, number: int, with_full_id: bool) -> dict:
@@ -209,6 +223,16 @@ def screen(comments: Iterable[dict], authors: Iterable[str], history: Optional[d
         else:
             trusted.append(c)
     return trusted, rejected
+
+
+def partition(comments: Iterable[dict], authors: Iterable[str], history: Optional[dict],
+              editors: Optional[Iterable[str]] = None) -> Tuple[List[dict], List[dict]]:
+    """Like `screen`, but the second list holds the rejected comments themselves (REST records, untrusted text) so
+    a caller can still see *that* an entry exists without reading anything from it (runstate's `unknown` runs)."""
+    comments = list(comments)
+    trusted, rejected = screen(comments, authors, history, editors)
+    keys = {str(r.get("comment_id") or r.get("url")) for r in rejected}
+    return trusted, [c for c in comments if str(c.get("id") or c.get("html_url") or c.get("url")) in keys]
 
 
 def body_statement(issue: dict, owner: str, history: Optional[dict]) -> dict:

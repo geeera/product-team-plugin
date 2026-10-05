@@ -28,6 +28,8 @@ Conventions (statuses, kinds, severities, flags, milestones) are in
 | Comment | `backlog comment 42 --body-file /tmp/c.md` |
 | Record a PR | `backlog link-pr 42 57` |
 | Owner's commands | `backlog answers 42` → `/approve`, `/reject why`, `/go`, `/no-go why`, `/resume`, `/override why` |
+| Owner requests from the team console | `backlog requests [--milestone current]` → pending sprint / queue requests, `ignored` with reasons |
+| Answer an owner request | `backlog request-done 42 --comment-id 123 --result applied\|declined --text "why"` |
 
 Rules:
 - Exactly one `status:*` label per issue — only `move` changes it.

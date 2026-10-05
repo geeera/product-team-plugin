@@ -1,0 +1,49 @@
+{
+  "_about": "Golden bytes of geeera/team-console ADR 0005 markers. `request` and `handled` map a comment body to what request_marker_of / handled_marker_of must return (null = not a marker).",
+  "request": [
+    {"body": "<!-- pt-owner-request {\"kind\":\"sprint\",\"target\":\"current\",\"v\":1} -->\nВозьми в текущий спринт.\n_Requested by the owner in the team console: «нужно к демо»_\n", "expect": {"kind": "sprint", "target": "current"}},
+    {"body": "<!-- pt-owner-request {\"kind\":\"sprint\",\"target\":\"next\",\"v\":1} -->\nPlease take this into the next sprint.\n_Requested by the owner in the team console: «after the demo»_\n", "expect": {"kind": "sprint", "target": "next"}},
+    {"body": "<!-- pt-owner-request {\"kind\":\"sprint\",\"target\":\"backlog\",\"v\":1} -->\nMove this back to the backlog.\n_Requested by the owner in the team console: «not now»_\n", "expect": {"kind": "sprint", "target": "backlog"}},
+    {"body": "<!-- pt-owner-request {\"direction\":\"up\",\"kind\":\"priority\",\"v\":1} -->\nПодними выше в очереди.\n_Requested by the owner in the team console: «срочно»_\n", "expect": {"kind": "priority", "direction": "up"}},
+    {"body": "<!-- pt-owner-request {\"direction\":\"down\",\"kind\":\"priority\",\"v\":1} -->\nMove it down the queue.\n_Requested by the owner in the team console: «can wait»_\n", "expect": {"kind": "priority", "direction": "down"}},
+    {"body": "<!-- pt-owner-request {\"kind\":\"sprint\",\"target\":\"next\",\"v\":1} -->\r\nCRLF line ends.\r\n", "expect": {"kind": "sprint", "target": "next"}},
+    {"body": "<!-- pt-owner-request {\"kind\":\"sprint\",\"target\":\"next\",\"v\":1} -->", "expect": {"kind": "sprint", "target": "next"}},
+
+    {"why": "a handled marker is not a request", "body": "<!-- pt-owner-request-handled {\"comment_id\":123,\"result\":\"applied\",\"v\":1} -->\nDone.\n", "expect": null},
+    {"why": "keys not sorted", "body": "<!-- pt-owner-request {\"target\":\"next\",\"kind\":\"sprint\",\"v\":1} -->\n", "expect": null},
+    {"why": "whitespace in the JSON", "body": "<!-- pt-owner-request {\"kind\": \"sprint\", \"target\": \"next\", \"v\": 1} -->\n", "expect": null},
+    {"why": "unknown version", "body": "<!-- pt-owner-request {\"kind\":\"sprint\",\"target\":\"next\",\"v\":2} -->\n", "expect": null},
+    {"why": "version as a boolean", "body": "<!-- pt-owner-request {\"kind\":\"sprint\",\"target\":\"next\",\"v\":true} -->\n", "expect": null},
+    {"why": "version as a string", "body": "<!-- pt-owner-request {\"kind\":\"sprint\",\"target\":\"next\",\"v\":\"1\"} -->\n", "expect": null},
+    {"why": "no version", "body": "<!-- pt-owner-request {\"kind\":\"sprint\",\"target\":\"next\"} -->\n", "expect": null},
+    {"why": "an extra field", "body": "<!-- pt-owner-request {\"issue\":7,\"kind\":\"sprint\",\"target\":\"next\",\"v\":1} -->\n", "expect": null},
+    {"why": "unknown target", "body": "<!-- pt-owner-request {\"kind\":\"sprint\",\"target\":\"later\",\"v\":1} -->\n", "expect": null},
+    {"why": "the queue as-is is not a request", "body": "<!-- pt-owner-request {\"direction\":\"as-is\",\"kind\":\"priority\",\"v\":1} -->\n", "expect": null},
+    {"why": "a sprint request with a direction", "body": "<!-- pt-owner-request {\"direction\":\"up\",\"kind\":\"sprint\",\"v\":1} -->\n", "expect": null},
+    {"why": "unknown kind", "body": "<!-- pt-owner-request {\"kind\":\"queue\",\"target\":\"next\",\"v\":1} -->\n", "expect": null},
+    {"why": "duplicate key", "body": "<!-- pt-owner-request {\"kind\":\"sprint\",\"target\":\"backlog\",\"target\":\"next\",\"v\":1} -->\n", "expect": null},
+    {"why": "not the first line", "body": "Owner asks:\n<!-- pt-owner-request {\"kind\":\"sprint\",\"target\":\"next\",\"v\":1} -->\n", "expect": null},
+    {"why": "leading space", "body": " <!-- pt-owner-request {\"kind\":\"sprint\",\"target\":\"next\",\"v\":1} -->\n", "expect": null},
+    {"why": "text after the marker on the line", "body": "<!-- pt-owner-request {\"kind\":\"sprint\",\"target\":\"next\",\"v\":1} --> now\n", "expect": null},
+    {"why": "quoted in prose", "body": "> <!-- pt-owner-request {\"kind\":\"sprint\",\"target\":\"next\",\"v\":1} -->\n", "expect": null},
+    {"why": "no space before the JSON", "body": "<!-- pt-owner-request{\"kind\":\"sprint\",\"target\":\"next\",\"v\":1} -->\n", "expect": null},
+    {"why": "not an object", "body": "<!-- pt-owner-request {} -->\n", "expect": null},
+    {"why": "broken JSON", "body": "<!-- pt-owner-request {\"kind\":\"sprint\",\"target\":\"next\",\"v\":1 -->\n", "expect": null},
+    {"why": "empty", "body": "", "expect": null}
+  ],
+  "handled": [
+    {"body": "<!-- pt-owner-request-handled {\"comment_id\":123,\"result\":\"applied\",\"v\":1} -->\n**PM note**: your request is applied.\n", "expect": {"comment_id": 123, "result": "applied"}},
+    {"body": "<!-- pt-owner-request-handled {\"comment_id\":4567890123,\"result\":\"declined\",\"v\":1} -->\n**PM note**: твоя просьба отклонена.\n\nThe sprint is full.\n", "expect": {"comment_id": 4567890123, "result": "declined"}},
+
+    {"why": "a request is not a handled marker", "body": "<!-- pt-owner-request {\"kind\":\"sprint\",\"target\":\"next\",\"v\":1} -->\n", "expect": null},
+    {"why": "comment_id as a string", "body": "<!-- pt-owner-request-handled {\"comment_id\":\"123\",\"result\":\"applied\",\"v\":1} -->\n", "expect": null},
+    {"why": "comment_id as a float", "body": "<!-- pt-owner-request-handled {\"comment_id\":123.0,\"result\":\"applied\",\"v\":1} -->\n", "expect": null},
+    {"why": "comment_id zero", "body": "<!-- pt-owner-request-handled {\"comment_id\":0,\"result\":\"applied\",\"v\":1} -->\n", "expect": null},
+    {"why": "unknown result", "body": "<!-- pt-owner-request-handled {\"comment_id\":123,\"result\":\"done\",\"v\":1} -->\n", "expect": null},
+    {"why": "unknown version", "body": "<!-- pt-owner-request-handled {\"comment_id\":123,\"result\":\"applied\",\"v\":2} -->\n", "expect": null},
+    {"why": "an extra field", "body": "<!-- pt-owner-request-handled {\"comment_id\":123,\"reason\":\"x\",\"result\":\"applied\",\"v\":1} -->\n", "expect": null},
+    {"why": "keys not sorted", "body": "<!-- pt-owner-request-handled {\"result\":\"applied\",\"comment_id\":123,\"v\":1} -->\n", "expect": null},
+    {"why": "quoted in prose, not the first line", "body": "**Team note**: we post\n<!-- pt-owner-request-handled {\"comment_id\":123,\"result\":\"applied\",\"v\":1} -->\n", "expect": null},
+    {"why": "a substring of the first line", "body": "see <!-- pt-owner-request-handled {\"comment_id\":123,\"result\":\"applied\",\"v\":1} -->\n", "expect": null}
+  ]
+}

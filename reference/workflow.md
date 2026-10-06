@@ -169,7 +169,8 @@ only when **all** of these hold (`scripts/ptlib/ownerrequests.py`):
 The newest such request on an issue replaces older ones. `backlog requests` lists the pending ones (and, under
 `ignored`, every request marker that does not count, with the reason). It looks back `--days` (30 by default): an
 older request is listed under `ignored` ("older than the lookback") and the owner asks again. It reads at most 25
-issues per run, the ones with the newest requests first, and says so under `truncated` when there were more; `slot-pm` applies or declines them within
+issues per run — issues with an owner-written console request first (so markers from others cannot crowd one
+out), then the newest — and says so under `truncated` when there were more; `slot-pm` applies or declines them within
 the caps and the freeze rule when it plans, and answers each with `backlog request-done`, which posts the handled
 marker as the team's identity — never with the owner's token:
 

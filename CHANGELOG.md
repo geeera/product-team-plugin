@@ -26,7 +26,7 @@ first `slot-pm` of the day runs `vendor self-update` and opens a PR with the ent
   owner's `gh` token, a PAT, an agent holding either) is ignored. The newest honoured request on an issue replaces
   older ones; it is pending until the team's own identity — never the owner's login — posted an unedited handled
   marker for its `comment_id` after it. Requests older than `--days` are ignored ("older than the lookback"); one
-  run reads at most 25 issues with requests, newest first, and reports the rest under `truncated`. Every marker
+  run reads at most 25 issues with requests (owner-written console requests first, then the newest), and reports the rest under `truncated`. Every marker
   that does not count is listed under `ignored` with the reason. Works without GraphQL.
 - New optional `project.yml` key `team.console_app_slugs` (app slugs, not `[bot]` logins; an unreadable list is
   an error). It is the trust root for requests, so it is read from the repository's **default branch** through

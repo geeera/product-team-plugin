@@ -411,6 +411,19 @@ class CloudSessionTest(unittest.TestCase):
         self.assertIn("2 issues carry request markers", out["truncated"])
         self.assertIn("wait for the next run", err)
 
+    def test_outsiders_flooding_markers_cannot_push_a_genuine_request_past_the_cap(self):
+        genuine = self.github.create_issue(BOT, "Genuine", ["kind:feature"])
+        request = self.github.comment(genuine["number"], OWNER, REQUEST_NEXT, app=CONSOLE)
+        for i in range(30):  # all newer than the genuine request
+            flood = self.github.create_issue(STRANGER, f"Flood {i}", [])
+            self.github.comment(flood["number"], STRANGER, REQUEST_NEXT, app=CONSOLE)
+        code, out, _ = self.run_cli(backlog, "requests")
+        self.assertEqual(backlog.MAX_REQUEST_ISSUES, 25)
+        self.assertEqual(code, 0)
+        self.assertIn("31 issues carry request markers", out["truncated"])
+        self.assertEqual([(r["issue"], r["comment_id"]) for r in out["requests"]],
+                         [(genuine["number"], request["id"])])
+
     def test_a_plain_comment_cannot_carry_a_request_or_handled_marker(self):
         issue = self.github.create_issue(BOT, "Export to CSV", ["kind:feature"])
         for body in (REQUEST_NEXT, '<!-- pt-owner-request-handled {"comment_id":5,"result":"applied","v":1} -->'):

@@ -415,25 +415,30 @@ def cmd_requests(repo: str, args) -> None:
     """
     since = (datetime.now(timezone.utc) - timedelta(days=args.days)).strftime("%Y-%m-%dT%H:%M:%SZ")
     recent = gh.api_list(f"repos/{repo}/issues/comments?since={quote(since)}&per_page=100")
-    newest = {}
-    for c in recent:
-        if c.get("issue_url") and ownerrequests.request_marker_of(c.get("body") or ""):
-            number = int(c["issue_url"].rstrip("/").rsplit("/", 1)[-1])
-            newest[number] = max(newest.get(number, ""), c.get("created_at") or "")
+    markers = [c for c in recent if c.get("issue_url") and ownerrequests.request_marker_of(c.get("body") or "")]
     result = {"requests": [], "handled": [], "ignored": [], "since": since, "console_app_slugs": [],
               "acts_as_owner": None, "history": provenance.GRAPHQL, "truncated": ""}
-    if not newest:
+    if not markers:
         out(result)
         return
-    # Over the cap, the issues with the most recent requests go first; the rest wait for the next run.
-    numbers = sorted(newest, key=lambda n: (newest[n], n), reverse=True)
-    if len(numbers) > MAX_REQUEST_ISSUES:
-        result["truncated"] = (f"{len(numbers)} issues carry request markers; read the {MAX_REQUEST_ISSUES} with "
-                               f"the newest ones, the other {len(numbers) - MAX_REQUEST_ISSUES} wait for the next run")
-        print(result["truncated"], file=sys.stderr)
-        numbers = numbers[:MAX_REQUEST_ISSUES]
     owner_login = gh.owner_login(repo)
     slugs = _request_slugs(repo)
+    # Ranking key per issue: (has a plausible request, newest marker). Plausible = the owner's login and a console
+    # slug on the REST record, so outsiders flooding markers cannot push a real request past the cap. Only a
+    # ranking hint: every issue read is verified in full by ownerrequests.evaluate.
+    rank = {}
+    for c in markers:
+        number = int(c["issue_url"].rstrip("/").rsplit("/", 1)[-1])
+        plausible = (provenance.author_of(c).lower() == owner_login.lower()
+                     and ((c.get("performed_via_github_app") or {}).get("slug") or "") in slugs)
+        rank[number] = max(rank.get(number, (False, "")), (plausible, c.get("created_at") or ""))
+    numbers = sorted(rank, key=lambda n: (rank[n], n), reverse=True)
+    if len(numbers) > MAX_REQUEST_ISSUES:
+        result["truncated"] = (f"{len(numbers)} issues carry request markers; read the {MAX_REQUEST_ISSUES} with "
+                               f"the owner's console requests first, then the newest; the other "
+                               f"{len(numbers) - MAX_REQUEST_ISSUES} wait for the next run")
+        print(result["truncated"], file=sys.stderr)
+        numbers = numbers[:MAX_REQUEST_ISSUES]
     acts = gh.acts_as_owner(repo)
     team = gh.team_logins(repo)
     result.update(console_app_slugs=slugs, acts_as_owner=acts)

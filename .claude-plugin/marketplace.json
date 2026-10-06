@@ -10,7 +10,7 @@
     {
       "name": "product-team",
       "source": "./",
-      "version": "0.10.3",
+      "version": "0.11.0",
       "description": "Autonomous product team on scheduled cloud runs."
     }
   ]

@@ -25,6 +25,8 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from ptlib import gh, project, runstate  # noqa: E402
 
 OWNER, BOT, STRANGER = "geeera", "acme-team[bot]", "collaborator"
+CONSOLE = "team-console-stage"
+REQUEST_NEXT = '<!-- pt-owner-request {"kind":"sprint","target":"next","v":1} -->\nNext sprint, please.\n'
 REPO = "o/r"
 BLOCKED = ('POST https://api.github.com/graphql → HTTP 403: {"message":"GitHub GraphQL is not available from '
            'Claude Code sessions; use the REST API"}')
@@ -63,7 +65,7 @@ class FakeGitHub:
     def __init__(self, clock: Clock):
         self.clock = clock
         self.issues, self.comments, self.next_id = {}, [], 100
-        self.graphql_calls, self.writes = 0, []
+        self.graphql_calls, self.writes, self.auths = 0, [], []
 
     def create_issue(self, login, title, labels=(), body="", at=None):
         number = len(self.issues) + 1
@@ -73,12 +75,14 @@ class FakeGitHub:
                                "created_at": at or iso(self.clock.tick())}
         return self.issues[number]
 
-    def comment(self, number, login, body, at=None, edited=False):
+    def comment(self, number, login, body, at=None, edited=False, app=None):
         cid, self.next_id = self.next_id, self.next_id + 1
         at = at or iso(self.clock.tick())
         c = {"id": cid, "issue": number, "user": {"login": login}, "body": body, "created_at": at,
              "updated_at": iso(self.clock.now + timedelta(minutes=5)) if edited else at,
-             "html_url": f"https://github.com/{REPO}/issues/{number}#issuecomment-{cid}"}
+             "html_url": f"https://github.com/{REPO}/issues/{number}#issuecomment-{cid}",
+             "issue_url": f"https://api.github.com/repos/{REPO}/issues/{number}",
+             "performed_via_github_app": {"slug": app} if app else None}
         self.comments.append(c)
         return c
 
@@ -88,6 +92,7 @@ class FakeGitHub:
             raise gh.GhError(BLOCKED)
         if method != "GET":
             self.writes.append((method, path))
+            self.auths.append(auth)
         m = re.fullmatch(rf"repos/{REPO}/issues/(\d+)(/.*)?", path)
         if path == f"repos/{REPO}/issues" and method == "POST":
             return self.create_issue(BOT, fields["title"], fields.get("labels", []), fields.get("body", ""))
@@ -113,6 +118,10 @@ class FakeGitHub:
         raise AssertionError(f"unexpected {method} {path}")
 
     def api_list(self, path):
+        m = re.fullmatch(rf"repos/{REPO}/issues/comments\?since=([^&]+)&.*", path)
+        if m:  # GitHub's `since` filters on updated_at
+            since = m.group(1).replace("%3A", ":")
+            return [c for c in self.comments if c["updated_at"] >= since]
         m = re.fullmatch(rf"repos/{REPO}/issues/(\d+)/comments\?.*", path)
         if m:
             return [c for c in self.comments if c["issue"] == int(m.group(1))]
@@ -138,6 +147,7 @@ class CloudSessionTest(unittest.TestCase):
         self.github = FakeGitHub(self.clock)
         self.log = self.github.create_issue(BOT, "Team run log", ["team:run-log"])
         self.now = self.clock.now
+        self.agents, self.acts_as_owner = BOT, False
 
     def run_cli(self, module, *argv):
         stdout, stderr = io.StringIO(), io.StringIO()
@@ -153,11 +163,13 @@ class CloudSessionTest(unittest.TestCase):
              mock.patch.object(gh, "api", side_effect=self.github.api), \
              mock.patch.object(gh, "api_list", side_effect=self.github.api_list), \
              mock.patch.object(gh, "owner_login", return_value=OWNER), \
-             mock.patch.object(gh, "token_login", return_value=BOT), \
+             mock.patch.object(gh, "token_login", return_value=self.agents), \
              mock.patch.object(gh, "app_mode", return_value=True), \
-             mock.patch.object(gh, "acts_as_owner", return_value=False), \
+             mock.patch.object(gh, "acts_as_owner", return_value=self.acts_as_owner), \
              mock.patch.object(gh, "repo", return_value=REPO), \
              mock.patch.object(project, "run_log_issue", return_value=0), \
+             mock.patch.object(project, "console_app_slugs_on_default_branch", return_value=[CONSOLE]), \
+             mock.patch.object(project, "owner_language", return_value="en"), \
              mock.patch.object(sys, "stdout", stdout), mock.patch.object(sys, "stderr", stderr):
             try:
                 module.main()
@@ -338,6 +350,87 @@ class CloudSessionTest(unittest.TestCase):
         code, out, _ = self.run_cli(brief, "show")
         self.assertEqual((code, out["since"]), (0, "2026-09-30T10:00:00Z"))
         self.assertEqual(out["runs"], {"total": 0, "failed": 0})
+
+    def test_owner_requests_are_read_and_answered_without_graphql(self):
+        issue = self.github.create_issue(BOT, "Export to CSV", ["kind:feature", "status:approved"])
+        request = self.github.comment(issue["number"], OWNER, REQUEST_NEXT, app=CONSOLE)
+        typed = self.github.comment(issue["number"], OWNER, REQUEST_NEXT)  # the owner's gh token: no app
+        self.github.comment(issue["number"], OWNER, "/approve")
+        code, out, _ = self.run_cli(backlog, "requests")
+        self.assertEqual((code, out["history"], out["acts_as_owner"]), (0, "rest-only", False))
+        self.assertEqual([(r["issue"], r["comment_id"], r["kind"], r["target"], r["via"]) for r in out["requests"]],
+                         [(issue["number"], request["id"], "sprint", "next", CONSOLE)])
+        self.assertEqual([(i["comment_id"], "performed_via_github_app: none" in i["reason"]) for i in out["ignored"]],
+                         [(typed["id"], True)])
+
+        code, done, err = self.run_cli(backlog, "request-done", str(issue["number"]), "--comment-id",
+                                       str(request["id"]), "--result", "declined")
+        self.assertNotEqual(code, 0)
+        self.assertIn("needs the reason", err)
+        code, done, _ = self.run_cli(backlog, "request-done", str(issue["number"]), "--comment-id",
+                                     str(request["id"]), "--result", "declined", "--text", "The sprint is full.")
+        self.assertEqual((code, done["result"]), (0, "declined"))
+        posted = self.github.comments[-1]
+        self.assertEqual((posted["user"]["login"], self.github.auths[-1]), (BOT, None))  # the team's own token
+        self.assertTrue(posted["body"].startswith(
+            '<!-- pt-owner-request-handled {"comment_id":%d,"result":"declined","v":1} -->\n' % request["id"]))
+        code, out, _ = self.run_cli(backlog, "requests")
+        self.assertEqual((out["requests"], [(h["comment_id"], h["result"]) for h in out["handled"]]),
+                         ([], [(request["id"], "declined")]))
+        code, _, err = self.run_cli(backlog, "request-done", str(issue["number"]), "--comment-id",
+                                    str(request["id"]), "--result", "applied")
+        self.assertNotEqual(code, 0)
+        self.assertIn("already answered", err)
+
+    def test_no_request_counts_and_none_is_answered_while_an_agent_can_act_as_the_owner(self):
+        issue = self.github.create_issue(BOT, "Export to CSV", ["kind:feature"])
+        request = self.github.comment(issue["number"], OWNER, REQUEST_NEXT, app=CONSOLE)
+        self.acts_as_owner = True
+        _, out, _ = self.run_cli(backlog, "requests")
+        self.assertEqual(out["requests"], [])
+        self.assertIn("acts_as_owner", out["ignored"][0]["reason"])
+        code, _, err = self.run_cli(backlog, "request-done", str(issue["number"]), "--comment-id",
+                                    str(request["id"]), "--result", "applied")
+        self.assertNotEqual(code, 0)
+        self.assertIn("does not count", err)
+        self.agents = OWNER
+        code, _, err = self.run_cli(backlog, "request-done", str(issue["number"]), "--comment-id",
+                                    str(request["id"]), "--result", "applied")
+        self.assertIn("only as the team's identity", err)
+        self.assertEqual([w for w in self.github.writes if w[0] == "POST"], [])
+
+    def test_requests_read_at_most_the_cap_of_issues_newest_first_and_say_so(self):
+        older = self.github.create_issue(BOT, "Older", ["kind:feature"])
+        newer = self.github.create_issue(BOT, "Newer", ["kind:feature"])
+        self.github.comment(older["number"], OWNER, REQUEST_NEXT, app=CONSOLE)
+        request = self.github.comment(newer["number"], OWNER, REQUEST_NEXT, app=CONSOLE)
+        with mock.patch.object(backlog, "MAX_REQUEST_ISSUES", 1):
+            code, out, err = self.run_cli(backlog, "requests")
+        self.assertEqual(code, 0)
+        self.assertEqual([(r["issue"], r["comment_id"]) for r in out["requests"]], [(newer["number"], request["id"])])
+        self.assertIn("2 issues carry request markers", out["truncated"])
+        self.assertIn("wait for the next run", err)
+
+    def test_outsiders_flooding_markers_cannot_push_a_genuine_request_past_the_cap(self):
+        genuine = self.github.create_issue(BOT, "Genuine", ["kind:feature"])
+        request = self.github.comment(genuine["number"], OWNER, REQUEST_NEXT, app=CONSOLE)
+        for i in range(30):  # all newer than the genuine request
+            flood = self.github.create_issue(STRANGER, f"Flood {i}", [])
+            self.github.comment(flood["number"], STRANGER, REQUEST_NEXT, app=CONSOLE)
+        code, out, _ = self.run_cli(backlog, "requests")
+        self.assertEqual(backlog.MAX_REQUEST_ISSUES, 25)
+        self.assertEqual(code, 0)
+        self.assertIn("31 issues carry request markers", out["truncated"])
+        self.assertEqual([(r["issue"], r["comment_id"]) for r in out["requests"]],
+                         [(genuine["number"], request["id"])])
+
+    def test_a_plain_comment_cannot_carry_a_request_or_handled_marker(self):
+        issue = self.github.create_issue(BOT, "Export to CSV", ["kind:feature"])
+        for body in (REQUEST_NEXT, '<!-- pt-owner-request-handled {"comment_id":5,"result":"applied","v":1} -->'):
+            code, _, err = self.run_cli(backlog, "comment", str(issue["number"]), "--body", body)
+            self.assertNotEqual(code, 0)
+            self.assertIn("request-done", err)
+        self.assertEqual(self.github.writes, [])
 
 
 if __name__ == "__main__":

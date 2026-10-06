@@ -4,7 +4,7 @@ Products follow the `stable` channel (or a pinned tag, `team.plugin_ref` in `.pr
 first `slot-pm` of the day runs `vendor self-update` and opens a PR with the entries in between. Breaking changes (a renamed label, a changed script contract, a new required
 `project.yml` key) are marked **Breaking** with the migration step.
 
-## Unreleased
+## 0.11.0
 
 - **Owner requests to the PM** (geeera/team-console ADR 0005). The team console lets the owner ask the PM to move
   an issue to the current or next sprint or back to the backlog, or up or down the queue; it posts one comment on

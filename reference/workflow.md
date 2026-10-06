@@ -158,13 +158,18 @@ only when **all** of these hold (`scripts/ptlib/ownerrequests.py`):
   (REST-only sessions: `updated_at` equals `created_at`);
 - GitHub says the console posted it: `performed_via_github_app.slug` is one of `team.console_app_slugs` in
   `project.yml`, compared exactly (an app slug such as `team-console-prod`, never a login). The owner's own `gh`
-  token or a PAT carries no app, so a marker typed on GitHub does not count;
+  token or a PAT carries no app, so a marker typed on GitHub does not count. **This key is the trust root**: it
+  is read from the repository's default branch through the API, never from the working tree, so it changes only
+  through a merged PR — a change to `project.yml` needs SECURITY, and adding a slug needs the owner's approval
+  (`access`);
 - no agent in this session can write as the owner (`gh.acts_as_owner` is false). Until GitHub is verified to set
   `performed_via_github_app` on the console's user-to-server comments, requests are never honoured in
   same-account mode or while an owner credential is in the session.
 
 The newest such request on an issue replaces older ones. `backlog requests` lists the pending ones (and, under
-`ignored`, every request marker that does not count, with the reason); `slot-pm` applies or declines them within
+`ignored`, every request marker that does not count, with the reason). It looks back `--days` (30 by default): an
+older request is listed under `ignored` ("older than the lookback") and the owner asks again. It reads at most 25
+issues per run, the ones with the newest requests first, and says so under `truncated` when there were more; `slot-pm` applies or declines them within
 the caps and the freeze rule when it plans, and answers each with `backlog request-done`, which posts the handled
 marker as the team's identity — never with the owner's token:
 
@@ -175,8 +180,9 @@ marker as the team's identity — never with the owner's token:
 <the reason, one line>
 ```
 
-A request is pending until a handled marker for its `comment_id` exists that a team login wrote after it and
-nobody edited. A request never approves a feature, changes a status, or moves work that is in progress; the
+A request is pending until a handled marker for its `comment_id` exists that the team's own identity wrote after
+it and nobody edited. A handled marker by the owner's login never counts: whoever holds the owner's credential
+could otherwise silently drop a real request (and `request-done` refuses to post as the owner). A request never approves a feature, changes a status, or moves work that is in progress; the
 decision policy is unchanged. `backlog comment` refuses either marker.
 
 ## Findings and release gates

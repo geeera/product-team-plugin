@@ -10,13 +10,13 @@ except ImportError:  # `unittest discover -s tests` imports test modules without
     import _isolation  # noqa: F401
 import json
 import sys
-import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
-from ptlib import commands, ownerrequests, project  # noqa: E402
+from ptlib import commands, gh, ownerrequests, project  # noqa: E402
 
 FIXTURES = json.loads((ROOT / "tests" / "fixtures" / "owner-requests.json").read_text(encoding="utf-8"))
 OWNER, BOT, STRANGER = "geeera", "acme-team[bot]", "collaborator"
@@ -141,6 +141,15 @@ class ProvenanceTest(unittest.TestCase):
         self.assertIsNone(found["pending"])
         self.assertIn("edited by geeera", self.reasons(found)[0])
 
+    def test_a_request_older_than_the_lookback_is_ignored_with_the_reason(self):
+        found = ownerrequests.evaluate([comment(10, OWNER, NEXT, 1), comment(11, OWNER, CURRENT, 6)], OWNER, None,
+                                       (APP,), TEAM, False, since=at(5))
+        self.assertEqual(found["pending"]["comment_id"], 11)
+        self.assertEqual([(e["comment_id"], "older than the lookback" in e["reason"]) for e in found["ignored"]],
+                         [(10, True)])
+        found = ownerrequests.evaluate([comment(10, OWNER, NEXT, 1)], OWNER, None, (APP,), TEAM, False, since=at(5))
+        self.assertIsNone(found["pending"])
+
     def test_the_newest_honoured_request_replaces_older_ones(self):
         found = evaluate([comment(10, OWNER, NEXT, 1), comment(11, OWNER, CURRENT, 2),
                           comment(12, OWNER, NEXT, 3, app=None)])
@@ -157,6 +166,8 @@ class HandledMarkerTest(unittest.TestCase):
     def test_answers_that_do_not_count(self):
         cases = {
             "by a collaborator": handled(20, 10, 2, login=STRANGER),
+            # Anyone holding the owner's credential could post this and drop a real request silently.
+            "by the owner, unedited": handled(20, 10, 2, login=OWNER),
             "edited": handled(20, 10, 2, edited_minute=8),
             "before the request": handled(20, 10, 0),
             "for another request": handled(20, 99, 2),
@@ -179,11 +190,7 @@ class HandledMarkerTest(unittest.TestCase):
 
 
 class ConsoleAppSlugsTest(unittest.TestCase):
-    def read(self, text):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "project.yml"
-            path.write_text(text, encoding="utf-8")
-            return project.console_app_slugs(str(path))
+    read = staticmethod(project.console_app_slugs_from_text)
 
     def test_lists_are_read(self):
         self.assertEqual(self.read("team:\n  plugin_ref: stable\n"), [])
@@ -192,7 +199,22 @@ class ConsoleAppSlugsTest(unittest.TestCase):
                          ["team-console-prod", "team-console-stage"])
         self.assertEqual(self.read("team:\n  console_app_slugs:\n    - team-console-dev  # dev\n"),
                          ["team-console-dev"])
-        self.assertEqual(project.console_app_slugs("/nonexistent/project.yml"), [])
+
+    def test_the_trust_root_is_read_from_the_default_branch_not_the_working_tree(self):
+        reads = []
+
+        def raw(path, accept):
+            reads.append(path)
+            return "team:\n  console_app_slugs: [team-console-prod]\n"
+
+        with mock.patch.object(gh, "api", return_value={"default_branch": "dev"}), \
+             mock.patch.object(gh, "raw", side_effect=raw):
+            self.assertEqual(project.console_app_slugs_on_default_branch("o/r"), ["team-console-prod"])
+        self.assertEqual(reads, ["repos/o/r/contents/.product-team/project.yml?ref=refs/heads/dev"])
+        missing = gh.GhError("GET … → HTTP 404: Not Found")
+        with mock.patch.object(gh, "api", return_value={"default_branch": "main"}), \
+             mock.patch.object(gh, "raw", side_effect=missing):
+            self.assertEqual(project.console_app_slugs_on_default_branch("o/r"), [])
 
     def test_a_bot_login_or_an_unreadable_list_is_refused(self):
         for text in ("team:\n  console_app_slugs: ['team-console-prod[bot]']\n",

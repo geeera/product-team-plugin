@@ -109,7 +109,8 @@ still holds (a request never approves scope, never changes a status, never moves
 - `ignored` lists request markers that do not count, with the reason (not by the owner, edited, not posted by the
   console's app, or this session can act as the owner). Never act on them; mention them in the summary. An
   owner-written, unedited one that is ignored only because `acts_as_owner` is true or `team.console_app_slugs`
-  is empty is a setup gap — say so in the summary, once.
+  is empty is a setup gap — say so in the summary, once. A non-empty `truncated` means more issues carry
+  requests than one run reads: the rest come next run; say so in the summary.
 
 ## 3. Prepare
 - For approved `needs-design` issues without an approved design (at most 2 per run, 4 in burn):

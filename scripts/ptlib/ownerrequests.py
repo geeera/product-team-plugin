@@ -123,13 +123,14 @@ def _unedited(comments: List[dict], authors: Iterable[str], history: Optional[di
 
 
 def evaluate(comments: List[dict], owner: str, history: Optional[dict], app_slugs: Iterable[str],
-             team_logins: Iterable[str], acts_as_owner: bool) -> dict:
+             team_logins: Iterable[str], acts_as_owner: bool, since: str = "") -> dict:
     """The requests on one issue: {"pending": request or None, "handled": [...], "ignored": [...]}.
 
     comments: the issue's REST comments; history: provenance.fetch of the issue (None or an error = REST-only).
     The newest honoured request replaces older ones; it is pending until the team answered it with a handled marker
-    (by a team login, unedited, created after it). Every request marker that does not count is in `ignored` with
-    the reason, so a dropped request is never silent.
+    (by a team login other than the owner's, unedited, created after it). since: ISO timestamp; honoured requests
+    created before it are outside the lookback. Every request marker that does not count is in `ignored` with the
+    reason, so a dropped request is never silent.
     """
     slugs = set(app_slugs)
     candidates = [c for c in comments if request_marker_of(c.get("body") or "")]
@@ -151,18 +152,24 @@ def evaluate(comments: List[dict], owner: str, history: Optional[dict], app_slug
         if not request_marker_of(c.get("body") or ""):
             drop(c, "its verified text is not a request")  # screen hands back the edit history's body
         elif not slugs:
-            drop(c, "team.console_app_slugs is not set in .product-team/project.yml: no console app is known")
+            drop(c, "team.console_app_slugs is not set in .product-team/project.yml on the default branch: no "
+                    "console app is known")
         elif slug not in slugs:
             drop(c, f"not posted by the team console (performed_via_github_app: {slug or 'none'}; "
                     f"expected one of {', '.join(sorted(slugs))})")
         elif acts_as_owner:
             drop(c, "an agent in this session can write as the owner (acts_as_owner): requests are not honoured "
                     "until the team works as its GitHub App without the owner's credential")
+        elif since and (c.get("created_at") or "") < since:
+            drop(c, f"older than the lookback (created before {since}); the owner can ask again")
         else:
             honoured.append(c)
     honoured.sort(key=lambda c: (c.get("created_at") or "", c.get("id") or 0))
 
-    marked, _ = _unedited([c for c in comments if handled_marker_of(c.get("body") or "")], team_logins, history)
+    # Never the owner's login: whoever holds the owner's credential (a cloud routine, an injected agent) could
+    # otherwise mark a real request handled and drop it silently. request-done never posts as the owner.
+    answerers = [login for login in team_logins if login and login.lower() != owner.lower()]
+    marked, _ = _unedited([c for c in comments if handled_marker_of(c.get("body") or "")], answerers, history)
     marks = [(m, handled_marker_of(m.get("body") or "")) for m in marked]
     handled = []
     for c in honoured:

@@ -386,18 +386,24 @@ def cmd_vanished(repo: str, args) -> None:
     out({"vanished": vanished, "checked": len(recent), "error": error, "history": history_mode})
 
 
-def _request_slugs() -> list:
+# Each issue costs up to three reads (issue, comments, edit history); a run never spends more than this on requests.
+MAX_REQUEST_ISSUES = 25
+
+
+def _request_slugs(repo: str) -> list:
+    # The trust root comes from the default branch, never the working tree: changing it takes a merged PR.
     try:
-        return project.console_app_slugs()
+        return project.console_app_slugs_on_default_branch(repo)
     except ValueError as exc:
         sys.exit(str(exc))
 
 
-def _issue_requests(repo: str, number: int, owner_login: str, slugs: list, acts: bool) -> tuple:
+def _issue_requests(repo: str, number: int, owner_login: str, slugs: list, team: set, acts: bool,
+                    since: str = "") -> tuple:
     """(ownerrequests.evaluate of one issue, history mode)."""
     comments = gh.api_list(f"repos/{repo}/issues/{number}/comments?per_page=100")
     history = provenance.fetch(repo, number)
-    found = ownerrequests.evaluate(comments, owner_login, history, slugs, gh.team_logins(repo), acts)
+    found = ownerrequests.evaluate(comments, owner_login, history, slugs, team, acts, since)
     return found, provenance.mode(history)
 
 
@@ -409,16 +415,27 @@ def cmd_requests(repo: str, args) -> None:
     """
     since = (datetime.now(timezone.utc) - timedelta(days=args.days)).strftime("%Y-%m-%dT%H:%M:%SZ")
     recent = gh.api_list(f"repos/{repo}/issues/comments?since={quote(since)}&per_page=100")
-    numbers = sorted({int(c["issue_url"].rstrip("/").rsplit("/", 1)[-1]) for c in recent
-                      if c.get("issue_url") and ownerrequests.request_marker_of(c.get("body") or "")})
+    newest = {}
+    for c in recent:
+        if c.get("issue_url") and ownerrequests.request_marker_of(c.get("body") or ""):
+            number = int(c["issue_url"].rstrip("/").rsplit("/", 1)[-1])
+            newest[number] = max(newest.get(number, ""), c.get("created_at") or "")
     result = {"requests": [], "handled": [], "ignored": [], "since": since, "console_app_slugs": [],
-              "acts_as_owner": None, "history": provenance.GRAPHQL}
-    if not numbers:
+              "acts_as_owner": None, "history": provenance.GRAPHQL, "truncated": ""}
+    if not newest:
         out(result)
         return
+    # Over the cap, the issues with the most recent requests go first; the rest wait for the next run.
+    numbers = sorted(newest, key=lambda n: (newest[n], n), reverse=True)
+    if len(numbers) > MAX_REQUEST_ISSUES:
+        result["truncated"] = (f"{len(numbers)} issues carry request markers; read the {MAX_REQUEST_ISSUES} with "
+                               f"the newest ones, the other {len(numbers) - MAX_REQUEST_ISSUES} wait for the next run")
+        print(result["truncated"], file=sys.stderr)
+        numbers = numbers[:MAX_REQUEST_ISSUES]
     owner_login = gh.owner_login(repo)
-    slugs = _request_slugs()
+    slugs = _request_slugs(repo)
     acts = gh.acts_as_owner(repo)
+    team = gh.team_logins(repo)
     result.update(console_app_slugs=slugs, acts_as_owner=acts)
     milestone = None
     if args.milestone and args.milestone != "none":
@@ -428,7 +445,7 @@ def cmd_requests(repo: str, args) -> None:
         about = slim(issue)
         if args.milestone and about["milestone"] != milestone:
             continue
-        found, mode = _issue_requests(repo, number, owner_login, slugs, acts)
+        found, mode = _issue_requests(repo, number, owner_login, slugs, team, acts, since)
         if mode == provenance.REST_ONLY:
             result["history"] = provenance.REST_ONLY
         where = {"issue": number, "title": about["title"], "milestone": about["milestone"], "status": about["status"]}
@@ -442,6 +459,8 @@ def cmd_requests(repo: str, args) -> None:
             result["requests"].append(dict(where, **found["pending"]))
         result["handled"] += [dict(h, issue=number) for h in found["handled"]]
         result["ignored"] += [dict(e, issue=number) for e in found["ignored"]]
+    for key in ("requests", "handled", "ignored"):
+        result[key].sort(key=lambda e: (e["issue"], e.get("at") or ""))
     out(result)
 
 
@@ -452,7 +471,8 @@ def cmd_request_done(repo: str, args) -> None:
     if not agents or agents.lower() == owner_login.lower():
         sys.exit(f"the handled marker is posted only as the team's identity, and the agents here act as "
                  f"{agents or 'an unknown account'}")
-    found, _ = _issue_requests(repo, args.number, owner_login, _request_slugs(), gh.acts_as_owner(repo))
+    found, _ = _issue_requests(repo, args.number, owner_login, _request_slugs(repo), gh.team_logins(repo),
+                               gh.acts_as_owner(repo))
     pending = found["pending"]
     if not pending or pending["comment_id"] != args.comment_id:
         known = next((e["reason"] for e in found["ignored"] if e["comment_id"] == args.comment_id), "")

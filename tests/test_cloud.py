@@ -168,7 +168,7 @@ class CloudSessionTest(unittest.TestCase):
              mock.patch.object(gh, "acts_as_owner", return_value=self.acts_as_owner), \
              mock.patch.object(gh, "repo", return_value=REPO), \
              mock.patch.object(project, "run_log_issue", return_value=0), \
-             mock.patch.object(project, "console_app_slugs", return_value=[CONSOLE]), \
+             mock.patch.object(project, "console_app_slugs_on_default_branch", return_value=[CONSOLE]), \
              mock.patch.object(project, "owner_language", return_value="en"), \
              mock.patch.object(sys, "stdout", stdout), mock.patch.object(sys, "stderr", stderr):
             try:
@@ -398,6 +398,18 @@ class CloudSessionTest(unittest.TestCase):
                                     str(request["id"]), "--result", "applied")
         self.assertIn("only as the team's identity", err)
         self.assertEqual([w for w in self.github.writes if w[0] == "POST"], [])
+
+    def test_requests_read_at_most_the_cap_of_issues_newest_first_and_say_so(self):
+        older = self.github.create_issue(BOT, "Older", ["kind:feature"])
+        newer = self.github.create_issue(BOT, "Newer", ["kind:feature"])
+        self.github.comment(older["number"], OWNER, REQUEST_NEXT, app=CONSOLE)
+        request = self.github.comment(newer["number"], OWNER, REQUEST_NEXT, app=CONSOLE)
+        with mock.patch.object(backlog, "MAX_REQUEST_ISSUES", 1):
+            code, out, err = self.run_cli(backlog, "requests")
+        self.assertEqual(code, 0)
+        self.assertEqual([(r["issue"], r["comment_id"]) for r in out["requests"]], [(newer["number"], request["id"])])
+        self.assertIn("2 issues carry request markers", out["truncated"])
+        self.assertIn("wait for the next run", err)
 
     def test_a_plain_comment_cannot_carry_a_request_or_handled_marker(self):
         issue = self.github.create_issue(BOT, "Export to CSV", ["kind:feature"])

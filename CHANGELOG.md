@@ -24,13 +24,17 @@ first `slot-pm` of the day runs `vendor self-update` and opens a PR with the ent
   exactly, and no agent in the session can write as the owner (`gh.acts_as_owner` false — the fallback until
   GitHub is verified to set the app on user-to-server comments). An owner-authored marker without the app (the
   owner's `gh` token, a PAT, an agent holding either) is ignored. The newest honoured request on an issue replaces
-  older ones; it is pending until a team login posted an unedited handled marker for its `comment_id` after it.
-  Every marker that does not count is listed under `ignored` with the reason. Works without GraphQL.
+  older ones; it is pending until the team's own identity — never the owner's login — posted an unedited handled
+  marker for its `comment_id` after it. Requests older than `--days` are ignored ("older than the lookback"); one
+  run reads at most 25 issues with requests, newest first, and reports the rest under `truncated`. Every marker
+  that does not count is listed under `ignored` with the reason. Works without GraphQL.
 - New optional `project.yml` key `team.console_app_slugs` (app slugs, not `[bot]` logins; an unreadable list is
-  an error). `backlog comment` refuses a body that starts with either marker.
+  an error). It is the trust root for requests, so it is read from the repository's **default branch** through
+  the API, never from the working tree (`project.text_on_branch`, now shared with `pr gate`'s base-branch read).
+  `backlog comment` refuses a body that starts with either marker.
   **Migration** (only for products that use the team console): add `console_app_slugs: [team-console-<env>]`
-  under `team:` for each console environment that writes to the repository. Without it no request is honoured
-  and `backlog requests` says why.
+  under `team:` for each console environment that writes to the repository, through a PR to the default branch.
+  Without it no request is honoured and `backlog requests` says why.
 
 ## 0.10.3
 

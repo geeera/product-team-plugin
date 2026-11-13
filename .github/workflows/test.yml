@@ -14,7 +14,8 @@ permissions:
 
 jobs:
   unit:
-    runs-on: ubuntu-latest
+    # pinned: ubuntu-latest (26.04) has no Python 3.9 build for setup-python
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     strategy:
       matrix:

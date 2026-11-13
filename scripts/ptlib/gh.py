@@ -278,6 +278,11 @@ def repo() -> str:
             return m.group(1)
     except FileNotFoundError:
         pass
+    # An orchestrator session sits in the plugin's own checkout and its agents' shells reset there; falling back to
+    # that origin would aim reviews and merges at the plugin's PRs instead of the product's.
+    if os.path.isfile(".claude-plugin/plugin.json"):
+        raise GhError("this is the plugin's own checkout, not a product: cd into the product's worktree "
+                      "or set PT_REPO=owner/repo")
     proc = subprocess.run(["git", "remote", "get-url", "origin"], capture_output=True, text=True, check=False,
                           env=child_env())
     found = parse_remote(proc.stdout) if proc.returncode == 0 else None

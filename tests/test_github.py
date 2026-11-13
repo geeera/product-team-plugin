@@ -7,6 +7,7 @@ import json
 import os
 import socket
 import sys
+import tempfile
 import unittest
 import urllib.error
 from pathlib import Path
@@ -25,6 +26,37 @@ class RemoteTest(unittest.TestCase):
 
     def test_unusable_remote(self):
         self.assertIsNone(gh.parse_remote("storify"))
+
+
+class RepoResolutionTest(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.addCleanup(os.chdir, os.getcwd())
+        self.dir = Path(tmp.name)
+        os.chdir(self.dir)
+        env = mock.patch.dict(os.environ, {k: v for k, v in os.environ.items() if k != "PT_REPO"}, clear=True)
+        env.start()
+        self.addCleanup(env.stop)
+
+    def test_refuses_the_plugins_own_checkout(self):
+        (self.dir / ".claude-plugin").mkdir()
+        (self.dir / ".claude-plugin" / "plugin.json").write_text("{}")
+        with mock.patch("subprocess.run") as run:
+            with self.assertRaisesRegex(gh.GhError, "plugin's own checkout"):
+                gh.repo()
+        run.assert_not_called()
+
+    def test_explicit_repo_wins_in_the_plugins_checkout(self):
+        (self.dir / ".claude-plugin").mkdir()
+        (self.dir / ".claude-plugin" / "plugin.json").write_text("{}")
+        with mock.patch.dict(os.environ, {"PT_REPO": "geeera/storify"}):
+            self.assertEqual(gh.repo(), "geeera/storify")
+
+    def test_project_file_wins_over_the_remote(self):
+        (self.dir / ".product-team").mkdir()
+        (self.dir / ".product-team" / "project.yml").write_text("repo: geeera/storify\n")
+        self.assertEqual(gh.repo(), "geeera/storify")
 
 
 class PaginationTest(unittest.TestCase):

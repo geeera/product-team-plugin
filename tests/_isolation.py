@@ -1,4 +1,4 @@
-"""Imported first by every test module: no test may read the machine's real GitHub credentials.
+"""Imported first by every test module: no test may read the machine's real GitHub or console credentials.
 
 Credential variables are removed from the process environment, and the one function that asks the `gh` CLI for
 a token is replaced by a tripwire, so a test that forgets to mock that path fails instead of reading a real token.
@@ -11,8 +11,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from ptlib import gh  # noqa: E402
 
+# TC_* is the console job's environment (TC_JOB_TOKEN, TC_API_URL, TC_RUNNER_SOCKET …): a test sets its own.
 CREDENTIAL_ENV = re.compile(r"^(GH_TOKEN|GITHUB_TOKEN|GH_ENTERPRISE_TOKEN|GITHUB_ENTERPRISE_TOKEN|PT_OWNER_TOKEN|"
-                            r"PT_REVIEW_TOKEN|PT_(TEAM|REVIEW)_APP_\w+)$")
+                            r"PT_REVIEW_TOKEN|PT_(TEAM|REVIEW)_APP_\w+|TC_\w+)$")
 
 
 class RealCredentialAccess(AssertionError):

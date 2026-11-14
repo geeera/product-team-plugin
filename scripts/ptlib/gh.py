@@ -12,12 +12,13 @@ import json
 import os
 import re
 import shutil
-import socket
 import subprocess
 import time
 import urllib.error
 import urllib.request
 from typing import Any, List, Optional, Tuple
+
+from . import transport
 
 API = os.environ.get("PT_GITHUB_API", "https://api.github.com").rstrip("/")
 _NEXT = re.compile(r'<([^>]+)>;\s*rel="next"')
@@ -89,82 +90,40 @@ def personal_credentials() -> List[str]:
     return list(dict.fromkeys(c for c in found if c))
 
 
-DEFAULT_DEADLINE = 90.0
-SOCKET_TIMEOUT = 60.0  # per blocking socket operation, never beyond what is left of the deadline
-RETRY_BACKOFF = 2.0
-_CHUNK = 64 * 1024
-
-
-class _Deadline(Exception):
-    """The request's wall-clock budget ran out while the answer was still arriving."""
-
-
-class _Retryable(Exception):
-    """A failure a GET may be retried after: a timeout or a 5xx."""
-
-    def __init__(self, error: GhError):
-        super().__init__(str(error))
-        self.error = error
+# Re-exported: callers and tests read the transport settings through this module.
+DEFAULT_DEADLINE = transport.DEFAULT_DEADLINE
+SOCKET_TIMEOUT = transport.SOCKET_TIMEOUT
+RETRY_BACKOFF = transport.RETRY_BACKOFF
 
 
 def deadline_seconds() -> float:
     """PT_HTTP_DEADLINE: the wall-clock budget of one API call, retry included (default 90 s)."""
-    raw = os.environ.get("PT_HTTP_DEADLINE", "").strip()
-    if not raw:
-        return DEFAULT_DEADLINE
-    try:
-        value = float(raw)
-    except ValueError:
-        raise GhError(f"PT_HTTP_DEADLINE must be a number of seconds, not {raw!r}") from None
-    if not value > 0:
-        raise GhError(f"PT_HTTP_DEADLINE must be positive, not {raw!r}")
-    return value
-
-
-def _is_timeout(exc: BaseException) -> bool:
-    reason = getattr(exc, "reason", exc)
-    return isinstance(exc, (socket.timeout, TimeoutError)) or isinstance(reason, (socket.timeout, TimeoutError))
-
-
-def _read_until(resp: Any, deadline: float) -> bytes:
-    """The body, read in chunks so a slow trickle cannot outlast the deadline (urllib's timeout is per read)."""
-    chunks = []
-    while True:
-        left = deadline - time.monotonic()
-        if left <= 0:
-            raise _Deadline()
-        sock = getattr(getattr(getattr(resp, "fp", None), "raw", None), "_sock", None)
-        if sock is not None:
-            sock.settimeout(min(SOCKET_TIMEOUT, left))
-        chunk = resp.read1(_CHUNK) if hasattr(resp, "read1") else resp.read(_CHUNK)
-        if not chunk:
-            return b"".join(chunks)
-        chunks.append(chunk)
+    return transport.deadline_seconds(GhError)
 
 
 def _attempt(method: str, url: str, req: urllib.request.Request, deadline: float) -> Tuple[str, dict]:
     left = deadline - time.monotonic()
     if left <= 0:
-        raise _Deadline()
+        raise transport.Deadline()
     try:
         with urllib.request.urlopen(req, timeout=min(SOCKET_TIMEOUT, left)) as resp:
-            return _read_until(resp, deadline).decode("utf-8"), dict(resp.headers)
+            return transport.read_until(resp, deadline).decode("utf-8"), dict(resp.headers)
     except urllib.error.HTTPError as exc:
         try:
-            detail = exc.read().decode("utf-8", "replace")[:500]
+            detail = transport.clip(exc.read().decode("utf-8", "replace"))
         finally:
             exc.close()
         error = GhError(f"{method} {url} → HTTP {exc.code}: {detail}")
         if exc.code >= 500:
-            raise _Retryable(error) from exc
+            raise transport.Retryable(error) from exc
         raise error from exc
     except (OSError, http.client.HTTPException) as exc:  # URLError, timeouts, dropped connections
         reason = exc.reason if isinstance(exc, urllib.error.URLError) else repr(exc)
         error = GhError(f"{method} {url} failed: {reason}")
-        if _is_timeout(exc):
+        if transport.is_timeout(exc):
             if time.monotonic() >= deadline:
-                raise _Deadline() from exc
-            raise _Retryable(error) from exc
+                raise transport.Deadline() from exc
+            raise transport.Retryable(error) from exc
         raise error from exc
 
 
@@ -182,20 +141,14 @@ def _request(method: str, url: str, body: Optional[dict] = None, accept: str = "
     if body is not None:
         data = json.dumps(body).encode()
         headers["Content-Type"] = "application/json"
-    attempts = 2 if method.upper() == "GET" else 1
-    for attempt in range(attempts):
+
+    def attempt() -> Tuple[str, dict]:
         req = urllib.request.Request(url, data=data, method=method, headers=headers)
-        try:
-            return _attempt(method, url, req, deadline)
-        except _Deadline:
-            raise GhError(f"{method} {url} failed: no complete answer within {budget:g} s "
-                          "(PT_HTTP_DEADLINE)") from None
-        except _Retryable as exc:
-            wait = RETRY_BACKOFF * (attempt + 1)
-            if attempt + 1 >= attempts or deadline - time.monotonic() <= wait:
-                raise exc.error from exc.__cause__
-            time.sleep(wait)
-    raise AssertionError("unreachable")  # the loop returns or raises
+        return _attempt(method, url, req, deadline)
+
+    return transport.run(attempt, attempts=2 if method.upper() == "GET" else 1, deadline=deadline,
+                         on_deadline=lambda: GhError(f"{method} {url} failed: no complete answer within "
+                                                     f"{budget:g} s (PT_HTTP_DEADLINE)"))
 
 
 def _json(text: str, what: str) -> Any:

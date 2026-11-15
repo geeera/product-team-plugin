@@ -188,7 +188,7 @@ class ConsoleTestCase(unittest.TestCase):
 class FixtureTest(ConsoleTestCase):
     def test_the_client_replays_every_vendored_fixture(self):
         fixtures = self.fake.load_fixtures()
-        self.assertEqual(len(fixtures), 13)
+        self.assertEqual(len(fixtures), 16)
         for fx in fixtures:
             req, expected = fx["request"], fx["response"]
             with self.subTest(fixture=fx["route"], path=req["path"], status=expected["status"]):

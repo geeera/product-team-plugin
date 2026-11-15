@@ -1,4 +1,4 @@
-"""Console read commands (team-console #607): backlog list/next/sprint/init, slot-context, sprint-metrics, each run
+"""The read commands on the console (team-console #607): backlog reads, slot-context and sprint-metrics, each run
 as its CLI against the fake console of test_console, which serves the vendored contract fixtures."""
 try:  # first: no test may read real credentials or run `gh auth token` (tests/_isolation.py)
     from . import _isolation  # noqa: F401
@@ -16,6 +16,7 @@ import os
 import sys
 import unittest
 import urllib.parse
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
 
@@ -122,6 +123,79 @@ class BacklogReadTest(ScriptTestCase):
         self.assertEqual(code, 0)
         self.assertEqual([(i["number"], i["key"], i["milestone"]) for i in out], [(4, "TC-4", "Sprint 05")])
         self.assertEqual(set(out[0]), set(backlog.SUMMARY))
+
+    def test_show_reads_the_item_its_comments_asks_and_decisions(self):
+        self.fake.load_fixtures()
+        self.fake.on("GET", f"{P}/items/1/decisions", page("decisions", [{
+            "id": 4, "command": "approve", "text": "", "askId": 1, "reversesCommentId": None, "via": "web",
+            "decidedAt": "2026-11-12T11:00:00.000Z", "sourceUrl": None}]))
+        code, out, _ = self.run_cli(backlog, "show", "1")
+        self.assertEqual(code, 0)
+        self.assertEqual(sorted(p.split("?")[0] for p in self.paths()),
+                         sorted([f"{P}/items/1", f"{P}/items/1/asks", f"{P}/sprints", f"{P}/items/1/comments",
+                                 f"{P}/items/1/decisions"]))
+        self.assertEqual((out["number"], out["title"], out["body"]), (1, "Export to CSV", ""))
+        self.assertEqual(out["comments"], [{"id": 1, "kind": "comment", "author": "owner", "author_kind": "owner",
+                                            "at": "2026-11-12T10:00:00.000Z", "body": "Which format?"}])
+        self.assertEqual([(a["category"], a["commands"], a["state"]) for a in out["asks"]],
+                         [("scope", ["approve", "reject"], "open")])
+        self.assertEqual([(d["command"], d["ask_id"], d["via"]) for d in out["decisions"]], [("approve", 1, "web")])
+
+    def test_answers_are_the_owners_decision_rows_with_nothing_ignored(self):
+        rows = [{"id": 2, "command": "done", "text": "created", "askId": None, "reversesCommentId": None,
+                 "via": "web", "decidedAt": "2026-11-12T12:00:00.000Z", "sourceUrl": None},
+                {"id": 1, "command": "reject", "text": "too broad", "askId": 1, "reversesCommentId": None,
+                 "via": "telegram", "decidedAt": "2026-11-12T10:00:00.000Z", "sourceUrl": None}]
+        self.fake.on("GET", f"{P}/items/7/decisions", page("decisions", rows))
+        code, out, _ = self.run_cli(backlog, "answers", "7")
+        self.assertEqual(code, 0)
+        self.assertEqual([(c["command"], c["text"], c["via"]) for c in out["commands"]],
+                         [("reject", "too broad", "telegram"), ("done", "created", "web")])
+        self.assertEqual((out["ignored"], out["same_account"], [d["id"] for d in out["done"]]), ([], False, [2]))
+
+    def test_reversals_are_rejects_of_a_team_decision_no_later_decision_answered(self):
+        def reject(item, at, reverses):
+            return {"id": item * 10, "command": "reject", "text": f"no {item}", "askId": None,
+                    "reversesCommentId": reverses, "via": "web", "decidedAt": at, "sourceUrl": None,
+                    "item": {"key": f"TC-{item}", "number": item}}
+        self.fake.on("GET", f"{P}/decisions?since=2026-11-01T00:00:00Z&command=reject", page("decisions", [
+            reject(2, "2026-11-12T10:00:00.000Z", 5), reject(3, "2026-11-10T10:00:00.000Z", 6),
+            reject(4, "2026-11-12T10:00:00.000Z", None)]))
+        self.fake.on("GET", f"{P}/sprints", sprints())
+        self.fake.on("GET", f"{P}/items/2/comments", page("comments", [
+            {"id": 5, "kind": "decision", "body": "x", "createdAt": "2026-11-11T10:00:00.000Z"}]))
+        self.fake.on("GET", f"{P}/items/3/comments", page("comments", [
+            {"id": 6, "kind": "decision", "body": "x", "createdAt": "2026-11-09T10:00:00.000Z"},
+            {"id": 8, "kind": "decision", "body": "redone", "createdAt": "2026-11-11T10:00:00.000Z"}]))
+        self.fake.on("GET", f"{P}/items/2", (200, dto(2), {}))
+        with mock.patch.object(backlog, "days_ago", return_value=datetime(2026, 11, 1, tzinfo=timezone.utc)):
+            code, out, _ = self.run_cli(backlog, "reversals")
+        self.assertEqual(code, 0)
+        self.assertEqual([(r["number"], r["reason"], r["decision_id"], r["reverses_comment_id"]) for r in out],
+                         [(2, "no 2", 20, 5)])
+        self.assertNotIn(f"{P}/items/4/comments", self.paths())
+
+    def test_requests_always_name_the_state_and_one_on_a_closed_item_is_ignored(self):
+        def request(rid, number, at, req=None):
+            return {"id": rid, "request": req or {"kind": "sprint", "target": "next"}, "requestedAt": at,
+                    "result": None, "reason": None, "handledAt": None,
+                    "item": {"key": f"TC-{number}", "number": number, "title": f"Item {number}", "state": "open"}}
+        self.fake.on("GET", f"{P}/requests?state=pending", page("requests", [
+            request(1, 1, "2026-11-12T10:00:00.000Z"), request(2, 7, "2026-11-12T10:00:00.000Z"),
+            request(3, 2, "2026-10-01T10:00:00.000Z"),
+            request(4, 2, "2026-11-12T10:00:00.000Z", {"kind": "priority", "direction": "up"})]))
+        self.fake.on("GET", f"{P}/sprints", sprints(sprint(5, "2099-01-09")))
+        self.fake.on("GET", f"{P}/items?state=open", page("items", [dto(1, sprint=5), dto(2)]))
+        with mock.patch.object(backlog, "days_ago", return_value=datetime(2026, 11, 1, tzinfo=timezone.utc)):
+            code, out, _ = self.run_cli(backlog, "requests")
+            _, current, _ = self.run_cli(backlog, "requests", "--milestone", "current")
+        self.assertEqual(code, 0)
+        self.assertEqual([(r["issue"], r["request_id"], r["kind"], r.get("target"), r.get("direction"),
+                           r["milestone"]) for r in out["requests"]],
+                         [(1, 1, "sprint", "next", None, "Sprint 05"), (2, 4, "priority", None, "up", None)])
+        self.assertEqual([(i["issue"], i["reason"]) for i in out["ignored"]], [(7, "the item is closed")])
+        self.assertEqual([r["issue"] for r in current["requests"]], [1])
+        self.assertTrue(all("state=" in p for p in self.paths() if "/requests" in p))
 
     def test_next_dispatches_in_the_console_queue_order(self):
         self.fake.on("GET", f"{P}/sprints", sprints(sprint(4, "2026-11-13", state="closed"),

@@ -6,7 +6,6 @@ except ImportError:  # `unittest discover -s tests` imports test modules without
 import importlib.machinery
 import importlib.util
 import io
-import json
 import sys
 import unittest
 from pathlib import Path
@@ -102,18 +101,6 @@ class AnswerCliTest(unittest.TestCase):
             self.run_cli(["answer", "7", "--command", "approve", "--owner-said", "да"], app_mode=True,
                          owner_token=backlog.gh.GhError("needs geeera's own token"))
         self.assertIn("own token", str(caught.exception))
-
-    def test_answers_in_app_mode_are_the_owners_only_and_not_flagged(self):
-        _, text = self.run_cli(["answers", "7"], app_mode=True)
-        data = json.loads(text)
-        self.assertFalse(data["same_account"])
-        self.assertEqual(data["agents"], BOT)
-        self.assertEqual([c["command"] for c in data["commands"]], ["reject"])
-
-    def test_answers_in_same_account_mode_are_flagged(self):
-        _, text = self.run_cli(["answers", "7"], app_mode=False, agents_login=OWNER)
-        self.assertTrue(json.loads(text)["same_account"])
-
 
 class RunLogAuthorsTest(unittest.TestCase):
     ISSUE = {"user": {"login": OWNER}}

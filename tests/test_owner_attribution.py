@@ -13,7 +13,7 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
-from ptlib import commands, demo, owner  # noqa: E402
+from ptlib import commands, owner  # noqa: E402
 
 
 def load(name):
@@ -48,13 +48,10 @@ class CommandAttributionTest(unittest.TestCase):
         found = commands.parse([comment(BOT, "/reject no"), comment(OWNER, RELAYED)], OWNER, NO_EDITS)
         self.assertEqual([c["command"] for c in found], ["approve"])
 
-    def test_team_decision_reversal_and_demo_decisions_need_the_owners_login(self):
+    def test_a_team_decision_reversal_needs_the_owners_login(self):
         decided = comment(BOT, owner.decision_comment("use X"), at="2026-09-29T09:00:00Z")
         self.assertEqual(owner.reversed_by_owner([decided, comment(BOT, "/reject why")], OWNER, NO_EDITS, [BOT]), {})
         self.assertEqual(owner.reversed_by_owner([decided, comment(OWNER, "/reject why")], OWNER, NO_EDITS, [BOT])["text"], "why")
-        block = '/demo-decisions\n```json\n{"decisions": {"release": {"decision": "go"}}}\n```'
-        self.assertIsNone(demo.decisions_from_comments([comment(BOT, block)], OWNER, NO_EDITS))
-        self.assertIsNotNone(demo.decisions_from_comments([comment(OWNER, block)], OWNER, NO_EDITS))
 
 
 class RunLogAuthorsTest(unittest.TestCase):

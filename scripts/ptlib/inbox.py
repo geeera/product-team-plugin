@@ -1,7 +1,8 @@
-"""The owner's single to-do list: one pinned issue whose body every run rewrites from the backlog."""
+"""The owner's single to-do list: on GitHub one pinned issue rewritten from the backlog every run; on the team
+console its `GET …/inbox` read model (ADR 0006 decision 12), rendered the same way for `inbox show` and the digest."""
 from __future__ import annotations
 
-from typing import Dict, List
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 MARKER = "<!-- pt-inbox -->"
 
@@ -35,6 +36,21 @@ TEXT: Dict[str, Dict[str, tuple]] = {
     },
 }
 ORDER = ("setup", "paused", "release", "design", "question", "owner", "local")
+# On the console the owner answers on the item's page, not with a GitHub comment.
+CONSOLE_ACTIONS: Dict[str, Dict[str, str]] = {
+    "en": {
+        "release": "On the demo item in the console: go or no-go",
+        "design": "Open the design, then approve or reject it on the item in the console",
+        "question": "Answer each one on its item in the console",
+    },
+    "ru": {
+        "release": "В консоли, на пункте демо: go или no-go",
+        "design": "Открой дизайн, затем одобри или отклони его на пункте в консоли",
+        "question": "Ответь на каждый на его пункте в консоли",
+    },
+}
+CONSOLE_SECTIONS = ("release", "design", "question", "owner", "local")  # the console's `Section`
+SETUP_TITLE = "Agents use your GitHub account — give them their own GitHub Apps (reference/identities.md)"
 
 
 def classify(issue: dict):
@@ -55,8 +71,7 @@ def classify(issue: dict):
 def sections(issues: List[dict], paused_url: str = "", same_account_url: str = "", decided: List[dict] = ()) -> Dict[str, list]:
     groups: Dict[str, list] = {key: [] for key in ORDER + ("fyi",)}
     if same_account_url:
-        groups["setup"].append({"title": "Agents use your GitHub account — give them their own GitHub Apps "
-                                         "(reference/identities.md)", "url": same_account_url})
+        groups["setup"].append({"title": SETUP_TITLE, "url": same_account_url})
     if paused_url:
         groups["paused"].append({"title": "Run log", "url": paused_url})
     for issue in sorted(issues, key=lambda i: i["number"]):
@@ -67,17 +82,56 @@ def sections(issues: List[dict], paused_url: str = "", same_account_url: str = "
     return groups
 
 
+def _text(dto: Dict[str, Any], name: str) -> Optional[str]:
+    value = dto.get(name)
+    return value if isinstance(value, str) and value else None
+
+
+def console_groups(dto: Dict[str, Any], item_url: Callable[[int], Optional[str]]) -> Dict[str, list]:
+    """The console's InboxDto as `sections()` groups, in the console's order. Its rows are data: a section or a row
+    shape the plugin does not know is a ValueError, never a silently dropped item. The console renders no team
+    decisions (FYI) into the inbox, so that group stays empty."""
+    groups: Dict[str, list] = {key: [] for key in ORDER + ("fyi",)}
+    if dto.get("setup") is True:
+        groups["setup"].append({"title": SETUP_TITLE, "url": _text(dto, "setupUrl")})
+    if dto.get("paused") is True:
+        groups["paused"].append({"title": "Run log", "url": _text(dto, "pausedUrl")})
+    for row in dto.get("items") or []:
+        number, section = row.get("number"), row.get("section")
+        if section not in CONSOLE_SECTIONS or not isinstance(number, int) or isinstance(number, bool) \
+                or number < 1 or not _text(row, "title"):
+            raise ValueError(f"the console inbox has an item this plugin cannot read (section {section!r})")
+        groups[section].append({"number": number, "key": _text(row, "key"), "title": row["title"],
+                                "url": item_url(number) or _text(row, "url"), "ask": _text(row, "ask")})
+    return groups
+
+
 def item_line(item: dict) -> str:
     number = f"#{item['number']} " if "number" in item else ""
     ask = f" — {item['ask']}" if item.get("ask") else ""
-    return f"- {number}[{item['title']}]({item['url']}){ask}"
+    title = f"[{item['title']}]({item['url']})" if item.get("url") else item["title"]
+    return f"- {number}{title}{ask}"
+
+
+def titled(groups: Dict[str, list], language: str = "en") -> List[Tuple[str, List[dict]]]:
+    """The groups as the digest reads them: (section title, items with number as text or None, title, url, ask)."""
+    t = TEXT.get(language, TEXT["en"])
+    return [(t[key][0], [{"number": str(i["number"]) if "number" in i else None, "title": i["title"],
+                          "url": i.get("url"), "ask": i.get("ask")} for i in groups[key]])
+            for key in ORDER + ("fyi",) if groups[key]]
 
 
 def render(issues: List[dict], paused_url: str = "", updated: str = "", same_account_url: str = "",
            decided: List[dict] = (), language: str = "en") -> str:
     """same_account_url: link to the owner checklist, set while the agents act as the owner's account."""
+    return render_groups(sections(issues, paused_url, same_account_url, decided), updated, language)
+
+
+def render_groups(groups: Dict[str, list], updated: str = "", language: str = "en",
+                  actions: Optional[Dict[str, Dict[str, str]]] = None) -> str:
+    """`actions` replaces a section's action line per language (CONSOLE_ACTIONS for the console's inbox)."""
     t = TEXT.get(language, TEXT["en"])
-    groups = sections(issues, paused_url, same_account_url, decided)
+    override = (actions or {}).get(language) or (actions or {}).get("en") or {}
     total = sum(len(groups[k]) for k in ORDER)
     lines = [MARKER, f"**{t['count'][0 if total == 1 else 1].format(n=total)}** {t['updated'].format(when=updated)}", ""]
     if not total:
@@ -87,7 +141,7 @@ def render(issues: List[dict], paused_url: str = "", updated: str = "", same_acc
         if not items:
             continue
         title, action = t[key]
-        lines += [f"### {title} ({len(items)})", f"_{action}_", ""]
+        lines += [f"### {title} ({len(items)})", f"_{override.get(key, action)}_", ""]
         lines += [item_line(item) for item in items]
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"

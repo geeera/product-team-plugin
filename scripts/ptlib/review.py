@@ -35,6 +35,38 @@ DEPENDENCY_FILES = re.compile(
 )
 
 
+# The items a PR names (ADR 0006 decision 2): a key (`TC-412`, any prefix the console uses) or a bare number, as the
+# head branch's first segment after its type (`feature/tc-412-slug`, `fix/412-slug`) or after a closing keyword in
+# the title or body (`Closes TC-412`, `Fixes #412`). A wrong guess only costs a lookup: every name is read back
+# from the console, and one it cannot read makes the security review required.
+_REF = r"(?:[A-Za-z]{2,5}-|#)?[1-9][0-9]{0,8}"
+_BRANCH_REF = re.compile(rf"^[a-z]+/({_REF})(?:[-_/.]|$)")
+_TEXT_REF = re.compile(rf"(?i)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?|refs?)\s*:?\s+({_REF})\b")
+
+
+def item_ref(raw: str) -> Optional[str]:
+    """`TC-412` (upper-cased) or `412` for a reference the console can address, else None."""
+    raw = raw.strip().lstrip("#")
+    return raw.upper() if re.fullmatch(_REF, raw) else None
+
+
+def item_refs(head_ref: str, title: str = "", body: str = "", *, branch_only: bool = False) -> List[str]:
+    """The item references of a PR, the head branch's first, each once."""
+    found = []
+    match = _BRANCH_REF.match(head_ref or "")
+    if match:
+        found.append(match.group(1))
+    if not branch_only:
+        for text in (title or "", body or ""):
+            found += [m.group(1) for m in _TEXT_REF.finditer(text)]
+    refs = []
+    for raw in found:
+        ref = item_ref(raw)
+        if ref and ref not in refs:
+            refs.append(ref)
+    return refs
+
+
 def security_reasons(paths: Iterable[str], labels: Iterable[str] = ()) -> List[str]:
     reasons = []
     if "security" in set(labels):

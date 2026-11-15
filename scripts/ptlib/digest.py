@@ -1,4 +1,4 @@
-"""The daily push to the owner's phone: the pinned inbox, as a short plain-text message.
+"""The daily push to the owner's phone: the owner's inbox, as a short plain-text message.
 
 GitHub does not notify you about your own account's comments — and in same-account mode the agents write as
 yours — so the team's questions would never reach the phone through GitHub. The digest goes out through a separate
@@ -51,7 +51,8 @@ def format_digest(product: str, sections: List[Tuple[str, List[dict]]], language
             lines.append(f"• {number}{item['title']}")
             if item["ask"]:
                 lines.append(f"  {ANSWER.get(language, ANSWER['en'])}: {item['ask']}")
-            lines.append(f"  {item['url']}")
+            if item["url"]:
+                lines.append(f"  {item['url']}")
         lines.append("")
     lines.append(FOOTER.get(language, FOOTER["en"]))
     return "\n".join(lines).rstrip() + "\n"

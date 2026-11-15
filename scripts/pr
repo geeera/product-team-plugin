@@ -11,7 +11,12 @@
   pr reviews N         review bodies, oldest first
   pr update-branch N   merge the base into the PR branch on GitHub (no force-push); fails on conflicts
   pr files N           changed paths
-  pr security-check N  does this PR need a security review? reasons from the paths and the linked issue's labels
+  pr security-check N  does this PR need a security review? reasons from the paths and the labels of the items it
+                       names (`feature/tc-412-…` head branch, `Closes TC-412` / `#412` in title or body), read from
+                       the team console; an item it cannot read there makes the review required (fails closed)
+  pr link-pr N [--item KEY]
+                       record PR N on its item in the team console (`pr-links`); the item is the head branch's
+                       (`feature/tc-412-…`) unless --item names it. A dev job links only an item it holds
   pr gate N            CI plus the independent verdicts it needs, each APPROVED on the current head commit: QA and
                        REVIEW as the `review:` block of project.yml on the PR's base branch requires them (both on
                        every PR without the block), SECURITY whenever security-check says so. `why` explains each
@@ -54,7 +59,7 @@ import tempfile  # noqa: E402
 from pathlib import Path  # noqa: E402
 from typing import Optional  # noqa: E402
 
-from ptlib import checks, gh, project, review, vendoring  # noqa: E402
+from ptlib import checks, console, gh, project, review, vendoring  # noqa: E402
 
 
 def out(data) -> None:
@@ -113,17 +118,60 @@ def changed_files(repo: str, n: int) -> list:
     return paths
 
 
-def linked_issue_labels(repo: str, n: int) -> list:
-    pr = gh.api(f"repos/{repo}/pulls/{n}")
-    body = pr.get("body") or ""
-    labels = [l["name"] for l in pr.get("labels", [])]
-    for number in re.findall(r"(?i)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?|refs?)\s*:?\s+#(\d+)", body):
-        labels += [l["name"] for l in gh.api(f"repos/{repo}/issues/{number}").get("labels", [])]
+def item_labels(ref: str) -> list:
+    """The item's labels from the console; ConsoleError when it cannot be read or the answer has no label list."""
+    labels = console.get_item(ref).get("labels")
+    if not isinstance(labels, list) or not all(isinstance(x, str) for x in labels):
+        raise console.ConsoleError(f"item {ref} has no label list", type="unexpected-answer")
     return labels
 
 
+def linked_labels(repo: str, n: int) -> tuple:
+    """(the PR's labels plus those of every item it names, reasons for the items that could not be read).
+
+    The gate fails closed: an item the console does not answer for — no TC_* job environment, unreachable, a
+    refusal, a 404, an answer without labels — is a reason to require the security review, never a skipped one."""
+    pr = gh.api(f"repos/{repo}/pulls/{n}")
+    labels = [l["name"] for l in pr.get("labels", [])]
+    unread = []
+    for ref in review.item_refs((pr.get("head") or {}).get("ref") or "", pr.get("title") or "", pr.get("body") or ""):
+        try:
+            labels += item_labels(ref)
+        except console.ConsoleError as exc:
+            # The type and status only: the detail is the console's text, and the reason must name the cause.
+            got = " ".join(p for p in (str(exc.status) if exc.status else "", exc.type) if p)
+            unread.append(f"linked item {ref} could not be read from the console ({got}): review required")
+    return labels, unread
+
+
 def security_check(repo: str, n: int, paths: Optional[list] = None) -> list:
-    return review.security_reasons(changed_files(repo, n) if paths is None else paths, linked_issue_labels(repo, n))
+    labels, unread = linked_labels(repo, n)
+    return review.security_reasons(changed_files(repo, n) if paths is None else paths, labels) + unread
+
+
+def link_pr(repo: str, n: int, item: Optional[str]) -> dict:
+    pr = gh.api(f"repos/{repo}/pulls/{n}")
+    head = (pr.get("head") or {}).get("ref") or ""
+    if item is not None:
+        ref = review.item_ref(item)
+        if not ref:
+            sys.exit(f"--item {item!r} is not an item key (TC-412) or number")
+    else:
+        refs = review.item_refs(head, branch_only=True)
+        if not refs:
+            sys.exit(f"PR #{n}: its head branch {head!r} names no item (feature/tc-412-slug); pass --item KEY")
+        ref = refs[0]
+    try:
+        link = console.link_pr(ref, pr["number"], pr["html_url"], head)
+    except console.ConsoleError as exc:
+        refusal = console.pr_link_refusal(exc)
+        if refusal:
+            print(f"console: {ref}: {refusal}", file=sys.stderr)
+            sys.exit(console.EXIT_ERROR)
+        sys.exit(console.report(exc))
+    number = int(ref.rsplit("-", 1)[-1])
+    return {"item": ref, "pr": pr["number"], "pr_url": pr["html_url"], "head_ref": head,
+            "linked_at": console.text_of(link, "linkedAt"), "url": console.item_url(number)}
 
 
 def base_project_text(repo: str, base: str) -> str:
@@ -387,6 +435,7 @@ def main() -> None:
     c.add_argument("--title", required=True); c.add_argument("--body"); c.add_argument("--body-file")
     for name in ("view", "checks", "diff", "reviews", "update-branch", "files", "security-check", "gate"):
         sub.add_parser(name).add_argument("number", type=int)
+    lp = sub.add_parser("link-pr"); lp.add_argument("number", type=int); lp.add_argument("--item")
     r = sub.add_parser("review"); r.add_argument("number", type=int); r.add_argument("--commit", required=True)
     r.add_argument("--body"); r.add_argument("--body-file")
     m = sub.add_parser("merge"); m.add_argument("number", type=int)
@@ -438,6 +487,8 @@ def main() -> None:
             out({"required": bool(reasons), "reasons": reasons})
         elif args.cmd == "gate":
             out(gate(repo, args.number))
+        elif args.cmd == "link-pr":
+            out(link_pr(repo, args.number, args.item))
         elif args.cmd == "push":
             out(push(repo, args.branch or current_branch()))
         elif args.cmd == "git-identity":

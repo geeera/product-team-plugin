@@ -54,6 +54,24 @@ class MorePathsTest(unittest.TestCase):
                 self.assertEqual(review.security_reasons([path]), [])
 
 
+class ItemRefsTest(unittest.TestCase):
+    def test_the_head_branch_comes_first_then_closing_keywords_each_once(self):
+        refs = review.item_refs("feature/tc-412-login", "Fix login (refs TC-412)",
+                                "Closes #9, fixes: st-4.\nPart of geeera/team-console#609, see RFC-9457 and TC-77")
+        self.assertEqual(refs, ["TC-412", "9", "ST-4"])
+
+    def test_branches_that_name_no_item(self):
+        for head in ("chore/product-team-0.12.0", "backmerge/stage-into-dev", "feature/tc-0-x", "feature/abcdef-1-x",
+                     "main", ""):
+            with self.subTest(head=head):
+                self.assertEqual(review.item_refs(head), [])
+        self.assertEqual(review.item_refs("fix/412_typo", "Closes TC-1", branch_only=True), ["412"])
+
+    def test_item_ref_accepts_keys_and_numbers_only(self):
+        self.assertEqual([review.item_ref(x) for x in ("tc-7", "#7", "7", "TC-07", "x y", "TOOLONG-1")],
+                         ["TC-7", "7", "7", None, None, None])
+
+
 class AgentToolingTest(unittest.TestCase):
     def test_files_that_steer_agents_or_the_gate_need_security(self):
         for path in (".claude/settings.json", ".claude/agents/qa.md", ".claude/product-team/scripts/pr",

@@ -28,21 +28,21 @@ refused with the item's console page, where the owner does it.
   backlog close N [--reason TEXT]                close as not planned (rejected, duplicate, obsolete)
   backlog edit N [--title T] [--body-file F]    change title or body (refused once the owner approved the item, #462)
   backlog label N [+L|-L]...                     add/remove flags; +tier:T / +sev:S set those fields, -tier:T clears
+  backlog queue N first|up|down                  move the item in its lane (pm; the order `backlog next` dispatches in)
   backlog comment N (--body B | --body-file F)   a `note` on the item
-  backlog link-pr N PR                           record the PR on the issue (GitHub until the next PR)
+  backlog link-pr N PR                           record the PR on the item (`pr-links`)
   backlog answers N                              the owner's decisions on the item (approve, reject, go, …): rows
                                                  only the owner writes, so "ignored" is always empty
   backlog vanished [--days 30]                   retired no-op (console rows are append-only): {"vanished": []}
   backlog requests [--milestone M|current|none] [--days 30]
                  pending owner requests from the team console ("sprint → next", "queue → up"); one on a closed
                  item is listed under "ignored"
-  backlog request-done N --comment-id ID --result applied|declined [--text REASON]
-                 answer a pending request with the handled marker, as the team (GitHub until the next PR);
-                 declined needs --text
+  backlog request-done N --request-id ID --result applied|declined [--text REASON]
+                 answer a pending request (pm); declined needs --text
   backlog next [--now ISO]                       what a development run takes now: dispatch list in the console's
                                                  queue order, skipped issues with reasons, missing architect notes
   backlog sprint current|list
-  backlog sprint create TITLE DUE_DATE           DUE_DATE = demo day, YYYY-MM-DD (GitHub until the next PR)
+  backlog sprint create TITLE DUE_DATE           DUE_DATE = demo day, YYYY-MM-DD; the console numbers the sprint
 """
 from __future__ import annotations
 
@@ -57,7 +57,7 @@ from datetime import date, datetime, timedelta, timezone
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from typing import Optional  # noqa: E402
 
-from ptlib import brief, console, gh, owner, ownerrequests, picker, project, provenance  # noqa: E402
+from ptlib import brief, console, gh, owner, ownerrequests, picker, project  # noqa: E402
 from ptlib.calendar import KYIV, compute, pick_current_sprint  # noqa: E402
 from ptlib.labels import LABELS, STATUSES, KINDS, SEVERITIES  # noqa: E402
 from ptlib.tiers import ORDER as TIERS  # noqa: E402
@@ -532,6 +532,12 @@ def cmd_label(args) -> None:
     out(written(console.update_item(args.number, patch)))
 
 
+def cmd_queue(args) -> None:
+    dto = console.queue_move(args.number, args.move)
+    queue = dto.get("queue") if isinstance(dto.get("queue"), dict) else {}
+    out(dict(written(dto), move=args.move, position=queue.get("position"), total=queue.get("total")))
+
+
 def cmd_comment(args) -> None:
     body = body_arg(args)
     if owner.DECISION_MARKER in body:
@@ -545,11 +551,15 @@ def cmd_comment(args) -> None:
          "url": console.item_url(args.number)})
 
 
-def cmd_link_pr(repo: str, args) -> None:
-    pr = gh.api(f"repos/{repo}/pulls/{args.pr}")
-    c = gh.api(f"repos/{repo}/issues/{args.number}/comments", "POST",
-               {"body": f"PR: {pr['html_url']} (`{pr['head']['ref']}` → `{pr['base']['ref']}`)"})
-    out({"issue": args.number, "pr": pr["number"], "pr_url": pr["html_url"], "comment": c["html_url"]})
+def cmd_link_pr(args) -> None:
+    # The PR itself is the VCS's (GitHub until Phase 2); the console records the link as a `pr-linked` event.
+    try:
+        pr = gh.api(f"repos/{gh.repo()}/pulls/{args.pr}")
+    except gh.GhError as exc:
+        sys.exit(str(exc))
+    link = console.link_pr(args.number, pr["number"], pr["html_url"], pr["head"]["ref"])
+    out({"issue": args.number, "pr": pr["number"], "pr_url": pr["html_url"], "head_ref": pr["head"]["ref"],
+         "linked_at": console.text_of(link, "linkedAt"), "url": console.item_url(args.number)})
 
 
 def cmd_vanished(_args) -> None:
@@ -558,60 +568,28 @@ def cmd_vanished(_args) -> None:
     out({"vanished": [], "checked": 0, "error": "", "history": "console"})
 
 
-def _request_slugs(repo: str) -> list:
-    # The trust root comes from the default branch, never the working tree: changing it takes a merged PR.
-    try:
-        return project.console_app_slugs_on_default_branch(repo)
-    except ValueError as exc:
-        sys.exit(str(exc))
+def cmd_request_done(args) -> None:
+    """Answer a pending owner request as the PM; the console records which job answered from the token."""
+    row = next((r for r in console.item_requests(args.number) if r.get("id") == args.request_id), None)
+    if row is None:
+        sys.exit(f"#{args.number}: request {args.request_id} is not a request on this item; `backlog requests` "
+                 "lists the pending ones with their request_id")
+    if row.get("handledAt") is not None:
+        sys.exit(f"#{args.number}: request {args.request_id} was already answered ({console.text_of(row, 'result')})")
+    reason = brief.one_line(args.text or "")
+    if args.result == "declined" and not reason:
+        sys.exit("a declined request needs the reason (--text): the owner is told why not")
+    handled = console.handle_request(args.request_id, args.result, reason)
+    out({"issue": args.number, "request_id": args.request_id, "result": console.text_of(handled, "result"),
+         "handled_at": console.text_of(handled, "handledAt"), "url": console.item_url(args.number)})
 
 
-def _issue_requests(repo: str, number: int, owner_login: str, slugs: list, team: set, acts: bool,
-                    since: str = "") -> tuple:
-    """(ownerrequests.evaluate of one issue, history mode)."""
-    comments = gh.api_list(f"repos/{repo}/issues/{number}/comments?per_page=100")
-    history = provenance.fetch(repo, number)
-    found = ownerrequests.evaluate(comments, owner_login, history, slugs, team, acts, since)
-    return found, provenance.mode(history)
-
-
-def cmd_request_done(repo: str, args) -> None:
-    """Answer a pending owner request with the handled marker, as the team — never with the owner's token."""
-    owner_login = gh.owner_login(repo)
-    agents = gh.token_login()
-    if not agents or agents.lower() == owner_login.lower():
-        sys.exit(f"the handled marker is posted only as the team's identity, and the agents here act as "
-                 f"{agents or 'an unknown account'}")
-    found, _ = _issue_requests(repo, args.number, owner_login, _request_slugs(repo), gh.team_logins(repo),
-                               gh.acts_as_owner(repo))
-    pending = found["pending"]
-    if not pending or pending["comment_id"] != args.comment_id:
-        known = next((e["reason"] for e in found["ignored"] if e["comment_id"] == args.comment_id), "")
-        done = next((h for h in found["handled"] if h["comment_id"] == args.comment_id), None)
-        why = (f"it was already answered ({done['result']}, {done['url']})" if done else
-               f"it does not count: {known}" if known else
-               f"the pending request is {pending['comment_id']} (the newest replaces older ones)" if pending else
-               "there is no pending owner request there")
-        sys.exit(f"#{args.number}: comment {args.comment_id} is not a pending owner request; {why}")
-    issue = gh.api(f"repos/{repo}/issues/{args.number}")
-    if issue.get("state") != "open" or "pull_request" in issue:
-        sys.exit(f"#{args.number} is not an open issue")
-    try:
-        body = ownerrequests.handled_comment(args.comment_id, args.result, args.text or "", pending["url"] or "",
-                                             project.owner_language())
-    except ValueError as exc:
-        sys.exit(str(exc))
-    # The agents' own token (the team app's in app mode): an owner token would make the answer look like the owner's.
-    c = gh.api(f"repos/{repo}/issues/{args.number}/comments", "POST", {"body": body})
-    out({"issue": args.number, "comment_id": args.comment_id, "result": args.result, "url": c["html_url"]})
-
-
-def cmd_sprint_create(repo: str, args) -> None:
+def cmd_sprint_create(args) -> None:
     if not args.title or not args.due:
         sys.exit("usage: backlog sprint create TITLE YYYY-MM-DD")
     due = date.fromisoformat(args.due)
-    m = gh.api(f"repos/{repo}/milestones", "POST", {"title": args.title, "due_on": f"{due.isoformat()}T12:00:00Z"})
-    out({"title": m["title"], "number": m["number"], "due": m["due_on"][:10], "url": m["html_url"]})
+    s = console.as_milestone(console.create_sprint(due.isoformat(), args.title))
+    out({"title": s["title"], "number": s["number"], "due": (s["due_on"] or "")[:10], "url": None})
 
 
 def main() -> None:
@@ -645,13 +623,14 @@ def main() -> None:
     ed = sub.add_parser("edit"); ed.add_argument("number", type=int); ed.add_argument("--title")
     ed.add_argument("--body"); ed.add_argument("--body-file")
     lb = sub.add_parser("label"); lb.add_argument("number", type=int); lb.add_argument("changes", nargs="+")
+    qu = sub.add_parser("queue"); qu.add_argument("number", type=int); qu.add_argument("move", choices=["first", "up", "down"])
     cm = sub.add_parser("comment"); cm.add_argument("number", type=int); cm.add_argument("--body"); cm.add_argument("--body-file")
     lp = sub.add_parser("link-pr"); lp.add_argument("number", type=int); lp.add_argument("pr", type=int)
     an = sub.add_parser("answers"); an.add_argument("number", type=int)
     va = sub.add_parser("vanished"); va.add_argument("--days", type=int, default=30)
     rq = sub.add_parser("requests"); rq.add_argument("--milestone"); rq.add_argument("--days", type=int, default=30)
     rd = sub.add_parser("request-done"); rd.add_argument("number", type=int)
-    rd.add_argument("--comment-id", type=int, required=True)
+    rd.add_argument("--request-id", type=int, required=True)
     rd.add_argument("--result", required=True, choices=list(ownerrequests.RESULTS)); rd.add_argument("--text")
     nx = sub.add_parser("next"); nx.add_argument("--now")
     sp = sub.add_parser("sprint"); sp.add_argument("action", choices=["current", "list", "create"])
@@ -666,17 +645,11 @@ def main() -> None:
         "init": cmd_init, "list": cmd_list, "show": cmd_show, "answers": cmd_answers, "reversals": cmd_reversals,
         "requests": cmd_requests, "next": cmd_next, "sprint": cmd_sprint,
         "create": cmd_create, "ask": cmd_ask, "answer": cmd_answer, "decide": cmd_decide, "move": cmd_move,
-        "milestone": cmd_milestone, "close": cmd_close, "edit": cmd_edit, "label": cmd_label,
-        "comment": cmd_comment, "vanished": cmd_vanished,
+        "milestone": cmd_milestone, "close": cmd_close, "edit": cmd_edit, "label": cmd_label, "queue": cmd_queue,
+        "comment": cmd_comment, "link-pr": cmd_link_pr, "vanished": cmd_vanished, "request-done": cmd_request_done,
     }
-    # Still GitHub until the next PR (team-console #608, part 2): the PR link, owner requests and sprint creation.
-    github = {"link-pr": cmd_link_pr, "request-done": cmd_request_done, "sprint": cmd_sprint_create}
-    if args.cmd in github and (args.cmd != "sprint" or args.action == "create"):
-        try:
-            github[args.cmd](gh.repo(), args)
-        except gh.GhError as exc:
-            sys.exit(str(exc))
-        return
+    if args.cmd == "sprint" and args.action == "create":
+        handlers["sprint"] = cmd_sprint_create
     try:
         handlers[args.cmd](args)
     except console.ConsoleError as exc:

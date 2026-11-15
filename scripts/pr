@@ -373,7 +373,12 @@ def show_json(rev: str, path: str) -> dict:
 
 
 def release_versions() -> dict:
-    """{commit: version} for every v<X.Y.Z> tag of the plugin (annotated tags resolved to their commit)."""
+    """{commit: version} for every stable v<X.Y.Z> tag of the plugin (annotated tags resolved to their commit).
+
+    A `v<X.Y.Z>-pre.N` tag is excluded: self-update must never offer a pre-release to a stable product, even
+    once one is tagged (team-console#436-P5 review). A product pinned to a pre-release names it explicitly in
+    its own manifest instead of going through this list.
+    """
     out = git("ls-remote", "--tags", vendoring.PLUGIN_REPO, "refs/tags/v*").decode()
     direct, peeled = {}, {}
     for line in out.splitlines():
@@ -386,8 +391,10 @@ def release_versions() -> dict:
     commits = {}
     for version, sha in direct.items():
         try:
-            vendoring.parse_version(version)
+            parsed = vendoring.parse_version(version)
         except ValueError:
+            continue
+        if vendoring.is_prerelease(parsed):
             continue
         commits[peeled.get(version, sha)] = version
     return commits

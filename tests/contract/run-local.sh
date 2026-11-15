@@ -13,9 +13,9 @@
 #   git worktree add --detach <dir> "$(cat tests/contract/console.lock)"
 #   cd <dir> && npm ci
 #   npx nx build console
-#   npx nx run api:migrate   # fresh local D1 under apps/api/.wrangler/state (wrangler d1 migrations apply --local)
+#   npx nx run api:migrate   # fresh local D1 under .wrangler/state (wrangler d1 migrations apply --local)
 #   npx wrangler dev --config apps/api/wrangler.jsonc --env dev --port "$((E2E_PORT_BASE))" \
-#     --persist-to apps/api/.wrangler/state --var ENVIRONMENT:local --var AUTH_MODE:local --var GITHUB_MOCK:true \
+#     --persist-to .wrangler/state --var ENVIRONMENT:local --var AUTH_MODE:local --var GITHUB_MOCK:true \
 #     --var OWNER_GITHUB_LOGIN:geeera
 # then seed one tracker-cut-over project for TC_PROJECT (slug, key prefix, the plugin's builtin labels) — the
 # console has no CLI for this yet (architect note on #436 §1, C3 is fixtures only), so seed it with the same

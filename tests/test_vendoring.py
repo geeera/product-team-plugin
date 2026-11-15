@@ -164,6 +164,10 @@ class SelfUpdateVerificationTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             vendoring.parse_version("0.12.0-rc.1")
 
+    def test_is_prerelease(self):
+        self.assertTrue(vendoring.is_prerelease(vendoring.parse_version("0.12.0-pre.1")))
+        self.assertFalse(vendoring.is_prerelease(vendoring.parse_version("0.12.0")))
+
 
 class PluginRefTest(unittest.TestCase):
     def test_reviewer_logins_inline_and_block_lists(self):

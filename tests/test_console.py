@@ -221,9 +221,11 @@ class FixtureTest(ConsoleTestCase):
                 self.assertEqual(caught.exception.type, problem_body["type"].rsplit("/", 1)[-1])
                 self.assertEqual(caught.exception.field, problem_body.get("field"))
                 self.assertEqual(caught.exception.reason, problem_body.get("reason"))
-                exit_code = console.EXIT_NOT_CUT_OVER if caught.exception.type == console.NOT_CUT_OVER \
-                    else console.EXIT_ERROR
-                self.assertEqual(caught.exception.exit_code, exit_code)
+                # Decoupled from console.py's own exit_code formula: driven by the fixture's raw problem
+                # type (not caught.exception.type, which that formula also reads) and the literal exit codes
+                # `pr`'s CLI actually relies on, so a regression in the formula itself would fail this.
+                is_not_cut_over = problem_body["type"].rsplit("/", 1)[-1] == "tracker-not-cut-over"
+                self.assertEqual(caught.exception.exit_code, 3 if is_not_cut_over else 1)
         self.assertEqual(len(self.fake.seen), len(fixtures))  # 4xx answers are never retried
 
     def test_the_named_calls_send_the_fixture_requests(self):

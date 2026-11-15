@@ -273,8 +273,9 @@ def list_all(path: str, member: str) -> List[Any]:
     for _ in range(10_000):  # a cursor that never ends is a console bug, not a reason to loop forever
         query = urllib.parse.urlencode([("limit", PAGE_LIMIT)] + ([("after", after)] if after is not None else []))
         page, _ = request("GET", f"{path}{joiner}{query}")
-        if not isinstance(page, dict) or not isinstance(page.get(member), list):
-            raise ConsoleError(f"GET {path}: the answer has no {member!r} list", type="unexpected-answer")
+        if not isinstance(page, dict) or not isinstance(page.get(member), list) \
+                or not all(isinstance(row, dict) for row in page[member]):
+            raise ConsoleError(f"GET {path}: the answer has no {member!r} list of objects", type="unexpected-answer")
         rows.extend(page[member])
         cursor = page.get("next")
         if cursor is None:
@@ -306,6 +307,96 @@ def update_item(number: int, patch: Dict[str, Any], *, reapply: bool = True) -> 
             if exc.status != 412 or not reapply or not tries_left:
                 raise
     raise AssertionError("unreachable")  # the loop returns or raises
+
+
+def _object(dto: Any, what: str) -> Dict[str, Any]:
+    if not isinstance(dto, dict):
+        raise ConsoleError(f"GET {what}: the answer is not an object", type="unexpected-answer")
+    return dto
+
+
+def items(**filters: Any) -> List[Dict[str, Any]]:
+    """`GET …/items` with its filters (state, status, kind, label, sprint), in the console's queue order: (rank,
+    number), the order `backlog next` dispatches in (#456). Callers must not re-sort it by number."""
+    return list_all(project_path("items", **filters), "items")
+
+
+def events(number: int) -> List[Dict[str, Any]]:
+    return list_all(project_path("items", number, "events"), "events")
+
+
+def labels() -> List[Dict[str, Any]]:
+    dto, _ = request("GET", project_path("labels"))
+    rows = _object(dto, "labels").get("labels")
+    if not isinstance(rows, list):
+        raise ConsoleError("GET labels: the answer has no 'labels' list", type="unexpected-answer")
+    return rows
+
+
+def sprints(state: Optional[str] = None) -> List[Dict[str, Any]]:
+    """The project's sprints (one unpaged list); `state` is open, closed or all (the console's default)."""
+    dto, _ = request("GET", project_path("sprints", state=state))
+    rows = _object(dto, "sprints").get("sprints")
+    if not isinstance(rows, list) or not all(isinstance(s, dict) and _is_number(s.get("number")) for s in rows):
+        raise ConsoleError("GET sprints: the answer has no 'sprints' list of numbered sprints",
+                           type="unexpected-answer")
+    return rows
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+
+def as_milestone(sprint: Dict[str, Any]) -> Dict[str, Any]:
+    """A sprint in the milestone shape `calendar.pick_current_sprint` and the sprint outputs read."""
+    due = sprint.get("dueOn")
+    return {"number": sprint["number"], "title": sprint_title(sprint), "state": sprint.get("state"),
+            "due_on": due if isinstance(due, str) else None}
+
+
+def _sprint_name(number: int) -> str:
+    return f"Sprint {number:02d}"  # what the console titles a sprint created without a title
+
+
+def sprint_title(sprint: Dict[str, Any]) -> str:
+    title = sprint.get("title")
+    return title if isinstance(title, str) and title else _sprint_name(sprint["number"])
+
+
+def text_of(row: Dict[str, Any], name: str) -> Optional[str]:
+    """A string member of a console row, or None: rows are data, a member of another type is not trusted."""
+    value = row.get(name)
+    return value if isinstance(value, str) else None
+
+
+def as_issue(dto: Dict[str, Any], sprint_titles: Optional[Mapping[int, str]] = None,
+             queue: Optional[int] = None, ask: Optional[str] = None) -> Dict[str, Any]:
+    """An ItemSummaryDto as the issue dict picker, inbox and metrics read. `milestone` is the title of the item's
+    sprint (`Sprint NN` when the title is not known); `queue` is the item's index in a `GET …/items` list, which is
+    the console's queue order, so `picker.pick` dispatches in it instead of by number."""
+    number = dto.get("number")
+    labels = dto.get("labels")
+    if not _is_number(number) or not isinstance(labels, list) or not all(isinstance(x, str) for x in labels) \
+            or not isinstance(dto.get("title"), str):
+        raise ConsoleError("an item in the answer has no number, title or label list", type="unexpected-answer")
+    sprint = dto.get("sprint")
+    milestone = None
+    if _is_number(sprint):
+        milestone = (sprint_titles or {}).get(sprint) or _sprint_name(sprint)
+    issue = {"number": number, "key": text_of(dto, "key"), "title": dto["title"], "url": item_url(number),
+             "labels": list(labels), "kind": text_of(dto, "kind"), "status": text_of(dto, "status"),
+             "state": text_of(dto, "state"), "milestone": milestone, "sprint": sprint if _is_number(sprint) else None,
+             "closed_at": text_of(dto, "closedAt"), "created_at": text_of(dto, "createdAt"),
+             "updated_at": text_of(dto, "updatedAt"), "ask": ask}
+    if queue is not None:
+        issue["queue"] = queue
+    return issue
+
+
+def issues(sprint_titles: Optional[Mapping[int, str]] = None, **filters: Any) -> List[Dict[str, Any]]:
+    """`items(**filters)` as issue dicts, each with its `queue` index in the console's order."""
+    return [as_issue(dto, sprint_titles, queue=index)
+            for index, dto in enumerate(items(**filters))]
 
 
 def inbox() -> Dict[str, Any]:

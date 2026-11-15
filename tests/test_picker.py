@@ -142,5 +142,32 @@ class ReviewRegressionTest(unittest.TestCase):
         self.assertEqual((plan["dispatch"][0]["base"], plan["dispatch"][0]["branch_prefix"]), ("dev", "feature"))
 
 
+def queued(position, *args, **kwargs):
+    return dict(issue(*args, **kwargs), queue=position)
+
+
+class QueueOrderTest(unittest.TestCase):
+    """The console's queue order (`queue`, the index in `GET …/items`, #456) replaces the issue number."""
+
+    def test_a_lower_numbered_item_ranked_later_is_dispatched_later(self):
+        plan = picker.pick([queued(0, 9), queued(1, 2), queued(2, 1)], S, BURN)
+        self.assertEqual(numbers(plan), [9, 2, 1])
+        capped = picker.pick([queued(0, 9), queued(1, 2), queued(2, 1)], S, NORMAL)
+        self.assertEqual(numbers(capped), [9, 2])
+        self.assertEqual(capped["skipped"], [{"number": 1, "reason": "over the cap for this run"}])
+
+    def test_rework_follows_the_queue_and_still_comes_before_planned_work(self):
+        rework = ["qa:changes-requested"]
+        plan = picker.pick([queued(0, 3), queued(1, 8, status="in-progress", labels=rework),
+                            queued(2, 4, status="in-progress", labels=rework)], S, BURN)
+        self.assertEqual(numbers(plan), [8, 4, 3])
+
+    def test_urgent_keeps_hotfix_and_severity_first_then_the_queue(self):
+        plan = picker.pick([queued(0, 5, "bug", labels=["sev:high"]), queued(1, 3, "bug", labels=["sev:high"]),
+                            queued(2, 7, "bug", labels=["sev:critical"]),
+                            queued(3, 9, "bug", labels=["sev:high", "in-production"])], S, NORMAL)
+        self.assertEqual(numbers(plan), [9, 7, 5, 3])
+
+
 if __name__ == "__main__":
     unittest.main()

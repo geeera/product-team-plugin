@@ -21,8 +21,7 @@ class LabelArgsTest(unittest.TestCase):
     def run_cli(self, *argv):
         seen = {}
         with mock.patch.object(sys, "argv", ["backlog", *argv]), \
-             mock.patch.object(backlog.gh, "repo", return_value="o/r"), \
-             mock.patch.object(backlog, "cmd_label", side_effect=lambda repo, args: seen.update(changes=args.changes)):
+             mock.patch.object(backlog, "cmd_label", side_effect=lambda args: seen.update(changes=args.changes)):
             backlog.main()
         return seen["changes"]
 

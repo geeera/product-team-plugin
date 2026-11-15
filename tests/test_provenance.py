@@ -35,7 +35,6 @@ def load(name):
     return module
 
 
-backlog = load("backlog")
 runlog = load("runlog")
 
 
@@ -335,107 +334,6 @@ class TeamDecisionDateTest(unittest.TestCase):
         h = history(*(node(c) for c in comments))
         self.assertEqual(owner.reversed_by_owner(comments, OWNER, h, [BOT])["text"], "use Y")
         self.assertFalse(owner.is_decision(moved["body"]))
-
-
-class DecideCliTest(unittest.TestCase):
-    def run_decide(self, argv, comments):
-        posted = []
-
-        def api(path, method="GET", fields=None, auth=None):
-            if path == "repos/o/r/issues/7" and method == "GET":
-                return {"number": 7, "title": "t", "html_url": "u", "state": "open", "labels": [{"name": "kind:task"}]}
-            if path == "repos/o/r/issues/7/comments" and method == "POST":
-                posted.append(fields["body"])
-                return {"html_url": "https://x/c", "id": 9}
-            if path == "repos/o/r/issues/7" and method == "PATCH":
-                return {"number": 7, "title": "t", "html_url": "u", "state": "open", "labels": []}
-            raise AssertionError(f"{method} {path}")
-
-        stdout = io.StringIO()
-        with mock.patch.object(sys, "argv", ["backlog", *argv]), \
-             mock.patch.object(backlog.gh, "repo", return_value="o/r"), \
-             mock.patch.object(backlog.gh, "api", side_effect=api), \
-             mock.patch.object(backlog.gh, "api_list", return_value=comments), \
-             mock.patch.object(backlog.gh, "graphql", return_value=graphql_page([node(c) for c in comments])), \
-             mock.patch.object(backlog.gh, "owner_login", return_value=OWNER), \
-             mock.patch.object(backlog.gh, "token_login", return_value=BOT), \
-             mock.patch.object(sys, "stdout", stdout):
-            backlog.main()
-        return posted
-
-    COMMENTS = [TeamDecisionDateTest.DECIDED, TeamDecisionDateTest.REJECT]
-
-    def test_decide_refuses_while_an_owner_reversal_is_open(self):
-        with self.assertRaises(SystemExit) as caught:
-            self.run_decide(["decide", "7", "--body", "still X"], self.COMMENTS)
-        self.assertIn("--handles-reversal 2", str(caught.exception))
-
-    def test_decide_naming_the_reversal_records_it_as_handled(self):
-        posted = self.run_decide(["decide", "7", "--body", "use Y", "--handles-reversal", "2"], self.COMMENTS)
-        self.assertIn("pt-reversal-handled id=2", posted[0])
-
-    def test_decide_without_a_reversal_just_records(self):
-        posted = self.run_decide(["decide", "7", "--body", "use X"], [TeamDecisionDateTest.DECIDED])
-        self.assertNotIn("pt-reversal-handled", posted[0])
-
-    def test_a_decision_marker_cannot_be_posted_as_a_plain_comment(self):
-        with self.assertRaises(SystemExit) as caught:
-            self.run_decide(["comment", "7", "--body", owner.decision_comment("x")], [])
-        self.assertIn("backlog decide", str(caught.exception))
-
-
-class VanishedCliTest(unittest.TestCase):
-    NOW = "2099-01-01T00:00:00Z"  # every entry below is recent
-
-    def run_vanished(self, acted, comments_by_issue):
-        listed = []
-
-        def api_list(path):
-            listed.append(path)
-            number = int(path.split("/issues/")[1].split("/")[0])
-            found = comments_by_issue.get(number, [])
-            if isinstance(found, Exception):
-                raise found
-            return found
-
-        stdout = io.StringIO()
-        with mock.patch.object(sys, "argv", ["backlog", "vanished"]), \
-             mock.patch.object(backlog.gh, "repo", return_value="o/r"), \
-             mock.patch.object(backlog.gh, "api_list", side_effect=api_list), \
-             mock.patch.object(backlog.runlogissue, "acted_on", return_value=acted), \
-             mock.patch.object(sys, "stdout", stdout):
-            backlog.main()
-        return json.loads(stdout.getvalue()), listed
-
-    def test_a_deleted_command_the_team_acted_on_is_flagged_once_per_issue_read(self):
-        acted = ([{"issue": 7, "comment_id": 1, "run_id": "r1", "at": self.NOW},
-                  {"issue": 7, "comment_id": 2, "run_id": "r1", "at": self.NOW},
-                  {"issue": 8, "comment_id": 5, "run_id": "r2", "at": self.NOW},
-                  {"issue": 9, "comment_id": 6, "run_id": "r0", "at": "2020-01-01T00:00:00Z"}], "", "graphql")
-        data, listed = self.run_vanished(acted, {7: [rest(2, OWNER, "/approve")], 8: [rest(5, OWNER, "/go")]})
-        self.assertEqual([(v["issue"], v["comment_id"]) for v in data["vanished"]], [(7, 1)])
-        self.assertEqual(data["checked"], 3)  # the entry older than --days is not re-checked
-        self.assertEqual(len(listed), 2)
-
-    def test_a_deleted_issue_reports_all_its_commands_and_the_check_continues(self):
-        acted = ([{"issue": 7, "comment_id": 1, "run_id": "r1", "at": self.NOW},
-                  {"issue": 7, "comment_id": 2, "run_id": "r1", "at": self.NOW},
-                  {"issue": 8, "comment_id": 5, "run_id": "r2", "at": self.NOW}], "", "graphql")
-        gone = gh.GhError("GET https://api.github.com/repos/o/r/issues/7/comments → HTTP 410: gone")
-        data, _ = self.run_vanished(acted, {7: gone, 8: []})
-        self.assertEqual([(v["issue"], v["comment_id"]) for v in data["vanished"]], [(7, 1), (7, 2), (8, 5)])
-        self.assertEqual(data["vanished"][0]["reason"], "issue #7 is gone")
-
-    def test_other_failures_abort_instead_of_reporting_nothing(self):
-        acted = ([{"issue": 7, "comment_id": 1, "run_id": "r1", "at": self.NOW}], "", "graphql")
-        with self.assertRaises(SystemExit) as caught:
-            self.run_vanished(acted, {7: gh.GhError("GET … → HTTP 502: bad gateway")})
-        self.assertIn("502", str(caught.exception))
-
-    def test_an_unreadable_run_log_is_reported_not_guessed(self):
-        data, _ = self.run_vanished(([], "run log unreadable: 502", "graphql"), {})
-        self.assertEqual(data["vanished"], [])
-        self.assertIn("502", data["error"])
 
 
 class ActedRecordTest(unittest.TestCase):

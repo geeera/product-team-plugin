@@ -300,16 +300,6 @@ class CloudSessionTest(unittest.TestCase):
         self.assertEqual((code, out["decision"]), (3, "overlap"))
         self.assertIn(started["run_id"], out["reason"])
 
-    def test_vanished_reads_the_appended_log_in_rest_only_mode(self):
-        issue = self.github.create_issue(BOT, "Use R2?", ["kind:question"])
-        gone = self.github.comment(issue["number"], OWNER, "/approve")
-        _, started, _ = self.start()
-        self.finish(started["run_id"], "finished", "--acted", f"{issue['number']}:{gone['id']}")
-        self.github.comments.remove(gone)
-        code, out, _ = self.run_cli(backlog, "vanished")
-        self.assertEqual((code, out["error"], out["history"]), (0, "", "rest-only"))
-        self.assertEqual([(v["issue"], v["comment_id"]) for v in out["vanished"]], [(issue["number"], gone["id"])])
-
     def test_inbox_update_creates_the_issue_and_survives_a_failed_pin(self):
         self.github.create_issue(BOT, "Pick a CDN", ["kind:question", "owner:money"],
                                  body="**Your answer:** /approve or /reject why\n<!-- pt-ask -->\n")

@@ -87,11 +87,22 @@ def git_mode(source: Path) -> str:
     return "100755" if source.stat().st_mode & 0o111 else "100644"
 
 
+_VERSION = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:-pre\.(\d+))?$")
+
+
 def parse_version(text: str) -> tuple:
-    parts = text.strip().split(".")
-    if len(parts) != 3 or not all(p.isdigit() for p in parts):
+    """`X.Y.Z` or a pre-release `X.Y.Z-pre.N` (team-console#436-P5: 0.12.0-pre.1 runs ahead of the stable tag).
+
+    Comparable by plain tuple ordering: a pre-release sorts below the release it precedes and below a later
+    pre-release of the same release (`0.12.0-pre.1 < 0.12.0-pre.2 < 0.12.0`); self-update never tags a pre-release
+    (`release_versions()` only sees `v*` tags), so this only has to compare, never has to accept one as a release.
+    """
+    match = _VERSION.fullmatch(text.strip())
+    if not match:
         raise ValueError(f"not a release version: {text!r}")
-    return tuple(int(p) for p in parts)
+    major, minor, patch, pre = match.groups()
+    return (int(major), int(minor), int(patch), 0, int(pre)) if pre is not None \
+        else (int(major), int(minor), int(patch), 1, 0)
 
 
 def parse_diff_tree(raw: bytes) -> List[dict]:

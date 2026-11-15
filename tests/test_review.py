@@ -67,6 +67,38 @@ class ItemRefsTest(unittest.TestCase):
                 self.assertEqual(review.item_refs(head), [])
         self.assertEqual(review.item_refs("fix/412_typo", "Closes TC-1", branch_only=True), ["412"])
 
+    def test_the_branch_key_is_read_in_any_case(self):
+        for head in ("Feature/TC-412-x", "FIX/tc-412", "feature/Tc‑412-x"):
+            with self.subTest(head=head):
+                self.assertEqual(review.item_refs(head), ["TC-412"])
+
+    def test_markdown_and_other_hyphens_around_a_key_are_ignored(self):
+        for body in ("Closes **TC-412**", "Closes `TC-412`", "Closes [TC-412](https://c.example/p/tc/t/412)",
+                     "Closes TC‑412", "Closes TC–412.", "**Closes** _TC-412_", "Closes: <TC-412>"):
+            with self.subTest(body=body):
+                self.assertEqual(review.item_refs("", "", body), ["TC-412"])
+
+    def test_every_key_of_a_list_after_one_keyword_is_read(self):
+        self.assertEqual(review.item_refs("", "Closes TC-1, TC-2", "Fixes TC-3 TC-4 and #5 & TC-6; then TC-7"),
+                         ["TC-1", "TC-2", "TC-3", "TC-4", "5", "TC-6"])
+
+    def test_text_without_a_closing_keyword_names_no_item(self):
+        self.assertEqual(review.item_refs("feature/csv-export", "", "Implements TC-412"), [])
+
+    def test_closing_references_that_are_no_key_are_reported(self):
+        body = "Closes https://c.example/p/tc/t/412\nFixes geeera/team-console#412\nFixes the typo\nCloses TC-1"
+        self.assertEqual(review.opaque_refs("Closes https://c.example/p/tc/t/412", body),
+                         ["https://c.example/p/tc/t/412", "geeera/team-console#412"])
+        self.assertEqual(review.item_refs("", "", body), ["TC-1"])
+
+    def test_names_item_matches_a_bare_number_against_a_key(self):
+        self.assertTrue(review.names_item(["412"], "TC-412"))
+        self.assertTrue(review.names_item(["TC-412"], "412"))
+        self.assertTrue(review.names_item(["TC-1", "TC-412"], "TC-412"))
+        self.assertFalse(review.names_item(["ST-412"], "TC-412"))
+        self.assertFalse(review.names_item(["TC-41"], "TC-412"))
+        self.assertFalse(review.names_item([], "TC-412"))
+
     def test_item_ref_accepts_keys_and_numbers_only(self):
         self.assertEqual([review.item_ref(x) for x in ("tc-7", "#7", "7", "TC-07", "x y", "TOOLONG-1")],
                          ["TC-7", "7", "7", None, None, None])

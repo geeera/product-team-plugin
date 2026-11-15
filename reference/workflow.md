@@ -57,9 +57,12 @@ review:
 - `pr gate` reads the block from the PR's **base** branch (a PR cannot relax its own gate; a change to
   `project.yml` itself needs SECURITY). Without the block, QA and REVIEW are required on every PR (the behaviour
   before 0.10.2). SECURITY is never configurable: `pr security-check` decides it. It reads the labels of
-  every item the PR names — the head branch's key (`feature/tc-412-…`) and `Closes TC-412` / `Fixes #412` in the
-  title or body — from the console; an item it cannot read there (no `TC_*` job environment, a refusal, a 404, an
-  answer without labels) makes SECURITY required with the reason, never skipped.
+  every item the PR names — the head branch's key (`feature/tc-412-…`, any case) and every key after `Closes` /
+  `Fixes` / `Resolves` / `Refs` in the title or body (`Closes TC-412, TC-413`; markdown around a key is ignored)
+  — from the console; an item it cannot read there (no `TC_*` job environment, a refusal, a 404, an answer
+  without labels), a PR that names no item at all, and a closing reference that is no key (a URL,
+  `owner/repo#412`) each make SECURITY required with the reason, never skipped. `pr link-pr --item KEY` refuses
+  an item the PR does not name, so a linked item is always one the gate reads.
 - `code_paths` are globs over repository paths: `**` crosses directories, `*` does not, a pattern without `/`
   matches a file name anywhere (`*.ts`), matching ignores case and a leading `./`. Brace sets (`{a,b}`),
   character classes (`[ab]`) and negation (`!x`) are refused, not guessed. A renamed file counts by its old path

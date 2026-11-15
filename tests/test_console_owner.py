@@ -157,10 +157,36 @@ class SecurityCheckTest(ScriptTestCase):
         self.assertTrue(out["required"])
         self.assertEqual(self.paths(), [f"{P}/items/ST-4"])
 
-    def test_a_pr_naming_no_item_is_judged_by_its_paths(self):
-        code, out, _ = self.check(dict(PULL, head={"ref": "chore/product-team-0.12"}), files=["apps/api/auth.ts"])
-        self.assertEqual(out, {"required": True, "reasons": ["sensitive path: apps/api/auth.ts"]})
-        self.assertEqual(self.fake.seen, [])
+    def test_a_pr_naming_no_item_requires_the_review(self):
+        no_item = ("PR names no item (a feature/tc-412-… head branch or Closes TC-412 in the title or body): "
+                   "review required")
+        for pull in (dict(PULL, head={"ref": "feature/csv-export"}, body="Implements TC-412"),
+                     dict(PULL, head={"ref": "chore/product-team-0.12"})):
+            with self.subTest(head=pull["head"]["ref"]):
+                code, out, _ = self.check(pull)
+                self.assertEqual((code, out), (0, {"required": True, "reasons": [no_item]}))
+                self.assertEqual(self.fake.seen, [])
+        code, out, _ = self.check(dict(PULL, head={"ref": "fix/typo"}), files=["apps/api/auth.ts"])
+        self.assertEqual(out["reasons"], ["sensitive path: apps/api/auth.ts", no_item])
+
+    def test_a_closing_reference_that_is_no_key_requires_the_review(self):
+        self.fake.on("GET", f"{P}/items/1", (200, dto(1), {}))
+        code, out, _ = self.check(dict(PULL, body="Closes https://console.example/p/tc/t/412"))
+        self.assertEqual(out, {"required": True, "reasons": [
+            "PR closes https://console.example/p/tc/t/412, which is no item key the console can read: review "
+            "required"]})
+
+    def test_a_security_item_is_found_in_every_form_the_pr_names_it(self):
+        self.fake.on("GET", f"{P}/items/1", (200, dto(1), {}))
+        self.fake.on("GET", f"{P}/items/412", (200, dto(412, flags=["security"]), {}))
+        pulls = {"capitalised branch": dict(PULL, head={"ref": "Feature/TC-412-x"}),
+                 "markdown": dict(PULL, body="Closes **TC-412**"),
+                 "second key of a list": dict(PULL, body="Closes TC-1, TC-412"),
+                 "second key without a comma": dict(PULL, title="Fixes TC-1 TC-412")}
+        for name, pull in pulls.items():
+            with self.subTest(name):
+                code, out, _ = self.check(pull)
+                self.assertEqual((code, out), (0, {"required": True, "reasons": ["issue labelled security"]}))
 
     def gate(self, reviews):
         with mock.patch.object(pr.gh, "api", return_value=PULL), \
@@ -225,8 +251,16 @@ class LinkPrTest(ScriptTestCase):
             code, _, _ = self.link("--item", bad, pull=pull)
             self.assertEqual((code, self.fake.seen), (1, []))
         self.fake.on("POST", f"{P}/items/7/pr-links", (201, {"linkedAt": "2026-11-12T10:00:00.000Z"}, {}))
-        code, out, _ = self.link("--item", "tc-7", pull=pull, role=("dev", [7]))
+        code, out, _ = self.link("--item", "tc-7", pull=dict(pull, body="Closes `TC-7`"), role=("dev", [7]))
         self.assertEqual((code, out["item"], out["url"]), (0, "TC-7", f"{CONSOLE}/p/tc/t/7"))
+
+    def test_item_is_refused_when_the_pr_does_not_name_it(self):
+        # The gate reads only the items a PR names; a link it cannot see would bypass a `security` label.
+        for pull in (dict(PULL, head={"ref": "fix/typo"}), dict(PULL, body="Closes TC-8")):
+            with self.subTest(head=pull["head"]["ref"], body=pull["body"]):
+                code, _, err = self.link("--item", "TC-7", pull=pull, role=("dev", [7]))
+                self.assertEqual((code, self.fake.seen), (1, []))
+                self.assertIn("does not name TC-7: add `Closes TC-7` to its body", err)
 
 
 if __name__ == "__main__":

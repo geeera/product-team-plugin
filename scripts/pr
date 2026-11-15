@@ -12,11 +12,13 @@
   pr update-branch N   merge the base into the PR branch on GitHub (no force-push); fails on conflicts
   pr files N           changed paths
   pr security-check N  does this PR need a security review? reasons from the paths and the labels of the items it
-                       names (`feature/tc-412-…` head branch, `Closes TC-412` / `#412` in title or body), read from
-                       the team console; an item it cannot read there makes the review required (fails closed)
+                       names (`feature/tc-412-…` head branch, `Closes TC-412, TC-413` / `#412` in title or body),
+                       read from the team console; an item it cannot read there, a PR naming no item and a closing
+                       reference that is no key (URL, owner/repo#N) each make the review required (fails closed)
   pr link-pr N [--item KEY]
                        record PR N on its item in the team console (`pr-links`); the item is the head branch's
-                       (`feature/tc-412-…`) unless --item names it. A dev job links only an item it holds
+                       (`feature/tc-412-…`) unless --item names it, which the PR must name too (`Closes KEY`).
+                       A dev job links only an item it holds
   pr gate N            CI plus the independent verdicts it needs, each APPROVED on the current head commit: QA and
                        REVIEW as the `review:` block of project.yml on the PR's base branch requires them (both on
                        every PR without the block), SECURITY whenever security-check says so. `why` explains each
@@ -130,11 +132,21 @@ def linked_labels(repo: str, n: int) -> tuple:
     """(the PR's labels plus those of every item it names, reasons for the items that could not be read).
 
     The gate fails closed: an item the console does not answer for — no TC_* job environment, unreachable, a
-    refusal, a 404, an answer without labels — is a reason to require the security review, never a skipped one."""
+    refusal, a 404, an answer without labels — is a reason to require the security review, never a skipped one.
+    So is a PR that names no item, and a closing reference that is no item key (a URL, `owner/repo#N`): the console
+    has no read of the items a PR was linked to (team-console#627), so what the PR names is all the gate can check,
+    and `link-pr --item` refuses an item the PR does not name."""
     pr = gh.api(f"repos/{repo}/pulls/{n}")
     labels = [l["name"] for l in pr.get("labels", [])]
+    title, body = pr.get("title") or "", pr.get("body") or ""
+    refs = review.item_refs((pr.get("head") or {}).get("ref") or "", title, body)
     unread = []
-    for ref in review.item_refs((pr.get("head") or {}).get("ref") or "", pr.get("title") or "", pr.get("body") or ""):
+    if not refs:
+        unread.append("PR names no item (a feature/tc-412-… head branch or Closes TC-412 in the title or body): "
+                      "review required")
+    for ref in review.opaque_refs(title, body):
+        unread.append(f"PR closes {ref}, which is no item key the console can read: review required")
+    for ref in refs:
         try:
             labels += item_labels(ref)
         except console.ConsoleError as exc:
@@ -156,6 +168,10 @@ def link_pr(repo: str, n: int, item: Optional[str]) -> dict:
         ref = review.item_ref(item)
         if not ref:
             sys.exit(f"--item {item!r} is not an item key (TC-412) or number")
+        # The gate reads only the items a PR names: a link it would not see could carry a `security` label.
+        if not review.names_item(review.item_refs(head, pr.get("title") or "", pr.get("body") or ""), ref):
+            sys.exit(f"PR #{n} does not name {ref}: add `Closes {ref}` to its body (or name it in the head branch, "
+                     f"feature/{ref.lower()}-slug) so the review gate reads its labels, then link again")
     else:
         refs = review.item_refs(head, branch_only=True)
         if not refs:

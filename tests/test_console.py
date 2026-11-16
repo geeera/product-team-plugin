@@ -321,6 +321,94 @@ class RetryTest(ConsoleTestCase):
         self.assertEqual(self.fake.seen, [])
 
 
+class AnswerLimitsTest(ConsoleTestCase):
+    """What a buggy or hostile peer can make the client hold or send (SECURITY notes on plugin#25)."""
+
+    def test_an_answer_over_the_size_cap_is_refused_and_not_retried(self):
+        # Connection: close, so the fake does not wait on a connection the client drops mid-body.
+        self.fake.on("GET", "/api/v1/projects/tc/inbox", (200, b"[" + b"1," * 2000 + b"1]", {"Connection": "close"}))
+        with mock.patch.object(transport, "RESPONSE_LIMIT", 1000), \
+                self.assertRaises(console.ConsoleError) as caught:
+            console.inbox()
+        self.assertEqual(caught.exception.type, "answer-too-large")
+        self.assertEqual(len(self.fake.seen), 1)
+
+    def test_a_malformed_etag_from_the_console_is_a_console_error(self):
+        for etag in ('"1"\r\n\tX-Evil: 1', "1", '"1" junk'):
+            with self.subTest(etag=etag):
+                self.fake.seen.clear()
+                self.fake.on("GET", "/api/v1/projects/tc/items/7", (200, {"number": 7}, {"ETag": etag}))
+                with self.assertRaises(console.ConsoleError) as caught:
+                    console.update_item(7, {"status": "ready"})
+                self.assertEqual(caught.exception.type, "unexpected-answer")
+                self.assertEqual([s["method"] for s in self.fake.seen], ["GET"])  # no PATCH went out
+
+    def test_a_malformed_if_match_is_refused_before_sending(self):
+        for etag in ('"1"\nX-Evil: 1', '"\u00e9"', ""):
+            with self.subTest(etag=etag), self.assertRaises(console.ConsoleError) as caught:
+                console.request("PATCH", "projects/tc/items/7", {"status": "ready"}, etag=etag)
+            self.assertEqual(caught.exception.type, "etag-invalid")
+        self.assertEqual(self.fake.seen, [])
+
+    def test_a_header_http_client_refuses_is_a_console_error_without_its_value(self):
+        refused = ValueError(f"Invalid header value b'Bearer {TOKEN}'")
+        with mock.patch.object(http.client.HTTPConnection, "putheader", side_effect=refused), \
+                self.assertRaises(console.ConsoleError) as caught:
+            console.inbox()
+        self.assertEqual(caught.exception.type, "request-invalid")
+        self.assert_no_token(str(caught.exception))
+        self.assertIsNone(caught.exception.__cause__)
+
+
+class HeaderTrickleTest(unittest.TestCase):
+    """The attempt deadline holds while the status line and headers arrive, not only for the body."""
+
+    def setUp(self):
+        self.requests = 0
+        test = self
+
+        class Handler(socketserver.BaseRequestHandler):
+            def handle(self):
+                data = b""
+                while b"\r\n\r\n" not in data:
+                    chunk = self.request.recv(4096)
+                    if not chunk:
+                        return
+                    data += chunk
+                test.requests += 1
+                try:
+                    if test.requests == 1:
+                        self.request.sendall(b"HTTP/1.1 200 OK\r\nX-Pad: ")
+                        for _ in range(60):  # 3 s of header bytes, each well inside a 0.3 s socket timeout
+                            self.request.sendall(b"x")
+                            time.sleep(0.05)
+                        return
+                    body = b'{"items": []}'
+                    self.request.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: "
+                                         + str(len(body)).encode() + b"\r\nConnection: close\r\n\r\n" + body)
+                except OSError:
+                    pass  # the client gave up, as it should
+
+        self.server = socketserver.ThreadingTCPServer(("127.0.0.1", 0), Handler)
+        self.server.daemon_threads = True
+        threading.Thread(target=self.server.serve_forever, args=(0.05,), daemon=True).start()
+        self.addCleanup(self.server.server_close)
+        self.addCleanup(self.server.shutdown)
+        env = mock.patch.dict(os.environ, {"TC_API_URL": f"http://127.0.0.1:{self.server.server_address[1]}/api/v1",
+                                           "TC_JOB_TOKEN": TOKEN, "TC_PROJECT": "tc", "NO_PROXY": "*"})
+        for patch in (env, mock.patch.object(transport, "RETRY_BACKOFF", 0.01),
+                      mock.patch.object(console, "ATTEMPT_DEADLINE", 0.3)):
+            patch.start()
+            self.addCleanup(patch.stop)
+        os.environ.pop("PT_HTTP_DEADLINE", None)
+
+    def test_a_trickle_of_header_bytes_is_cut_at_the_attempt_deadline(self):
+        started = time.monotonic()
+        self.assertEqual(console.inbox(), {"items": []})  # the retry, on a connection the server closes
+        self.assertLess(time.monotonic() - started, 1.5)
+        self.assertEqual(self.requests, 2)
+
+
 class ItemUpdateTest(ConsoleTestCase):
     def setUp(self):
         super().setUp()
@@ -471,7 +559,9 @@ class RunnerSocketTest(ConsoleTestCase):
         directory = tempfile.mkdtemp(prefix="tc-", dir="/tmp" if os.path.isdir("/tmp") else None)
         self.addCleanup(shutil.rmtree, directory, True)
         self.socket_path = os.path.join(directory, "job.sock")
-        return UnixHTTPServer(self.socket_path, handler_for(self.fake))
+        server = UnixHTTPServer(self.socket_path, handler_for(self.fake))
+        os.chmod(self.socket_path, 0o600)  # as the runner leaves it, whatever the umask
+        return server
 
     def environment(self):
         return {"TC_API_URL": "http://tc/api/v1", "TC_RUNNER_SOCKET": self.socket_path, "TC_JOB_TOKEN": TOKEN,
@@ -497,6 +587,37 @@ class RunnerSocketTest(ConsoleTestCase):
         self.assertEqual(caught.exception.type, "unreachable")
         self.assert_no_token(str(caught.exception))
 
+
+    def test_a_socket_open_to_every_user_or_not_a_socket_is_refused(self):
+        os.chmod(self.socket_path, 0o666)
+        try:
+            with self.assertRaises(console.ConsoleError) as caught:
+                console.inbox()
+        finally:
+            os.chmod(self.socket_path, 0o600)
+        self.assertEqual((caught.exception.type, caught.exception.field), ("socket-untrusted", "TC_RUNNER_SOCKET"))
+        directory = os.path.dirname(self.socket_path)
+        plain = os.path.join(directory, "plain")
+        Path(plain).write_text("")
+        link = os.path.join(directory, "link.sock")
+        os.symlink(self.socket_path, link)
+        for path in (plain, link):
+            with self.subTest(path=os.path.basename(path)), mock.patch.dict(os.environ, {"TC_RUNNER_SOCKET": path}):
+                with self.assertRaisesRegex(console.ConsoleError, "is not a socket"):
+                    console.inbox()
+        self.assertEqual(self.fake.seen, [])
+
+    def test_a_socket_of_another_user_is_used_only_through_a_shared_group(self):
+        self.fake.on("GET", "/api/v1/projects/tc/inbox", (200, {"items": []}, {}))
+        info = os.stat(self.socket_path)
+        other = mock.patch.object(console.os, "geteuid", return_value=info.st_uid + 1000)
+        with other, mock.patch.object(console.os, "getegid", return_value=info.st_gid + 1000), \
+                mock.patch.object(console.os, "getgroups", return_value=[info.st_gid + 1001]):
+            with self.assertRaisesRegex(console.ConsoleError, "belongs to another user"):
+                console.inbox()
+        self.assertEqual(self.fake.seen, [])
+        with other, mock.patch.object(console.os, "getgroups", return_value=[info.st_gid]):
+            self.assertEqual(console.inbox(), {"items": []})  # the runner's 0660 socket under the job's group
 
 if __name__ == "__main__":
     unittest.main()

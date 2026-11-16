@@ -80,8 +80,8 @@
   .bar { position: fixed; left: 0; right: 0; bottom: 0; background: var(--surface); border-top: 1px solid var(--line); padding: 10px 16px calc(10px + env(safe-area-inset-bottom, 0px)); }
   .bar-inner { max-width: 720px; margin: 0 auto; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; justify-content: space-between; }
   .status { font-size: 0.85rem; color: var(--muted); }
-  .primary { font: 600 0.9rem var(--sans); min-height: 40px; padding: 0 16px; border-radius: 8px; border: 0; background: var(--accent); color: var(--accent-ink); cursor: pointer; }
-  pre#fallback { font: 0.75rem/1.4 var(--mono); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px; overflow-x: auto; white-space: pre; }
+  .primary { font: 600 0.9rem var(--sans); min-height: 40px; padding: 0 16px; border-radius: 8px; border: 0; background: var(--accent); color: var(--accent-ink); cursor: pointer; display: inline-flex; align-items: center; text-decoration: none; }
+  .primary[hidden] { display: none; }
 </style>
 
 <!-- demo-prep replaces the JSON between the markers; everything else stays as shipped by the plugin. -->
@@ -119,7 +119,7 @@
 <div class="bar" role="region" aria-label="Save decisions">
   <div class="bar-inner">
     <span class="status" id="status">Decisions are saved as you tap.</span>
-    <button class="primary" id="copy" type="button">Copy decisions for the demo issue</button>
+    <a class="primary" id="decide" target="_blank" rel="noopener" hidden>Decide on the demo item</a>
   </div>
 </div>
 
@@ -145,18 +145,23 @@
   const sevClass = { critical: "crit", high: "crit", medium: "warn", low: "plain" };
 
   function setStatus(text) { statusEl.textContent = text; }
+  // demo-apply reads the owner's decisions from the console (demo-page decisions), not from text pasted anywhere.
+  const DECIDE = "Decide on the demo item in the console.";
+  const UNSAVED = "Not saved here. " + DECIDE;
+  const decide = document.getElementById("decide");
+  if (/^https?:\/\//.test(data.demo_issue?.url || "")) { decide.href = data.demo_issue.url; decide.hidden = false; }
 
   async function save(id, patch) {
     decisions[id] = Object.assign({ decision: null, comment: "" }, decisions[id], patch);
-    if (!db) { setStatus("Not saved online here. Use the copy button and paste into the demo issue."); return; }
+    if (!db) { setStatus(UNSAVED); return; }
     try {
       await db.doc("decisions/" + id).set({ item: id, ...decisions[id], updated_at: new Date().toISOString() });
       setStatus("Saved.");
     } catch (err) {
       const code = err && err.code ? err.code : "error";
       setStatus(code === "not_granted"
-        ? "Only the product owner's decisions are saved. Use the copy button instead."
-        : "Could not save (" + code + "). Use the copy button and paste into the demo issue.");
+        ? "Only the product owner's decisions are saved here. " + DECIDE
+        : "Could not save (" + code + "). " + DECIDE);
     }
   }
 
@@ -258,31 +263,11 @@
     }
   }
 
-  function decisionBlock() {
-    const payload = { sprint: data.sprint, decided_at: new Date().toISOString(), decisions };
-    return "/demo-decisions\n```json\n" + JSON.stringify(payload, null, 2) + "\n```";
-  }
-
-  document.getElementById("copy").addEventListener("click", async () => {
-    const text = decisionBlock();
-    try {
-      await navigator.clipboard.writeText(text);
-      setStatus("Copied. Paste it as a comment on the demo issue.");
-    } catch (_err) {
-      let pre = document.getElementById("fallback");
-      if (!pre) { pre = el("pre", { id: "fallback", tabindex: "0" }); app.append(pre); }
-      pre.textContent = text;
-      const range = document.createRange(); range.selectNodeContents(pre);
-      const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
-      setStatus("Copy was blocked. The text is selected below; copy it by hand.");
-    }
-  });
-
   render();
 
   (async () => {
     db = window.claude && typeof window.claude.use === "function" ? await window.claude.use("db") : null;
-    if (!db) { setStatus("Saving online is unavailable here. Use the copy button."); return; }
+    if (!db) { setStatus(UNSAVED); return; }
     try {
       const snap = await db.collection("decisions").get();
       snap.docs.forEach(d => { const v = d.data(); if (v) decisions[d.id] = { decision: v.decision ?? null, comment: v.comment ?? "" }; });

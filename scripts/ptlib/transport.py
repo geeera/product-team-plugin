@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import http.client
 import io
+import ipaddress
 import os
 import socket
 import time
@@ -21,6 +22,16 @@ ERROR_BODY_LIMIT = 500  # an error message quotes at most this much of a respons
 RESPONSE_LIMIT = 32 * 1024 * 1024
 
 T = TypeVar("T")
+
+
+def is_loopback(host: str) -> bool:
+    """Whether `host` names this machine (`localhost`, 127.0.0.0/8, ::1): the only place plain http is acceptable."""
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
 
 
 class Deadline(Exception):

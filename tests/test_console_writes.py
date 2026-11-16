@@ -345,22 +345,48 @@ class CommentLinkTest(WriteTestCase):
             self.assertEqual((code, self.fake.seen), (1, []), body)
             self.assertIn(text, err)
 
+    def link(self, pull):
+        with mock.patch.object(backlog.gh, "repo", return_value="acme/tc"), \
+                mock.patch.object(backlog.gh, "api", return_value=pull) as api:
+            result = self.run_cli(backlog, "link-pr", "7", "57")
+        api.assert_called_once_with("repos/acme/tc/pulls/57")
+        return result
+
     def test_link_pr_reads_the_pull_request_and_posts_the_link(self):
         pull = {"number": 57, "html_url": "https://github.com/acme/tc/pull/57", "head": {"ref": "feature/tc-7-x"}}
+        self.fake.on("GET", f"{P}/items/7", (200, dto(7), {}))
         self.fake.on("POST", f"{P}/items/7/pr-links", (201, {**{k: pull[k] for k in ("number",)}, "url": pull["html_url"],
                                                              "headRef": "feature/tc-7-x",
                                                              "linkedAt": "2026-11-12T10:00:00.000Z",
                                                              "linkedBy": {"kind": "job", "name": "dev"}}, {}))
-        with mock.patch.object(backlog.gh, "repo", return_value="acme/tc"), \
-                mock.patch.object(backlog.gh, "api", return_value=pull) as api:
-            code, out, _ = self.run_cli(backlog, "link-pr", "7", "57")
-        api.assert_called_once_with("repos/acme/tc/pulls/57")
+        code, out, _ = self.link(pull)
         self.assertEqual(code, 0)
         self.assertEqual(self.sent("POST", f"{P}/items/7/pr-links")[0]["body"],
                          {"number": 57, "url": pull["html_url"], "headRef": "feature/tc-7-x"})
         self.assertEqual(out, {"issue": 7, "pr": 57, "pr_url": pull["html_url"], "head_ref": "feature/tc-7-x",
                                "linked_at": "2026-11-12T10:00:00.000Z", "url": f"{CONSOLE}/p/tc/t/7"})
         self.assert_writes_are_idempotent()
+
+    def test_link_pr_is_refused_when_the_pr_does_not_name_the_item(self):
+        # team-console#628: the same rule as `pr link-pr --item`, so a link always matches what the PR says.
+        self.fake.on("GET", f"{P}/items/7", (200, dto(7), {}))
+        self.fake.on("POST", f"{P}/items/7/pr-links", (201, {"linkedAt": "2026-11-12T10:00:00.000Z"}, {}))
+        base = {"number": 57, "html_url": "https://github.com/acme/tc/pull/57", "title": "", "body": ""}
+        for head, body in (("fix/typo", ""), ("feature/tc-8-x", "Closes ST-7"), ("fix/typo", "Implements TC-7")):
+            with self.subTest(head=head, body=body):
+                code, _, err = self.link(dict(base, head={"ref": head}, body=body))
+                self.assertEqual(code, 1)
+                self.assertIn("PR #57 does not name TC-7: add `Closes TC-7` to its body", err)
+        self.assertEqual(self.sent("POST", f"{P}/items/7/pr-links"), [])
+        code, _, _ = self.link(dict(base, head={"ref": "fix/typo"}, body="Fixes #7"))
+        self.assertEqual(code, 0)
+
+    def test_link_pr_on_an_item_it_cannot_read_writes_nothing(self):
+        self.fake.on("GET", f"{P}/items/7", problem(404, "item-not-found"))
+        code, _, _ = self.link({"number": 57, "html_url": "https://github.com/acme/tc/pull/57",
+                                "head": {"ref": "feature/tc-7-x"}})
+        self.assertEqual(code, 1)
+        self.assertEqual([s["method"] for s in self.fake.seen], ["GET"])
 
 
 class QueueTest(WriteTestCase):

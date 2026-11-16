@@ -42,5 +42,5 @@ Write `demo.json` (schema = the example data inside the template):
 The open demo item is the owner's release question in the console's "Needs you" (`inbox update` is a no-op there);
 run `${CLAUDE_PLUGIN_ROOT}/scripts/workflows run owner-digest.yml` so it reaches the phone now, not tomorrow morning.
 Comment on the demo issue with the link and the three decisions that matter most. `demo-apply` reads the owner's
-decisions from the console (`demo-page decisions`); a `/demo-decisions` block pasted from the page's "Copy decisions"
-button is no longer read.
+decisions from the console (`demo-page decisions`) and the artifact's `decisions`; the page's "Decide on the demo
+item" button opens `demo_issue.url`, so give it the demo item's console URL.

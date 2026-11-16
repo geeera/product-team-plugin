@@ -57,12 +57,11 @@ review:
 - `pr gate` reads the block from the PR's **base** branch (a PR cannot relax its own gate; a change to
   `project.yml` itself needs SECURITY). Without the block, QA and REVIEW are required on every PR (the behaviour
   before 0.10.2). SECURITY is never configurable: `pr security-check` decides it. It reads the labels of
-  every item the PR names — the head branch's key (`feature/tc-412-…`, any case) and every key after `Closes` /
-  `Fixes` / `Resolves` / `Refs` in the title or body (`Closes TC-412, TC-413`; markdown around a key is ignored)
-  — from the console; an item it cannot read there (no `TC_*` job environment, a refusal, a 404, an answer
-  without labels), a PR that names no item at all, and a closing reference that is no key (a URL,
-  `owner/repo#412`) each make SECURITY required with the reason, never skipped. `pr link-pr --item KEY` refuses
-  an item the PR does not name, so a linked item is always one the gate reads.
+  every item the console links the PR to (`pr link-pr`, `GET …/prs/N/items`), never what the PR's title, body
+  or branch name; links it cannot read in full (no `TC_*` job environment, a refusal, a page it cannot follow),
+  a console project whose repository is not the PR's, and a PR linked to no item each make SECURITY required
+  with the reason, never skipped. `pr link-pr --item KEY` and `backlog link-pr N PR` refuse an item the PR does
+  not name (`Closes KEY`, or its branch), so what the reviewers read and what the gate reads agree.
 - `code_paths` are globs over repository paths: `**` crosses directories, `*` does not, a pattern without `/`
   matches a file name anywhere (`*.ts`), matching ignores case and a leading `./`. Brace sets (`{a,b}`),
   character classes (`[ab]`) and negation (`!x`) are refused, not guessed. A renamed file counts by its old path

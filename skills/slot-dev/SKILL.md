@@ -43,8 +43,8 @@ run. Rework addresses only the blockers the review triage kept; non-blocking ite
 
 Each agent returns a PR URL or a blocked reason:
 - PR → `PR link-pr <pr>` (the item its head branch names, `feature/tc-412-…`; `--item KEY` when the branch names
-  none, and then the PR body must say `Closes KEY` — the review gate reads only the items a PR names, and one
-  that names none needs SECURITY), `B move N qa`. `item-not-held` means the PR names an item this developer's job was not given: fix the
+  none, and then the PR body must say `Closes KEY` — the review gate reads the items the console links the PR
+  to, and a PR linked to none needs SECURITY), `B move N qa`. `item-not-held` means the PR names an item this developer's job was not given: fix the
   branch or `--item`, never link it to another item to get past the refusal.
 - Blocked → `B move N blocked --reason "<reason>"`; if the owner must act, add `needs:owner` (or
   `needs:local` for work that needs a local machine) so it lands in the owner's inbox and later runs skip it.

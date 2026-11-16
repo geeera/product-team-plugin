@@ -85,19 +85,26 @@ class ItemRefsTest(unittest.TestCase):
     def test_text_without_a_closing_keyword_names_no_item(self):
         self.assertEqual(review.item_refs("feature/csv-export", "", "Implements TC-412"), [])
 
-    def test_closing_references_that_are_no_key_are_reported(self):
+    def test_closing_references_that_are_no_key_name_no_item(self):
         body = "Closes https://c.example/p/tc/t/412\nFixes geeera/team-console#412\nFixes the typo\nCloses TC-1"
-        self.assertEqual(review.opaque_refs("Closes https://c.example/p/tc/t/412", body),
-                         ["https://c.example/p/tc/t/412", "geeera/team-console#412"])
-        self.assertEqual(review.item_refs("", "", body), ["TC-1"])
+        self.assertEqual(review.item_refs("", "Closes https://c.example/p/tc/t/412", body), ["TC-1"])
 
-    def test_names_item_matches_a_bare_number_against_a_key(self):
+    def test_names_item_matches_the_key_or_its_bare_number_only(self):
         self.assertTrue(review.names_item(["412"], "TC-412"))
-        self.assertTrue(review.names_item(["TC-412"], "412"))
         self.assertTrue(review.names_item(["TC-1", "TC-412"], "TC-412"))
         self.assertFalse(review.names_item(["ST-412"], "TC-412"))
+        # team-console#628: a bare number is resolved to its key first; it never matches another project's key.
+        self.assertFalse(review.names_item(["ST-412"], "412"))
         self.assertFalse(review.names_item(["TC-41"], "TC-412"))
         self.assertFalse(review.names_item([], "TC-412"))
+
+    def test_naming_refusal_says_how_to_name_the_item(self):
+        pull = {"number": 57, "head": {"ref": "fix/typo"}, "title": "Fixes #412", "body": ""}
+        self.assertEqual(review.naming_refusal(pull, "TC-412"), "")
+        self.assertEqual(review.naming_refusal(dict(pull, head={"ref": "feature/tc-412-x"}, title=""), "TC-412"), "")
+        refusal = review.naming_refusal(dict(pull, title="Fixes ST-412"), "TC-412")
+        self.assertTrue(refusal.startswith("PR #57 does not name TC-412: add `Closes TC-412` to its body"))
+        self.assertIn("feature/tc-412-slug", refusal)
 
     def test_item_ref_accepts_keys_and_numbers_only(self):
         self.assertEqual([review.item_ref(x) for x in ("tc-7", "#7", "7", "TC-07", "x y", "TOOLONG-1")],

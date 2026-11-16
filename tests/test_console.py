@@ -106,7 +106,7 @@ class FakeConsole:
         handler.wfile.write(raw)
 
     def load_fixtures(self):
-        """The nine vendored fixtures, each served only to its identity and its request body."""
+        """The vendored fixtures, each served only to its identity and its request body."""
         fixtures = [json.loads(p.read_text(encoding="utf-8")) for p in sorted(FIXTURES.glob("*.json"))]
         for fx in fixtures:
             self.on(fx["request"]["method"], fx["request"]["path"],
@@ -188,7 +188,7 @@ class ConsoleTestCase(unittest.TestCase):
 class FixtureTest(ConsoleTestCase):
     def test_the_client_replays_every_vendored_fixture(self):
         fixtures = self.fake.load_fixtures()
-        self.assertEqual(len(fixtures), 9)
+        self.assertEqual(len(fixtures), 13)
         for fx in fixtures:
             req, expected = fx["request"], fx["response"]
             with self.subTest(fixture=fx["route"], path=req["path"], status=expected["status"]):
@@ -206,7 +206,7 @@ class FixtureTest(ConsoleTestCase):
                 self.assertEqual(caught.exception.field, problem_body.get("field"))
                 self.assertEqual(caught.exception.reason, problem_body.get("reason"))
                 self.assertEqual(caught.exception.exit_code, console.EXIT_ERROR)
-        self.assertEqual(len(self.fake.seen), 9)  # 4xx answers are never retried
+        self.assertEqual(len(self.fake.seen), len(fixtures))  # 4xx answers are never retried
 
     def test_the_named_calls_send_the_fixture_requests(self):
         self.fake.load_fixtures()
@@ -328,15 +328,15 @@ class ItemUpdateTest(ConsoleTestCase):
 class PaginationTest(ConsoleTestCase):
     def test_follows_next_cursors_with_the_largest_page(self):
         base = "/api/v1/projects/tc/requests?state=all"
-        self.fake.on("GET", base, (200, {"requests": [1, 2], "next": 2}, {}))
-        self.fake.on("GET", base + "&after=2", (200, {"requests": [3], "next": None}, {}))
-        self.assertEqual(console.requests("all"), [1, 2, 3])
+        self.fake.on("GET", base, (200, {"requests": [{"id": 1}, {"id": 2}], "next": 2}, {}))
+        self.fake.on("GET", base + "&after=2", (200, {"requests": [{"id": 3}], "next": None}, {}))
+        self.assertEqual([r["id"] for r in console.requests("all")], [1, 2, 3])
         self.assertTrue(all("limit=100" in s["path"] for s in self.fake.seen))
 
     def test_a_cursor_that_does_not_advance_is_an_error(self):
         base = "/api/v1/projects/tc/requests?state=all"
-        self.fake.on("GET", base, (200, {"requests": [1], "next": 4}, {}))
-        self.fake.on("GET", base + "&after=4", (200, {"requests": [1], "next": 4}, {}))
+        self.fake.on("GET", base, (200, {"requests": [{"id": 1}], "next": 4}, {}))
+        self.fake.on("GET", base + "&after=4", (200, {"requests": [{"id": 1}], "next": 4}, {}))
         with self.assertRaisesRegex(console.ConsoleError, "does not advance"):
             console.requests("all")
 

@@ -24,6 +24,15 @@ class CycleTest(unittest.TestCase):
         self.assertIsNone(metrics.cycle_days("2026-09-04T00:00:00Z", []))
         self.assertIsNone(metrics.cycle_days(None, [labeled("status:in-progress", "2026-09-02T00:00:00Z")]))
 
+    def test_console_status_events_count_from_the_first_move_to_in_progress(self):
+        def status(after, at, kind="status"):
+            return {"id": 1, "at": at, "kind": kind, "before": None, "after": {"status": after}}
+        events = [status("approved", "2026-09-01T00:00:00.000Z", "created"),
+                  status("in-progress", "2026-09-02T00:00:00.000Z"),
+                  status("qa", "2026-09-03T00:00:00.000Z"), status("in-progress", "2026-09-03T12:00:00.000Z"),
+                  {"id": 5, "at": "2026-09-01T00:00:00.000Z", "kind": "labels", "before": None, "after": {"flags": []}}]
+        self.assertEqual(metrics.cycle_days("2026-09-04T12:00:00.000Z", events), 2.5)
+
 
 class QaTest(unittest.TestCase):
     def test_first_pass_counts_only_approvals_without_earlier_requests(self):

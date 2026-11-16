@@ -3,6 +3,8 @@
 
   sprint-metrics [--milestone "Sprint 01"|current]   plan vs shipped, median cycle time, QA first-pass rate
 
+Items, sprints and status history come from the team console (TC_* job environment). The QA block still reads PR
+reviews on GitHub (`qa.source: github-prs`): pull requests stay the VCS's until the console records verdicts.
 Pair with `runlog stats` for run durations and failures.
 """
 from __future__ import annotations
@@ -16,20 +18,28 @@ sys.dont_write_bytecode = True  # the vendored copy lives in the product repo: n
 from datetime import date, datetime, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from ptlib import gh, metrics  # noqa: E402
+from ptlib import console, gh, metrics  # noqa: E402
 from ptlib.calendar import KYIV, pick_current_sprint  # noqa: E402
 
 
-
-def find_milestone(repo: str, title: str) -> dict:
-    milestones = gh.api_list(f"repos/{repo}/milestones?state=all&per_page=100")
+def find_sprint(title: str) -> dict:
+    sprints = [console.as_milestone(s) for s in console.sprints("all")]
     if title == "current":
-        found = pick_current_sprint([m for m in milestones if m["state"] == "open"], datetime.now(KYIV).date())
+        found = pick_current_sprint(sprints, datetime.now(KYIV).date())
     else:
-        found = next((m for m in milestones if m["title"] == title), None)
+        found = next((s for s in sprints if s["title"] == title), None)
     if not found:
-        sys.exit(f"milestone not found: {title}")
+        sys.exit(f"sprint not found: {title}")
     return found
+
+
+def qa_reviews(start: str) -> dict:
+    repo = gh.repo()
+    prs = [pr for pr in gh.api_list(f"repos/{repo}/pulls?state=all&sort=updated&direction=desc&per_page=100")
+           if pr["updated_at"][:10] >= start]
+    return {pr["number"]: [r.get("body") or "" for r in
+                           gh.api_list(f"repos/{repo}/pulls/{pr['number']}/reviews?per_page=100")]
+            for pr in prs}
 
 
 def main() -> None:
@@ -38,26 +48,22 @@ def main() -> None:
     p.add_argument("--length-days", type=int, default=14)
     args = p.parse_args()
     try:
-        repo = gh.repo()
-        ms = find_milestone(repo, args.milestone)
-        raw = [i for i in gh.api_list(f"repos/{repo}/issues?state=all&milestone={ms['number']}&per_page=100")
-               if "pull_request" not in i]
-        issues = [{"number": i["number"], "state": i["state"], "closed_at": i.get("closed_at"),
-                   "labels": [l["name"] for l in i["labels"]]} for i in raw]
-        events = {i["number"]: gh.api_list(f"repos/{repo}/issues/{i['number']}/events?per_page=100")
-                  for i in issues if i["state"] == "closed"}
-        if not ms.get("due_on"):
-            sys.exit(f"milestone {ms['title']!r} has no due date; set the demo day on it first")
-        start = (date.fromisoformat(ms["due_on"][:10]) - timedelta(days=args.length_days)).isoformat()
-        prs = [pr for pr in gh.api_list(f"repos/{repo}/pulls?state=all&sort=updated&direction=desc&per_page=100")
-               if pr["updated_at"][:10] >= start]
-        reviews = {pr["number"]: [r.get("body") or "" for r in gh.api_list(f"repos/{repo}/pulls/{pr['number']}/reviews?per_page=100")]
-                   for pr in prs}
-        summary = metrics.sprint_summary(issues, events, reviews)
-        summary.update(sprint=ms["title"], demo=(ms.get("due_on") or "")[:10])
-        print(json.dumps(summary, indent=2))
+        sprint = find_sprint(args.milestone)
+        if not sprint["due_on"]:
+            sys.exit(f"sprint {sprint['title']!r} has no demo day; set it first")
+        issues = console.issues({sprint["number"]: sprint["title"]}, sprint=sprint["number"], state="all")
+        events = {i["number"]: console.events(i["number"]) for i in issues if i["state"] == "closed"}
+    except console.ConsoleError as exc:
+        sys.exit(console.report(exc))
+    start = (date.fromisoformat(sprint["due_on"][:10]) - timedelta(days=args.length_days)).isoformat()
+    try:
+        reviews = qa_reviews(start)
     except gh.GhError as exc:
         sys.exit(str(exc))
+    summary = metrics.sprint_summary(issues, events, reviews)
+    summary["qa"]["source"] = "github-prs"
+    summary.update(sprint=sprint["title"], demo=sprint["due_on"][:10])
+    print(json.dumps(summary, indent=2))
 
 
 if __name__ == "__main__":

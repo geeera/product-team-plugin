@@ -99,9 +99,9 @@ def pick(issues: List[dict], sprint: Optional[str], ctx: dict, known_agents: Opt
         planned.append(issue)
 
     urgent.sort(key=lambda i: (0 if is_hotfix(i) else 1,
-                               SEV_RANK.get(_severity(i) or "", 2), i["number"]))
-    rework.sort(key=lambda i: i["number"])
-    planned.sort(key=lambda i: i["number"])
+                               SEV_RANK.get(_severity(i) or "", 2), queue_position(i)))
+    rework.sort(key=queue_position)
+    planned.sort(key=queue_position)
 
     budget = caps["dev_tasks"]
     dispatch = []
@@ -118,6 +118,11 @@ def pick(issues: List[dict], sprint: Optional[str], ctx: dict, known_agents: Opt
 
     return {"dispatch": dispatch, "skipped": skipped, "needs_architect_note": needs_note,
             "parallel": caps["parallel_devs"]}
+
+
+def queue_position(issue: dict) -> int:
+    """The console's queue order (`queue`, the item's index in `GET …/items`, #456); the issue number without it."""
+    return issue.get("queue", issue["number"])
 
 
 def is_hotfix(issue: dict) -> bool:

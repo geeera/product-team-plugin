@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Print the current slot context as JSON: Kyiv local time, mode (normal | burn | freeze), cut day, caps.
 
-  slot-context                 reads the current sprint milestone from GitHub
+  slot-context                 reads the current sprint from the team console (TC_* job environment)
   slot-context --offline       calendar only (no sprint, so never freeze)
   slot-context --now ISO       evaluate at a given instant (testing / planning)
 
@@ -19,7 +19,7 @@ sys.dont_write_bytecode = True  # the vendored copy lives in the product repo: n
 from datetime import date, datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from ptlib import calendar, gh, project  # noqa: E402
+from ptlib import calendar, console, project  # noqa: E402
 
 
 def main() -> None:
@@ -34,10 +34,12 @@ def main() -> None:
     sprint_title, demo = None, None
     if not args.offline:
         try:
-            repo = gh.repo()
-            milestones = gh.api_list(f"repos/{repo}/milestones?state=open&per_page=100")
-        except gh.GhError as exc:
-            sys.exit(f"cannot read sprint milestones ({exc}); rerun with --offline to skip freeze detection")
+            milestones = [console.as_milestone(s) for s in console.sprints("open")]
+        except console.ConsoleError as exc:
+            code = console.report(exc)
+            if code == console.EXIT_ERROR:
+                print("cannot read the sprints; rerun with --offline to skip freeze detection", file=sys.stderr)
+            sys.exit(code)
         sprint = calendar.pick_current_sprint(milestones, now.astimezone(calendar.KYIV).date())
         if sprint:
             sprint_title, demo = sprint["title"], date.fromisoformat(sprint["due_on"][:10])

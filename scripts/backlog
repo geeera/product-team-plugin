@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""Backlog adapter over GitHub Issues (SPEC decision 4).
+"""Backlog adapter (SPEC decision 4): reads come from the team console's tracker (TC_* job environment, ADR 0006);
+the item reads (show, answers, reversals, requests) and the writes still go to GitHub Issues until they move
+too (team-console #607, #608).
 
 The contract is the subcommand set below and its JSON output; a different tracker replaces this file, not the
-skills. Output is JSON on stdout; errors go to stderr with a non-zero exit.
+skills. Output is JSON on stdout; errors go to stderr with a non-zero exit (3: the project is still on GitHub).
 
-  backlog init                                   create missing labels (idempotent; existing ones untouched)
-  backlog list [--status S] [--kind K] [--label L]... [--milestone M|current] [--state open|closed|all]
+  backlog init                                   check the console has the plugin's labels (it seeds them at the
+                                                 cutover; adding one is the owner's): exit 1 naming the missing ones
+  backlog list [--status S] [--kind K] [--label L]... [--milestone M|current|none] [--state open|closed|all]
   backlog show N                                 issue with body, labels, comments
   backlog create --title T --kind K [--status proposed] [--severity SEV] [--label L]...
                  [--milestone M|current] (--body B | --body-file F)
@@ -40,8 +43,8 @@ skills. Output is JSON on stdout; errors go to stderr with a non-zero exit.
   backlog request-done N --comment-id ID --result applied|declined [--text REASON]
                  answer a pending request with the handled marker, as the team (never the owner's token);
                  declined needs --text
-  backlog next [--now ISO]                       what a development run takes now: ordered dispatch list,
-                                                 skipped issues with reasons, missing architect notes
+  backlog next [--now ISO]                       what a development run takes now: dispatch list in the console's
+                                                 queue order, skipped issues with reasons, missing architect notes
   backlog sprint current|list
   backlog sprint create TITLE DUE_DATE           DUE_DATE = demo day, YYYY-MM-DD
 """
@@ -58,7 +61,7 @@ from datetime import date, datetime, timedelta, timezone
 from urllib.parse import quote
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from ptlib import brief, commands, gh, inbox, owner, ownerrequests, picker, project, provenance, runlogissue  # noqa: E402
+from ptlib import brief, commands, console, gh, inbox, owner, ownerrequests, picker, project, provenance, runlogissue  # noqa: E402
 from ptlib.calendar import KYIV, compute, pick_current_sprint  # noqa: E402
 from ptlib.labels import LABELS, STATUSES, KINDS, SEVERITIES  # noqa: E402
 
@@ -115,38 +118,85 @@ def resolve_milestone(repo: str, value):
     sys.exit(f"milestone not found: {value}")
 
 
-def cmd_init(repo: str, _args) -> None:
-    # Labels the project already has are left as they are: the project's conventions beat the plugin's.
-    existing = {l["name"] for l in gh.api_list(f"repos/{repo}/labels?per_page=100")}
-    created, kept = [], []
-    for name, (color, desc) in LABELS.items():
-        if name in existing:
-            kept.append(name)
-            continue
-        gh.api(f"repos/{repo}/labels", "POST", {"name": name, "color": color, "description": desc})
-        created.append(name)
-    out({"created": created, "kept": kept})
+# Reads: the team console's tracker. Its rows are data; each handler prints only fields it checked the type of.
+
+SUMMARY = ("number", "key", "title", "state", "status", "kind", "labels", "milestone", "url", "updated_at")
 
 
-def gh_quote(name: str) -> str:
-    return quote(name, safe="")
+def summary(issue: dict) -> dict:
+    """A console.as_issue dict in the shape the console reads print: slim's, plus the item key."""
+    return {k: issue.get(k) for k in SUMMARY}
 
 
-def cmd_list(repo: str, args) -> None:
+def sprint_titles(sprints: list) -> dict:
+    return {s["number"]: console.sprint_title(s) for s in sprints}
+
+
+def console_sprint(sprints: list, value: str, today: date) -> dict:
+    """The sprint a --milestone names, as a milestone dict: its title, or `current`."""
+    milestones = [console.as_milestone(s) for s in sprints]
+    if value == "current":
+        found = pick_current_sprint(milestones, today)
+        if not found:
+            sys.exit("no open sprint with a demo day; run `backlog sprint create`")
+        return found
+    found = next((m for m in milestones if m["title"] == value), None)
+    if not found:
+        sys.exit(f"sprint not found: {value}")
+    return found
+
+
+def cmd_init(_args) -> None:
+    # The console seeds the plugin's labels at the cutover and only the owner adds labels: this checks, never writes.
+    present = {console.text_of(label, "name") for label in console.labels() if isinstance(label, dict)}
+    missing = [name for name in LABELS if name not in present]
+    out({"created": [], "kept": [name for name in LABELS if name in present], "missing": missing})
+    if missing:
+        sys.exit(f"the console project lacks {len(missing)} of the plugin's labels: the owner adds them there")
+
+
+def cmd_list(args) -> None:
+    sprints = console.sprints()
     labels = list(args.label or [])
-    if args.status:
-        labels.append(f"status:{args.status}")
-    if args.kind:
-        labels.append(f"kind:{args.kind}")
-    query = f"state={args.state}&per_page=100"
+    filters = {"state": args.state, "status": args.status, "kind": args.kind}
+    if args.milestone:
+        filters["sprint"] = "none" if args.milestone == "none" else \
+            console_sprint(sprints, args.milestone, datetime.now(KYIV).date())["number"]
     if labels:
-        query += "&labels=" + gh_quote(",".join(labels))
-    ms = resolve_milestone(repo, args.milestone)
-    if ms:
-        query += f"&milestone={ms['number']}"
-    issues = [i for i in gh.api_list(f"repos/{repo}/issues?{query}") if "pull_request" not in i]
-    out([slim(i) for i in issues])
+        filters["label"] = labels[0]  # the console takes one label per request; the rest narrow the answer here
+    found = console.issues(sprint_titles(sprints), **filters)
+    out([summary(i) for i in found if set(labels) <= set(i["labels"])])
 
+
+def cmd_next(args) -> None:
+    now = datetime.fromisoformat(args.now) if args.now else datetime.now(KYIV)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=KYIV)
+    sprints = console.sprints()
+    sprint = pick_current_sprint([console.as_milestone(s) for s in sprints], now.astimezone(KYIV).date())
+    demo = date.fromisoformat(sprint["due_on"][:10]) if sprint else None
+    ctx = compute(now, sprint["title"] if sprint else None, demo, project.freeze_days()).to_dict()
+    # In the console's queue order (each issue carries `queue`): the picker dispatches in it, not by number.
+    issues = console.issues(sprint_titles(sprints), state="open")
+    agents_dir = os.path.join(os.getcwd(), ".claude", "agents")
+    known = ({f[:-3] for f in os.listdir(agents_dir) if f.endswith(".md")} | {"fullstack-dev"}
+             if os.path.isdir(agents_dir) else None)
+    plan = picker.pick(issues, ctx["sprint"], ctx, known)
+    plan["context"] = ctx
+    out(plan)
+
+
+def cmd_sprint(args) -> None:
+    sprints = [console.as_milestone(s) for s in console.sprints()]
+    if args.action == "current":
+        s = pick_current_sprint(sprints, datetime.now(KYIV).date())
+        out({"title": s["title"], "number": s["number"], "due": s["due_on"][:10], "url": None} if s else None)
+    else:
+        out([{"title": s["title"], "number": s["number"], "state": s["state"], "due": (s["due_on"] or "")[:10]}
+             for s in sprints])
+
+
+# Still GitHub Issues: the item reads until their console form lands, the writes until team-console #608.
 
 def cmd_show(repo: str, args) -> None:
     issue = gh.api(f"repos/{repo}/issues/{args.number}")
@@ -500,36 +550,12 @@ def cmd_request_done(repo: str, args) -> None:
     out({"issue": args.number, "comment_id": args.comment_id, "result": args.result, "url": c["html_url"]})
 
 
-def cmd_next(repo: str, args) -> None:
-    now = datetime.fromisoformat(args.now) if args.now else datetime.now(KYIV)
-    if now.tzinfo is None:
-        now = now.replace(tzinfo=KYIV)
-    sprint = current_sprint(repo)
-    demo = date.fromisoformat(sprint["due_on"][:10]) if sprint else None
-    ctx = compute(now, sprint["title"] if sprint else None, demo, project.freeze_days()).to_dict()
-    issues = [slim(i) for i in gh.api_list(f"repos/{repo}/issues?state=open&per_page=100") if "pull_request" not in i]
-    agents_dir = os.path.join(os.getcwd(), ".claude", "agents")
-    known = ({f[:-3] for f in os.listdir(agents_dir) if f.endswith(".md")} | {"fullstack-dev"}
-             if os.path.isdir(agents_dir) else None)
-    plan = picker.pick(issues, ctx["sprint"], ctx, known)
-    plan["context"] = ctx
-    out(plan)
-
-
-def cmd_sprint(repo: str, args) -> None:
-    if args.action == "current":
-        s = current_sprint(repo)
-        out({"title": s["title"], "number": s["number"], "due": s["due_on"][:10], "url": s["html_url"]} if s else None)
-    elif args.action == "list":
-        out([{"title": m["title"], "number": m["number"], "state": m["state"], "due": (m.get("due_on") or "")[:10]}
-             for m in gh.api_list(f"repos/{repo}/milestones?state=all&per_page=100")])
-    else:
-        if not args.title or not args.due:
-            sys.exit("usage: backlog sprint create TITLE YYYY-MM-DD")
-        due = date.fromisoformat(args.due)
-        m = gh.api(f"repos/{repo}/milestones", "POST",
-                   {"title": args.title, "due_on": f"{due.isoformat()}T12:00:00Z"})
-        out({"title": m["title"], "number": m["number"], "due": m["due_on"][:10], "url": m["html_url"]})
+def cmd_sprint_create(repo: str, args) -> None:
+    if not args.title or not args.due:
+        sys.exit("usage: backlog sprint create TITLE YYYY-MM-DD")
+    due = date.fromisoformat(args.due)
+    m = gh.api(f"repos/{repo}/milestones", "POST", {"title": args.title, "due_on": f"{due.isoformat()}T12:00:00Z"})
+    out({"title": m["title"], "number": m["number"], "due": m["due_on"][:10], "url": m["html_url"]})
 
 
 def main() -> None:
@@ -578,13 +604,22 @@ def main() -> None:
         argv = argv[:2] + ["--"] + argv[2:]
     args = p.parse_args(argv)
 
-    handlers = {
-        "init": cmd_init, "list": cmd_list, "show": cmd_show, "create": cmd_create, "move": cmd_move, "close": cmd_close, "decide": cmd_decide, "ask": cmd_ask, "reversals": cmd_reversals, "answer": cmd_answer, "milestone": cmd_milestone,
-        "label": cmd_label, "edit": cmd_edit, "comment": cmd_comment, "link-pr": cmd_link_pr, "answers": cmd_answers, "vanished": cmd_vanished,
-        "sprint": cmd_sprint, "next": cmd_next, "requests": cmd_requests, "request-done": cmd_request_done,
+    reads = {"init": cmd_init, "list": cmd_list, "next": cmd_next, "sprint": cmd_sprint}
+    if args.cmd in reads and not (args.cmd == "sprint" and args.action == "create"):
+        try:
+            reads[args.cmd](args)
+        except console.ConsoleError as exc:
+            sys.exit(console.report(exc))
+        return
+    writes = {
+        "create": cmd_create, "move": cmd_move, "close": cmd_close, "decide": cmd_decide, "ask": cmd_ask,
+        "answer": cmd_answer, "milestone": cmd_milestone, "label": cmd_label, "edit": cmd_edit,
+        "comment": cmd_comment, "link-pr": cmd_link_pr, "vanished": cmd_vanished, "sprint": cmd_sprint_create,
+        "request-done": cmd_request_done, "show": cmd_show, "answers": cmd_answers, "reversals": cmd_reversals,
+        "requests": cmd_requests,
     }
     try:
-        handlers[args.cmd](gh.repo(), args)
+        writes[args.cmd](gh.repo(), args)
     except gh.GhError as exc:
         sys.exit(str(exc))
 

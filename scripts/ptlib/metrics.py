@@ -14,10 +14,19 @@ def _ts(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
+def _in_progress_at(event: dict) -> Optional[str]:
+    """When the event moved the item to in-progress: a GitHub `labeled` event or a console item event."""
+    if event.get("event") == "labeled":
+        hit = (event.get("label") or {}).get("name") == "status:in-progress"
+        return event.get("created_at") if hit else None
+    after = event.get("after")
+    hit = isinstance(after, dict) and after.get("status") == "in-progress" and isinstance(event.get("at"), str)
+    return event["at"] if hit else None
+
+
 def cycle_days(closed_at: Optional[str], label_events: List[dict]) -> Optional[float]:
     """From the first move to status:in-progress until the issue closed."""
-    starts = [e["created_at"] for e in label_events
-              if e.get("event") == "labeled" and (e.get("label") or {}).get("name") == "status:in-progress"]
+    starts = [at for at in map(_in_progress_at, label_events) if at]
     if not closed_at or not starts:
         return None
     return round((_ts(closed_at) - _ts(min(starts))).total_seconds() / 86400, 1)

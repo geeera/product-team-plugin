@@ -299,18 +299,11 @@ class CloudSessionTest(unittest.TestCase):
         self.assertEqual((code, out["decision"]), (3, "overlap"))
         self.assertIn(started["run_id"], out["reason"])
 
-    def test_inbox_update_creates_the_issue_and_survives_a_failed_pin(self):
-        self.github.create_issue(BOT, "Pick a CDN", ["kind:question", "owner:money"],
-                                 body="**Your answer:** /approve or /reject why\n<!-- pt-ask -->\n")
+    def test_inbox_update_is_a_no_op_that_touches_no_issue(self):
+        before = dict(self.github.issues)
         code, out, err = self.run_cli(inbox, "update")
-        self.assertEqual((code, out["pinned"]), (0, False))
-        self.assertIn("could not pin", err)
-        self.assertIn("GraphQL is not available", err)
-        created = self.github.issues[out["number"]]
-        self.assertIn("team:inbox", {l["name"] for l in created["labels"]})
-        self.assertIn("#2 ", created["body"])
-        code, again, _ = self.run_cli(inbox, "update")
-        self.assertEqual((code, again["number"], again["pinned"]), (0, out["number"], None))
+        self.assertEqual((code, out["updated"], err), (0, False, ""))
+        self.assertEqual(self.github.issues, before)
 
     def test_brief_mark_appends_and_the_latest_mark_is_read_back(self):
         for at in ("2026-09-29T10:00:00Z", "2026-09-30T10:00:00Z"):

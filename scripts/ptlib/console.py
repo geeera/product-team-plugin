@@ -19,6 +19,7 @@ import time
 import urllib.parse
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple, Union
 
 from . import transport
@@ -332,8 +333,9 @@ def _object(dto: Any, what: str) -> Dict[str, Any]:
     return dto
 
 
-def get_item(number: int) -> Dict[str, Any]:
-    """The item with its body, for reading; `item()` is the form a write uses (it needs the ETag)."""
+def get_item(number: Union[int, str]) -> Dict[str, Any]:
+    """The item with its body, for reading; `item()` is the form a write uses (it needs the ETag). `number` may also
+    be the item's key (`TC-412`): the console reads either, and answers 404 for another project's key."""
     dto, _ = request("GET", project_path("items", number))
     return _object(dto, f"item {number}")
 
@@ -435,7 +437,11 @@ def issues(sprint_titles: Optional[Mapping[int, str]] = None, **filters: Any) ->
 
 
 def inbox() -> Dict[str, Any]:
+    """`GET …/inbox`, the console's InboxDto: `items` (each with its `section`), `setup`, `paused` and their URLs."""
     dto, _ = request("GET", project_path("inbox"))
+    rows = _object(dto, "inbox").get("items")
+    if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
+        raise ConsoleError("GET inbox: the answer has no 'items' list of objects", type="unexpected-answer")
     return dto
 
 
@@ -448,10 +454,35 @@ def decisions(since: Optional[str] = None, command: Optional[str] = None) -> Lis
     return list_all(project_path("decisions", since=since, command=command), "decisions")
 
 
-def link_pr(number: int, pr_number: int, url: str, head_ref: str) -> Dict[str, Any]:
+def link_pr(number: Union[int, str], pr_number: int, url: str, head_ref: str) -> Dict[str, Any]:
     dto, _ = request("POST", project_path("items", number, "pr-links"),
                      {"number": pr_number, "url": url, "headRef": head_ref})
     return _object(dto, f"pr-link on item {number}")
+
+
+def pr_link_refusal(exc: ConsoleError) -> Optional[str]:
+    """What a refused `pr-links` write means for the job that sent it; None for any other error."""
+    if exc.status == 403 and exc.type == "pr-link-role":
+        if exc.reason == "item-not-held":
+            return ("this job does not hold the item (item-not-held): a developer links a pull request only to an "
+                    "item its job was given")
+        return "only a developer job or the orchestrator links a pull request to an item"
+    if exc.status == 422 and exc.type == "pr-link-invalid":
+        return f"the console refused the link ({exc.field or 'body'}): {exc.detail}"
+    return None
+
+
+def instant(value: Any) -> datetime:
+    """A console timestamp (`2026-11-12T10:00:00.000Z`) as an aware datetime; the epoch when it is not one."""
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (AttributeError, ValueError):
+        return datetime.fromtimestamp(0, timezone.utc)
+
+
+def query_instant(value: datetime) -> str:
+    """A `?since=` value: the UTC instant to the second, the form the console's query validation names."""
+    return value.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def create_item(payload: Dict[str, Any]) -> Dict[str, Any]:

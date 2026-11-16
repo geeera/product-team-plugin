@@ -2,14 +2,14 @@
 from __future__ import annotations
 
 import json
-import re
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
-from . import provenance
+from .console import instant
 
 START, END = "/*PT-DEMO-DATA-START*/", "/*PT-DEMO-DATA-END*/"
 REQUIRED = ("product", "repo", "sprint", "demo_date", "demo_issue", "release", "shipped", "proposals", "findings")
-_BLOCK = re.compile(r"^\s*/demo-decisions\s*\n```(?:json)?\s*\n(.*?)\n```", re.MULTILINE | re.DOTALL)
+RELEASE_COMMANDS = ("go", "no-go", "override")
+PROPOSAL_COMMANDS = ("approve", "reject")
 
 
 def fill(template: str, data: dict) -> str:
@@ -25,20 +25,40 @@ def fill(template: str, data: dict) -> str:
     return head + START + payload + END + tail
 
 
-def decisions_from_comments(comments: List[dict], owner: str, history: Optional[dict]) -> Optional[dict]:
-    """The owner's latest /demo-decisions block, or None. Blocks from anyone else, or in an owner comment someone
-    else edited (history: provenance.fetch of the demo issue), are ignored."""
-    latest = None
-    trusted, _ = provenance.screen(comments, [owner], history)
-    for c in sorted(trusted, key=lambda c: c.get("created_at") or ""):
-        for m in _BLOCK.finditer(c.get("body") or ""):
-            try:
-                parsed = json.loads(m.group(1))
-            except json.JSONDecodeError:
-                continue
-            if isinstance(parsed, dict) and isinstance(parsed.get("decisions"), dict):
-                latest = dict(parsed, source=c.get("html_url"))
-    return latest
+def _newest(rows: List[dict], commands: tuple) -> Optional[dict]:
+    found = [r for r in rows if r.get("command") in commands]
+    return max(found, key=lambda r: instant(r.get("decidedAt"))) if found else None
+
+
+def _text(row: dict, name: str) -> str:
+    value = row.get(name)
+    return value if isinstance(value, str) else ""
+
+
+def decisions_from_rows(demo_number: int, rows: List[Dict[str, Any]], source: Optional[str]) -> Optional[dict]:
+    """The owner's demo decisions from the console's decision feed since the demo item was opened (rows only the
+    owner's identity writes): the newest go/no-go/override on the demo item as `release`, the newest approve/reject
+    on each other item under `issue-<n>`, in the shape the page's /demo-decisions block had. None without any."""
+    by_item: Dict[int, List[dict]] = {}
+    for row in rows:
+        item = row.get("item")
+        number = item.get("number") if isinstance(item, dict) else None
+        if isinstance(number, int) and not isinstance(number, bool) and number > 0:
+            by_item.setdefault(number, []).append(row)
+    decisions: Dict[str, dict] = {}
+    release = _newest(by_item.pop(demo_number, []), RELEASE_COMMANDS)
+    if release:
+        decisions["release"] = {"decision": release["command"], "comment": _text(release, "text")}
+    for number in sorted(by_item):
+        found = _newest(by_item[number], PROPOSAL_COMMANDS)
+        if found:
+            decisions[f"issue-{number}"] = {"decision": found["command"], "comment": _text(found, "text"),
+                                            "key": _text(found["item"], "key") or None}
+    if not decisions:
+        return None
+    return {"release": {"command": release["command"], "text": _text(release, "text"),
+                        "at": _text(release, "decidedAt") or None} if release else None,
+            "decisions": decisions, "source": source}
 
 
 def normalise_db_rows(rows: List[dict]) -> dict:

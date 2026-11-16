@@ -11,7 +11,6 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 from ptlib import demo  # noqa: E402
 
-NO_EDITS = {"issue": None, "comments": {}}  # GitHub knows of no edits to any of these comments
 
 DATA = {
     "product": "p", "repo": "o/r", "sprint": "Sprint 01", "demo_date": "2026-10-09",
@@ -45,22 +44,29 @@ class FillTest(unittest.TestCase):
             demo.fill(self.template, {"product": "p"})
 
 
+def row(number, command, at, text=""):
+    """A row of the console's `GET …/decisions` feed (decisions.list fixture shape)."""
+    return {"id": 1, "command": command, "text": text, "askId": None, "reversesCommentId": None, "via": "web",
+            "decidedAt": at, "sourceUrl": None, "item": {"key": f"TC-{number}", "number": number}}
+
+
 class DecisionsTest(unittest.TestCase):
-    def block(self, decisions):
-        return "/demo-decisions\n```json\n" + json.dumps({"sprint": "Sprint 01", "decisions": decisions}) + "\n```"
+    def test_the_newest_release_and_proposal_decisions_win(self):
+        rows = [row(5, "no-go", "2026-11-12T10:00:00.000Z", "blocker"), row(5, "go", "2026-11-12T11:00:00.000Z"),
+                row(5, "approve", "2026-11-12T12:00:00.000Z"),  # not a release command: ignored on the demo item
+                row(21, "approve", "2026-11-12T10:00:00.000Z"), row(21, "reject", "2026-11-12T10:30:00.000Z", "later"),
+                row(22, "done", "2026-11-12T10:00:00.000Z"), {"command": "go", "item": None}]
+        found = demo.decisions_from_rows(5, rows, "https://console.example/p/tc/t/5")
+        self.assertEqual(found, {
+            "release": {"command": "go", "text": "", "at": "2026-11-12T11:00:00.000Z"},
+            "decisions": {"release": {"decision": "go", "comment": ""},
+                          "issue-21": {"decision": "reject", "comment": "later", "key": "TC-21"}},
+            "source": "https://console.example/p/tc/t/5"})
 
-    def test_takes_latest_owner_block(self):
-        comments = [
-            {"user": {"login": "geeera"}, "created_at": "2026-10-09T10:00:00Z", "updated_at": "2026-10-09T10:00:00Z", "body": self.block({"release": {"decision": "no-go"}})},
-            {"user": {"login": "geeera"}, "created_at": "2026-10-09T11:00:00Z", "updated_at": "2026-10-09T11:00:00Z", "body": self.block({"release": {"decision": "go"}})},
-            {"user": {"login": "intruder"}, "created_at": "2026-10-09T12:00:00Z", "updated_at": "2026-10-09T12:00:00Z", "body": self.block({"release": {"decision": "no-go"}})},
-        ]
-        found = demo.decisions_from_comments(comments, "Geeera", NO_EDITS)
-        self.assertEqual(found["decisions"]["release"]["decision"], "go")
-
-    def test_ignores_malformed_json(self):
-        comments = [{"user": {"login": "geeera"}, "created_at": "t", "updated_at": "t", "body": "/demo-decisions\n```json\n{oops\n```"}]
-        self.assertIsNone(demo.decisions_from_comments(comments, "geeera", NO_EDITS))
+    def test_no_decision_is_null(self):
+        self.assertIsNone(demo.decisions_from_rows(5, [row(22, "done", "2026-11-12T10:00:00.000Z")], "console"))
+        found = demo.decisions_from_rows(5, [row(21, "approve", "2026-11-12T10:00:00.000Z")], "console")
+        self.assertIsNone(found["release"])
 
     def test_normalises_db_rows(self):
         rows = [{"id": "issue-21", "data": {"item": "issue-21", "decision": "approve", "comment": "yes"}}]

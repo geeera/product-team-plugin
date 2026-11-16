@@ -16,7 +16,8 @@ feature/<issue>-<slug> ──PR──▶ dev ──cut 2 days before demo──�
   CI green plus the verdicts the PR needs (see [Review gate](#review-gate-proportional-reviews)): `QA: APPROVED`
   from `qa` and `REVIEW: APPROVED` from `reviewer` as `review:` in `project.yml` requires them, and
   `SECURITY: APPROVED` from `security` whenever `scripts/pr security-check` finds auth, data, payment, upload,
-  secret, dependency or CI changes.
+  secret, dependency or CI changes, or an item the PR names is labelled `security` (or cannot be read: it fails
+  closed).
   Every verdict must be on the current head commit. The orchestrator merges (squash) and moves the issue
   `status:qa` → `status:done`; the developer who wrote it never does. Branch operations (stage cut, release,
   back-merges) and the self-update PR merge with `--ci-only`.
@@ -55,7 +56,13 @@ review:
 
 - `pr gate` reads the block from the PR's **base** branch (a PR cannot relax its own gate; a change to
   `project.yml` itself needs SECURITY). Without the block, QA and REVIEW are required on every PR (the behaviour
-  before 0.10.2). SECURITY is never configurable: `pr security-check` decides it.
+  before 0.10.2). SECURITY is never configurable: `pr security-check` decides it. It reads the labels of
+  every item the PR names — the head branch's key (`feature/tc-412-…`, any case) and every key after `Closes` /
+  `Fixes` / `Resolves` / `Refs` in the title or body (`Closes TC-412, TC-413`; markdown around a key is ignored)
+  — from the console; an item it cannot read there (no `TC_*` job environment, a refusal, a 404, an answer
+  without labels), a PR that names no item at all, and a closing reference that is no key (a URL,
+  `owner/repo#412`) each make SECURITY required with the reason, never skipped. `pr link-pr --item KEY` refuses
+  an item the PR does not name, so a linked item is always one the gate reads.
 - `code_paths` are globs over repository paths: `**` crosses directories, `*` does not, a pattern without `/`
   matches a file name anywhere (`*.ts`), matching ignores case and a leading `./`. Brace sets (`{a,b}`),
   character classes (`[ab]`) and negation (`!x`) are refused, not guessed. A renamed file counts by its old path
@@ -119,6 +126,11 @@ Status labels are prefixed (`status:*`) so they never collide with labels an ado
 | Any cost (paid plan, upgrade, domain) | Comment `/approve` on the `kind:question` issue | Work that needs it stops |
 | Override of a release blocker | Written reason on the demo issue → recorded as a decision | Blocker stands |
 
+On the team console (0.12) the owner answers on the item's page: an approve, reject, go, no-go, override or
+done is a **decision row** only the owner's identity writes (`backlog answers` reads them), and what only the owner
+decides is refused to a job with the item's link (`the owner approves in the console: <url>`). The comment grammar
+below is how 0.11 reads owner commands on projects still on GitHub Issues.
+
 Owner commands in issue comments are case-insensitive and must be written by the repository owner
 (the repository's `owner.login`); commands from anyone else are ignored, and so is an owner comment anyone else
 ever edited (`reference/identities.md`). Reactions are never approvals.
@@ -138,53 +150,18 @@ issue comment with its header; write example commands in backticks.
 
 ## Owner requests (team console)
 
-The owner can ask the PM from the team console to move an issue between sprints or up or down the queue
-(geeera/team-console ADR 0005). That is a **request the PM honours**, not an owner command and not a console
-write: the console posts one comment on the owner's token and never sets a milestone, status or label itself.
+The owner can ask the PM from the team console to move an item between sprints or up or down the queue
+(geeera/team-console ADR 0005). That is a **request the PM honours**, not an owner command: the console records it
+as a row on the item and never sets a sprint, status or label itself.
 
-```
-<!-- pt-owner-request {"kind":"sprint","target":"next","v":1} -->
-<one human line in owner.language>
-_Requested by the owner in the team console: «…»_
-```
-
-`kind` is `sprint` (`target`: `current` | `next` | `backlog`) or `priority` (`direction`: `up` | `down`). Only
-the exact first line counts — the canonical JSON (sorted keys, no spaces, nothing but those fields, `v: 1`); a
-marker anywhere else, a quoted one, or a shape this version does not know is not a request. A request counts
-only when **all** of these hold (`scripts/ptlib/ownerrequests.py`):
-
-- the repository owner wrote it;
-- nobody ever edited it — not even the owner, since an agent holding the owner's credential edits as the owner
-  (REST-only sessions: `updated_at` equals `created_at`);
-- GitHub says the console posted it: `performed_via_github_app.slug` is one of `team.console_app_slugs` in
-  `project.yml`, compared exactly (an app slug such as `team-console-prod`, never a login). The owner's own `gh`
-  token or a PAT carries no app, so a marker typed on GitHub does not count. **This key is the trust root**: it
-  is read from the repository's default branch through the API, never from the working tree, so it changes only
-  through a merged PR — a change to `project.yml` needs SECURITY, and adding a slug needs the owner's approval
-  (`access`);
-- no agent in this session can write as the owner (`gh.acts_as_owner` is false). Until GitHub is verified to set
-  `performed_via_github_app` on the console's user-to-server comments, requests are never honoured in
-  same-account mode or while an owner credential is in the session.
-
-The newest such request on an issue replaces older ones. `backlog requests` lists the pending ones (and, under
-`ignored`, every request marker that does not count, with the reason). It looks back `--days` (30 by default): an
-older request is listed under `ignored` ("older than the lookback") and the owner asks again. It reads at most 25
-issues per run — issues with an owner-written console request first (so markers from others cannot crowd one
-out), then the newest — and says so under `truncated` when there were more; `slot-pm` applies or declines them within
-the caps and the freeze rule when it plans, and answers each with `backlog request-done`, which posts the handled
-marker as the team's identity — never with the owner's token:
-
-```
-<!-- pt-owner-request-handled {"comment_id":123,"result":"applied","v":1} -->
-**PM note**: your request is applied. <link to the request>
-
-<the reason, one line>
-```
-
-A request is pending until a handled marker for its `comment_id` exists that the team's own identity wrote after
-it and nobody edited. A handled marker by the owner's login never counts: whoever holds the owner's credential
-could otherwise silently drop a real request (and `request-done` refuses to post as the owner). A request never approves a feature, changes a status, or moves work that is in progress; the
-decision policy is unchanged. `backlog comment` refuses either marker.
+`backlog requests` lists the pending ones (`GET …/requests?state=pending`), each with its `request_id`, its `kind`
+— `sprint` (`target`: `current` | `next` | `backlog`) or `priority` (`direction`: `up` | `down`) — and the item's
+current sprint and status; one on a closed item is listed under `ignored`. Only the owner's identity creates a
+request, so there is nothing to screen. `slot-pm` applies or declines each within the caps and the freeze rule when
+it plans, and answers it with `backlog request-done N --request-id ID --result applied|declined --text "why"`
+(`POST …/requests/ID/handled`: the `pm` job only; declined needs `--text`; the console records which job answered
+and shows the owner the answer). An answered request is refused a second time (`request-handled`). A request never
+approves a feature, changes a status, or moves work that is in progress; the decision policy is unchanged.
 
 ## Findings and release gates
 

@@ -64,7 +64,7 @@ For each app: GitHub → Settings → Developer settings → GitHub Apps → **N
 | `PT_TEAM_APP_KEY_FILE` **or** `PT_TEAM_APP_KEY` | path to its `.pem` (`~` is expanded), **or** the PEM itself — base64 (one line, for cloud env vars) or raw |
 | `PT_REVIEW_APP_ID` | review app id; must be a different app (checked by bot login, so a numeric id and an `Iv…` client id of one app are caught too) |
 | `PT_REVIEW_APP_KEY_FILE` **or** `PT_REVIEW_APP_KEY` | as above, for the review app |
-| `PT_OWNER_TOKEN` | only in the team-chat session: a fine-grained token of **your** account (this repository, Issues read/write) that `backlog answer` posts your answers with |
+| `PT_OWNER_TOKEN` | 0.11 only, in the team-chat session: a fine-grained token of **your** account (this repository, Issues read/write) that `backlog answer` posts your answers with. On the console `backlog answer` is retired: you decide on the item's page |
 
 Precedence: `gh.token()` uses the team app when `PT_TEAM_APP_ID` is set, otherwise `GH_TOKEN`, `GITHUB_TOKEN`,
 `gh auth token` as before. `gh.review_token()` uses the review app, otherwise `PT_REVIEW_TOKEN` (a reviewing machine
@@ -164,8 +164,9 @@ settings and deleting the old one there.
   (`PT_OWNER_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN`, `gh auth`) resolves to your login. Only a session with none of those
   is false, and only then does the same-run caution in `slot-pm` and `demo-apply` fall away. Only a 401/403 from
   GitHub rules a credential out; an outage (5xx, timeout, network) cannot, so it counts as `true`.
-- **`backlog answer`** (team chat) posts with `PT_OWNER_TOKEN` and refuses when it is missing or not yours —
-  otherwise the answer would be the bot's and would not count.
+- **`backlog answer`** (team chat, 0.11) posts with `PT_OWNER_TOKEN` and refuses when it is missing or not yours —
+  otherwise the answer would be the bot's and would not count. On the console it only prints the item's link
+  (exit 2): decisions are rows only your identity writes.
 - **Verdicts**: with the review app configured, `pr gate` counts only `<review-slug>[bot]`; the login list in
   `project.yml` cannot widen that. Without the key in a session it falls back to `team.reviewer_logins`, read from
   the PR's **base branch** (a PR cannot name its own reviewers). The gate fails when the review bot is the team bot or
@@ -250,4 +251,11 @@ It does not:
 | `history: rest-only` / `history_error`: GraphQL is unavailable in this session | expected in Claude Code cloud sessions (GraphQL is blocked there): edited comments are ignored, unedited ones count; nothing to fix |
 | `history: rest-only` / `history_error`: anything else | GitHub's GraphQL API did not answer (outage, or a token without Issues read); the run went on with REST timestamps; the next run retries GraphQL |
 | `answers` → `ignored`: it may have been edited and its edit history could not be fetched | you (or anyone) edited the comment and this session has no edit history; write the command again in a new comment |
-| `inbox update`: warning: could not pin | pinning needs GraphQL; pin the "Needs you" issue by hand once, the scripts find it by label |
+| `inbox update`: warning: could not pin | 0.11: pinning needs GraphQL; pin the "Needs you" issue by hand once, the scripts find it by label (on the console `inbox update` is a no-op) |
+| `console: this project is still on GitHub Issues` (exit 3) | the project runs product-team 0.12 before its cutover to the console: stay on 0.11 until then |
+| `TC_… is not set: run this inside a console job` | the console scripts run only in a console job, which gets `TC_API_URL`, `TC_JOB_TOKEN`, `TC_PROJECT` from its runner |
+| `the owner approves in the console: <url>` | approving, leaving `proposed` and editing approved text are yours: the team asks (`backlog ask`) and links the item |
+| `this job does not hold the item (item-not-held)` | `pr link-pr`: a developer's job links a PR only to the item it was given; the branch or `--item` names another |
+| `security-check`: `linked item … could not be read from the console` | the gate failed closed and requires SECURITY: run the review, or fix the reference or the console and check again |
+| `security-check`: `PR names no item` / `PR closes …, which is no item key` | the gate failed closed: name the item (`feature/tc-412-…` branch or `Closes TC-412` in the body) or run the SECURITY review |
+| `pr link-pr`: `PR #N does not name TC-…` | `--item` names an item the gate would not read: add `Closes TC-…` to the PR body, then link again |

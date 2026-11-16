@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""The owner's daily digest: the pinned "Needs you" issue, sent to the phone (runs in GitHub Actions).
+"""The owner's daily digest: the console's "Needs you" (`GET …/projects/:slug/inbox`, TC_* job environment), sent to
+the phone. `owner-digest.yml` cannot reach the console and keeps running product-team 0.11 until the console's own
+digest job replaces it.
 
   digest show                  print the message
   digest send [--always]       send it; skipped when nothing needs the owner (unless --always)
@@ -22,16 +24,13 @@ import urllib.request
 from urllib.parse import quote
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from ptlib import digest, gh, project  # noqa: E402
+from ptlib import console, digest, inbox, project  # noqa: E402
 
 
-def message(repo: str) -> tuple:
-    found = gh.api_list(f"repos/{repo}/issues?state=open&labels=team:inbox&per_page=5")
-    if not found:
-        return 0, ""
-    sections = digest.parse_inbox(found[0].get("body") or "")
-    product = repo.split("/", 1)[-1]
-    return digest.needs_count(sections), digest.format_digest(product, sections, project.owner_language())
+def message() -> tuple:
+    language = project.owner_language()
+    sections = inbox.titled(inbox.console_groups(console.inbox(), console.item_url), language)
+    return digest.needs_count(sections), digest.format_digest(console.config().project, sections, language)
 
 
 def post(url: str, data: bytes, headers: dict) -> None:
@@ -67,11 +66,13 @@ def main() -> None:
     p.add_argument("--always", action="store_true")
     args = p.parse_args()
     try:
-        count, text = message(gh.repo())
-    except gh.GhError as exc:
-        sys.exit(str(exc))
+        count, text = message()
+    except console.ConsoleError as exc:
+        sys.exit(console.report(exc))
+    except ValueError as exc:
+        sys.exit(f"console: {exc}")
     if args.action == "show":
-        sys.stdout.write(text or "no inbox issue yet\n")
+        sys.stdout.write(text)
         return
     if not count and not args.always:
         print(json.dumps({"sent": False, "reason": "nothing needs the owner"}))

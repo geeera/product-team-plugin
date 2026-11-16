@@ -35,11 +35,12 @@ Write `demo.json` (schema = the example data inside the template):
   the demo issue.
 - **No Artifact tool** (typical in scheduled cloud runs) → commit nothing; instead write the same content as the
   demo issue body in Markdown: shipped (links), findings, proposals (each links its issue), release
-  recommendation. Tell the owner to answer with `/approve` or `/reject why` **on each proposal issue** and
-  `/go` or `/no-go why` (or `/override why` when blocked) **on the demo issue**.
+  recommendation. Tell the owner to approve or reject **each proposal on its item** and to decide go or no-go (override
+  when blocked) **on the demo item**, in the console.
 
 ## 4. Notify
-Run `${CLAUDE_PLUGIN_ROOT}/scripts/inbox update`, then `${CLAUDE_PLUGIN_ROOT}/scripts/workflows run owner-digest.yml`
-so the release question reaches the phone now, not tomorrow morning.
-Comment on the demo issue with the link and the three decisions that matter most. The page's "Copy decisions"
-button produces a `/demo-decisions` block the owner can paste there too — both routes are read by `demo-apply`.
+The open demo item is the owner's release question in the console's "Needs you" (`inbox update` is a no-op there);
+run `${CLAUDE_PLUGIN_ROOT}/scripts/workflows run owner-digest.yml` so it reaches the phone now, not tomorrow morning.
+Comment on the demo issue with the link and the three decisions that matter most. `demo-apply` reads the owner's
+decisions from the console (`demo-page decisions`); a `/demo-decisions` block pasted from the page's "Copy decisions"
+button is no longer read.

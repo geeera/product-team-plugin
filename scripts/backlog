@@ -58,6 +58,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from typing import Optional  # noqa: E402
 
 from ptlib import brief, console, gh, owner, ownerrequests, picker, project  # noqa: E402
+from ptlib.console import instant  # noqa: E402
 from ptlib.calendar import KYIV, compute, pick_current_sprint  # noqa: E402
 from ptlib.labels import LABELS, STATUSES, KINDS, SEVERITIES  # noqa: E402
 from ptlib.tiers import ORDER as TIERS  # noqa: E402
@@ -104,14 +105,6 @@ def console_sprint(sprints: list, value: str, today: date) -> dict:
     if not found:
         sys.exit(f"sprint not found: {value}")
     return found
-
-
-def instant(value) -> datetime:
-    """A console timestamp (`2026-11-12T10:00:00.000Z`) as an aware datetime; the epoch when it is not one."""
-    try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except (AttributeError, ValueError):
-        return datetime.fromtimestamp(0, timezone.utc)
 
 
 def days_ago(days: int) -> datetime:
@@ -189,7 +182,7 @@ def cmd_reversals(args) -> None:
     """Owner rejects of a team decision since --days that no later team decision on the item answered."""
     since = days_ago(args.days)
     newest = {}
-    for d in console.decisions(since=since.strftime("%Y-%m-%dT%H:%M:%SZ"), command="reject"):
+    for d in console.decisions(since=console.query_instant(since), command="reject"):
         number = d["item"].get("number") if isinstance(d.get("item"), dict) else None
         if d.get("reversesCommentId") is None or not isinstance(number, int):
             continue
@@ -320,6 +313,9 @@ def explain(exc: console.ConsoleError, number: Optional[int]) -> Optional[str]:
         return f"{where}the request was already answered (`backlog requests` lists the pending ones)"
     if exc.status == 412:
         return f"{where}the item changed while it was being written: `backlog show {number}` and repeat the change"
+    pr_link = console.pr_link_refusal(exc)
+    if pr_link:
+        return f"{where}{pr_link}"
     if exc.status == 422 and exc.type == "body-secret":
         return (f"{where}the text carries a secret ({exc.kind or 'credential'} in {exc.field or 'the body'}): remove "
                 "it — a job's text never stores a credential")

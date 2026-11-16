@@ -8,7 +8,7 @@ disable-model-invocation: true
 # Slot: development
 
 Follow `${CLAUDE_PLUGIN_ROOT}/reference/run-protocol.md` with slot name `slot-dev`. `B` =
-`${CLAUDE_PLUGIN_ROOT}/scripts/backlog`.
+`${CLAUDE_PLUGIN_ROOT}/scripts/backlog`, `PR` = `${CLAUDE_PLUGIN_ROOT}/scripts/pr`.
 
 ## 0. Route by mode
 - `mode == freeze` → run the `qa-regression` skill (within this run protocol) and close. No feature work.
@@ -42,7 +42,10 @@ verified** (`reference/workflow.md` → Review gate). A returned PR without it g
 run. Rework addresses only the blockers the review triage kept; non-blocking items are already follow-up issues.
 
 Each agent returns a PR URL or a blocked reason:
-- PR → `B link-pr N <pr>`, `B move N qa`.
+- PR → `PR link-pr <pr>` (the item its head branch names, `feature/tc-412-…`; `--item KEY` when the branch names
+  none, and then the PR body must say `Closes KEY` — the review gate reads only the items a PR names, and one
+  that names none needs SECURITY), `B move N qa`. `item-not-held` means the PR names an item this developer's job was not given: fix the
+  branch or `--item`, never link it to another item to get past the refusal.
 - Blocked → `B move N blocked --reason "<reason>"`; if the owner must act, add `needs:owner` (or
   `needs:local` for work that needs a local machine) so it lands in the owner's inbox and later runs skip it.
 

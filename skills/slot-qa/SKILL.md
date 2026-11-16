@@ -72,7 +72,8 @@ All output becomes findings through `B create`.
 If today is the sprint's demo date (`slot-context.demo_date`), run the `demo-prep` skill after the reviews.
 
 ## 6. Morning summary
-Run `${CLAUDE_PLUGIN_ROOT}/scripts/inbox update` first — the pinned "Needs you" issue is the owner's to-do list.
+Read `${CLAUDE_PLUGIN_ROOT}/scripts/inbox show` first — the console's "Needs you" is the owner's to-do list
+(`inbox update` is a no-op on the console and may stay in the run).
 Hand the facts to the `scribe` agent to format; post it as the run summary (run-log comment) and print it. It
 contains, in this order:
 1. **Needs you** — the count from the inbox and its link (the details live there, not in the summary).

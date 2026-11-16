@@ -21,7 +21,7 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
-from ptlib import brief, commands, demo, gh, owner, project, provenance, runlogissue, runstate  # noqa: E402
+from ptlib import brief, commands, gh, owner, project, provenance, runlogissue, runstate  # noqa: E402
 
 OWNER, BOT, REVIEWER, STRANGER = "geeera", "acme-team[bot]", "acme-review[bot]", "collaborator"
 CREATED, EDITED = "2026-09-29T10:00:00Z", "2026-09-29T11:00:00Z"
@@ -260,13 +260,6 @@ class OwnerCommandTest(unittest.TestCase):
 
 
 class OtherOwnerInputTest(unittest.TestCase):
-    BLOCK = '/demo-decisions\n```json\n{"decisions": {"release": {"decision": "go"}}}\n```'
-
-    def test_a_demo_decisions_block_edited_in_by_the_review_bot_is_ignored(self):
-        c = rest(1, OWNER, self.BLOCK, edited=True)
-        self.assertIsNone(demo.decisions_from_comments([c], OWNER, history(node(c, [REVIEWER]))))
-        self.assertIsNotNone(demo.decisions_from_comments([c], OWNER, history(node(c, [OWNER]))))
-
     def test_a_reversal_edited_in_by_the_team_bot_is_ignored(self):
         comments = [rest(1, BOT, owner.decision_comment("use X"), at="2026-09-29T09:00:00Z"),
                     rest(2, OWNER, "/reject use Y", edited=True)]

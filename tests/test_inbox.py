@@ -32,7 +32,7 @@ class RenderTest(unittest.TestCase):
 
     def test_each_question_shows_what_to_answer(self):
         body = inbox.render([issue(4, kind="question", ask="/approve to use R2 (recommended) · /reject why")])
-        self.assertIn("#4 [Issue 4](https://x/4) — /approve to use R2 (recommended) · /reject why", body)
+        self.assertIn(r"#4 [Issue 4](https://x/4) — /approve to use R2 \(recommended\) · /reject why", body)
 
     def test_team_decisions_are_listed_for_information_only(self):
         body = inbox.render([], decided=[issue(12, ["team-decided"])])
@@ -80,6 +80,34 @@ class LinkSchemeTest(unittest.TestCase):
             with self.subTest(url=url):
                 self.assertEqual(inbox.item_line({"number": 4, "title": "T", "url": url, "ask": "/approve"}),
                                  "- #4 T — /approve")
+
+
+class MarkdownEscapeTest(unittest.TestCase):
+    """team-console#661: a title/ask the console supplies must never close the markdown link early and
+    open a link of its own."""
+
+    def test_title_cannot_close_the_link_and_open_a_javascript_link(self):
+        line = inbox.item_line({"title": "x](javascript:alert(1))", "url": "https://a.b/c"})
+        self.assertEqual(line, r"- [x\]\(javascript:alert\(1\)\)](https://a.b/c)")
+
+    def test_title_cannot_spoof_a_second_https_link(self):
+        line = inbox.item_line({"title": "x](https://evil.example)", "url": "https://a.b/c"})
+        self.assertEqual(line, r"- [x\]\(https://evil.example\)](https://a.b/c)")
+        # the only real link markdown can parse out of the line is the trusted url, not evil.example
+        self.assertEqual(line.count("]("), 1)
+
+    def test_ask_is_escaped_too(self):
+        line = inbox.item_line({"title": "T", "url": "https://a.b/c", "ask": "x](javascript:alert(1))"})
+        self.assertEqual(line, r"- [T](https://a.b/c) — x\]\(javascript:alert\(1\)\)")
+
+    def test_escapes_every_markdown_control_character(self):
+        line = inbox.item_line({"title": r"\[]()<>*_`", "url": None})
+        self.assertEqual(line, r"- \\\[\]\(\)\<\>\*\_\`")
+
+    def test_newlines_cannot_forge_extra_lines(self):
+        line = inbox.item_line({"title": "T\n- #999 [fake](https://evil.example)", "url": None})
+        self.assertEqual(line, r"- T - #999 \[fake\]\(https://evil.example\)")
+        self.assertEqual(line.count("\n"), 0)
 
 
 if __name__ == "__main__":

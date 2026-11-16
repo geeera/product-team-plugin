@@ -90,27 +90,22 @@ def personal_credentials() -> List[str]:
     return list(dict.fromkeys(c for c in found if c))
 
 
-# Re-exported: callers and tests read the transport settings through this module.
-DEFAULT_DEADLINE = transport.DEFAULT_DEADLINE
-SOCKET_TIMEOUT = transport.SOCKET_TIMEOUT
-RETRY_BACKOFF = transport.RETRY_BACKOFF
-
-
 def deadline_seconds() -> float:
     """PT_HTTP_DEADLINE: the wall-clock budget of one API call, retry included (default 90 s)."""
     return transport.deadline_seconds(GhError)
 
 
 def _attempt(method: str, url: str, req: urllib.request.Request, deadline: float) -> Tuple[str, dict]:
-    left = deadline - time.monotonic()
-    if left <= 0:
-        raise transport.Deadline()
+    left = transport.remaining(deadline)
     try:
-        with urllib.request.urlopen(req, timeout=min(SOCKET_TIMEOUT, left)) as resp:
+        with urllib.request.urlopen(req, timeout=min(transport.SOCKET_TIMEOUT, left)) as resp:
             return transport.read_until(resp, deadline).decode("utf-8"), dict(resp.headers)
+    except transport.TooLarge as exc:
+        raise GhError(f"{method} {url} failed: {exc}") from None
     except urllib.error.HTTPError as exc:
         try:
-            detail = transport.clip(exc.read().decode("utf-8", "replace"))
+            # Only what the message quotes is read (4 bytes per character covers any UTF-8).
+            detail = transport.clip(exc.read(transport.ERROR_BODY_LIMIT * 4).decode("utf-8", "replace"))
         finally:
             exc.close()
         error = GhError(f"{method} {url} → HTTP {exc.code}: {detail}")
@@ -119,12 +114,7 @@ def _attempt(method: str, url: str, req: urllib.request.Request, deadline: float
         raise error from exc
     except (OSError, http.client.HTTPException) as exc:  # URLError, timeouts, dropped connections
         reason = exc.reason if isinstance(exc, urllib.error.URLError) else repr(exc)
-        error = GhError(f"{method} {url} failed: {reason}")
-        if transport.is_timeout(exc):
-            if time.monotonic() >= deadline:
-                raise transport.Deadline() from exc
-            raise transport.Retryable(error) from exc
-        raise error from exc
+        raise transport.network_failure(exc, GhError(f"{method} {url} failed: {reason}"), deadline) from exc
 
 
 def _request(method: str, url: str, body: Optional[dict] = None, accept: str = "application/vnd.github+json",

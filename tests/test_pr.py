@@ -263,11 +263,23 @@ class PushTest(unittest.TestCase):
         os.chdir(self.repo)
         self.addCleanup(os.chdir, cwd)
         self.pushes = []
+        self.remote_sha = None  # what GitHub answers after the push; None: the commit that was pushed
+        self.ls_remote = (0, b"")
+
+    def git_out(self, *args):
+        env = dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
+        return REAL_RUN(["git", "-C", self.repo, "-c", "user.name=t", "-c", "user.email=t@t", *args], check=True,
+                        capture_output=True, env=env).stdout.decode().strip()
 
     def fake_run(self, argv, **kwargs):
         if argv[:2] == ["git", "push"] or argv[3:4] == ["push"]:
             self.pushes.append((argv, kwargs))
             return mock.Mock(returncode=self.push_returncode, stdout=b"", stderr=self.push_stderr)
+        if "ls-remote" in argv and "--get-url" not in argv:  # reading the branch back from GitHub
+            code, stderr = self.ls_remote
+            sha = self.remote_sha or self.git_out("rev-parse", "HEAD")
+            return mock.Mock(returncode=code, stdout=f"{sha}\t{argv[-1]}\n".encode() if not code else b"",
+                             stderr=stderr)
         return REAL_RUN(argv, **kwargs)
 
     def run_push(self, branch="feature/7-x", app=True, returncode=0, stderr=b""):
@@ -373,6 +385,41 @@ class PushTest(unittest.TestCase):
         result = self.run_push(app=False)
         self.assertEqual(self.pushes[-1][0][3:], ["push", "-u", "origin", "refs/heads/feature/7-x:refs/heads/feature/7-x"])
         self.assertEqual(result["as"], "session remote (no team app configured)")
+
+    def test_a_stale_local_branch_is_refused_when_head_is_on_another_branch(self):
+        # #625: a worktree on rework-619 pushing --branch feature/7-x used to push the old local ref and succeed.
+        stale = self.git_out("rev-parse", "HEAD")
+        self.git_out("switch", "-q", "-c", "rework-619")
+        self.git_out("commit", "-q", "--allow-empty", "-m", "rework")
+        with self.assertRaisesRegex(pr.gh.GhError, f"refusing to push feature/7-x: the local branch is at "
+                                                   f"{stale[:12]}, but HEAD \\(branch rework-619\\)"):
+            self.run_push()
+        with self.assertRaisesRegex(pr.gh.GhError, "the local branch is at"):
+            self.run_push(app=False)
+        self.assertEqual(self.pushes, [])
+
+    def test_a_branch_at_head_is_pushed_from_another_branch_or_a_detached_head(self):
+        head = self.git_out("rev-parse", "HEAD")
+        self.git_out("switch", "-q", "-c", "rework-619")
+        self.assertEqual(self.run_push()["sha"], head)
+        self.git_out("switch", "-q", "--detach")
+        self.assertEqual(self.run_push(app=False)["sha"], head)
+        self.assertEqual(len(self.pushes), 2)
+
+    def test_a_missing_local_branch_is_refused(self):
+        with self.assertRaisesRegex(pr.gh.GhError, "no local branch of that name and HEAD is on branch feature/7-x"):
+            self.run_push(branch="feature/8-y")
+        self.assertEqual(self.pushes, [])
+
+    def test_success_needs_the_remote_branch_at_the_pushed_commit(self):
+        self.remote_sha = "0" * 40
+        for app in (True, False):
+            with self.subTest(app=app), self.assertRaisesRegex(pr.gh.GhError, "remote branch is at 000000000000, not"):
+                self.run_push(app=app)
+        self.ls_remote = (128, f"fatal: x-access-token:{SECRET}".encode())
+        with self.assertRaisesRegex(pr.gh.GhError, "could not read it back") as caught:
+            self.run_push()
+        self.assertFalse(SECRET in str(caught.exception), "token leaked")
 
     def test_never_forces(self):
         self.run_push()

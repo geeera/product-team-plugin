@@ -26,24 +26,23 @@ no internal jargon, links only where the owner needs to look at something.
 4. When the owner has heard everything: `R/brief mark --at <generated_at from step 1>`.
 
 ## Turning answers into actions
-- Answers depend on the item's `section` in `needs_you`, and always carry the owner's words:
-  `R/backlog answer N --command <c> --owner-said "<what the owner wrote, verbatim>" [--text "<their reason>"]`.
-  When the team acts as its GitHub App this posts with `PT_OWNER_TOKEN`, a token of the owner's own account that
-  only this chat's session has (never `GH_TOKEN` or `gh auth`). If it refuses because it is missing, tell the owner
-  to answer on the issue themselves or set it up (`reference/identities.md`) — never work around it with any other
-  token: an answer from the team's bot would not count. Use it for nothing else; while it is present
-  `backlog answers` reports `same_account: true`, because any agent here could write as the owner.
+- Decisions are the owner's own rows in the console: nobody here records one for them (`backlog answer` is
+  retired and only prints the link). When the owner answers in this chat, give the item's console link
+  (`url` in `needs_you`, or `R/backlog show N`) and ask them to tap the command there; say what each option means:
   - `question`, `design` → `approve` / `reject` (with a reason).
   - `release` → `go`, `no-go` (with a reason) or `override` (with the written reason) — confirm first.
   - `owner`, `local` (things only the owner can do: accounts, secrets, a GPU, a local build) → `done` once the
     owner says it is done; "ok" to such an item means "noted", not "done" — ask.
-  An ambiguous reply ("ok" to a question with two options) → ask which option. Say what you recorded.
+  An ambiguous reply ("ok" to a question with two options) → ask which option they will tap.
 - "Later" / "not now" → nothing is written; the question stays for the next briefing.
-- A reversal of a team decision ("нет, сделайте иначе") → `R/backlog answer N --command reject --text …`.
+- A reversal of a team decision ("нет, сделайте иначе") → the link to the item, where the owner taps `/reject`
+  on the team's decision; the next `slot-pm` picks it up from `backlog reversals`.
 - A request for work ("добавь…", "исправь…") → the PM writes it up: `R/backlog create --kind feature|bug|chore`
-  with acceptance criteria you confirm with the owner in one message. The owner asking for it in this chat is the
-  scope decision: create it `--status approved` in the current sprint only if the owner said so, otherwise the
-  next sprint; if the sprint is full, say what moves out and let the owner choose.
+  with acceptance criteria you confirm with the owner in one message. The item is `proposed` (a job never creates
+  or moves one past that); then `R/backlog ask N --owner-category scope --ask "<one line: /approve to build it
+  in <sprint>, /reject why>"` and give the owner the item's link to approve it there — that tap is the scope
+  decision. Put it in the current sprint (`--milestone current`) only if the owner said so, otherwise the next
+  sprint; if the sprint is full, say what moves out and let the owner choose.
 - Priorities and plans ("сначала X", "перенеси Y") → `R/backlog milestone` / labels, and say what changed.
 - "Why …?" / "what's the state of …?" → investigate read-only (issues, PRs, CI, run log) and answer with facts.
 - "Pause" / "resume" → the `pause` / `resume` skills.

@@ -37,11 +37,9 @@ an owner command that appeared in the same run in which an agent commented on th
 With `same_account: false` (the team acts as its GitHub App, `agents` names its bot) only the owner's own
 comments are listed, and that caution does not apply.
 
-Every owner command you act on goes into this run's `runlog finish` as `--acted N:<comment_id>`. Once at the
-start of this step, `B vanished`: each entry is a command the team already acted on that was deleted since — never
-act on it again, and tell the owner in the inbox and the summary (they may have withdrawn it, or someone else
-removed it). When `vanished` reports an `error` (the run log is unreadable or ambiguous), put that error in the
-inbox and the summary: the check did not run, so an empty list then means "unknown", never "nothing vanished".
+Every owner command you act on goes into this run's `runlog finish` as `--acted N:<id>` (the decision's `id` from
+`B answers`). Decisions are console rows only the owner's identity writes and nobody deletes, so `B vanished` is a
+no-op kept for one release: it always answers `{"vanished": []}`.
 
 Owner comments someone else edited never count: `answers` lists them under `ignored` with `kind: edited` and the
 reason (and `history: rest-only` + `history_error` when GitHub's edit history could not be read — the rule in
@@ -53,7 +51,8 @@ team, the owner approved an earlier text: ask again instead of acting.
 
 - **Designs**: for each issue labelled `design:awaiting-approval`, `B answers N` (only commands newer than the
   design-link comment count):
-  - `/approve` → `B label N +design:approved -design:awaiting-approval`, `B move N approved`.
+  - `/approve` → the console already set `design:approved` and `status:approved` as the decision's effect
+    (a job may not: `B label`/`B move N approved` are refused with the item's console link); unblock the work.
   - `/reject why` → hand to `ui-designer` (visual) or `ux-designer` (flow) with the reason for a revision (same run if within caps), keep
     `status:blocked`.
   - nothing → leave it blocked. Never approve on the owner's behalf.
@@ -70,7 +69,7 @@ team, the owner approved an earlier text: ask again instead of acting.
   secret name exists, the environment answers), then close it and unblock the work that waited on it; if it does
   not check out, say what is missing in the inbox.
 - **Reversals**: `B reversals` lists team decisions the owner answered with `/reject why`. For each, reopen the
-  work with the owner's reason: redo the decision with `B decide N --handles-reversal <comment_id> …` (`decide`
+  work with the owner's reason: redo the decision with `B decide N --handles-reversal <decision_id> …` (`decide`
   refuses any other new decision while the reversal is open), or turn it into an owner question with `B ask` if
   the owner wants to decide it.
 - **Questions**: for each open `kind:question`, read answers and act (e.g. a cost approved → unblock the
@@ -138,7 +137,7 @@ still holds (a request never approves scope, never changes a status, never moves
 (this is the release candidate; the owner approves the release at the demo, not the cut). Everything still
 `in-progress` moves to the next sprint milestone. Comment on the `team:demo` issue (create it with
 `B create --kind question --owner-category release --ask "/go to release <sprint> after the demo · /no-go why"
---label team:demo --title "<sprint> demo" …` if missing) with the stage URL.
+--commands go,no-go --label team:demo --title "<sprint> demo" …` if missing) with the stage URL.
 
 ## 5. Close
 Summary: answers applied, owner requests applied or declined (with the reason), designs waiting for the owner

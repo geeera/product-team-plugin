@@ -24,7 +24,6 @@ def load(name):
     return module
 
 
-backlog = load("backlog")
 runlog = load("runlog")
 
 OWNER, BOT = "geeera", "acme-team[bot]"
@@ -57,50 +56,6 @@ class CommandAttributionTest(unittest.TestCase):
         self.assertIsNone(demo.decisions_from_comments([comment(BOT, block)], OWNER, NO_EDITS))
         self.assertIsNotNone(demo.decisions_from_comments([comment(OWNER, block)], OWNER, NO_EDITS))
 
-
-class AnswerCliTest(unittest.TestCase):
-    def run_cli(self, argv, app_mode, owner_token="owner-pat", agents_login=BOT):
-        posted = []
-
-        def api(path, method="GET", fields=None, auth=None):
-            if path == "repos/o/r/issues/7" and method == "GET":
-                return {"state": "open", "labels": [{"name": "kind:question"}, {"name": "owner:scope"}]}
-            if path == "repos/o/r/issues/7/comments" and method == "POST":
-                posted.append({"body": fields["body"], "auth": auth})
-                return {"html_url": "https://x/c"}
-            raise AssertionError(f"{method} {path}")
-
-        stdout = io.StringIO()
-        with mock.patch.object(sys, "argv", ["backlog", *argv]), mock.patch.object(backlog.gh, "repo", return_value="o/r"), \
-             mock.patch.object(backlog.gh, "api", side_effect=api), \
-             mock.patch.object(backlog.gh, "app_mode", return_value=app_mode), \
-             mock.patch.object(backlog.gh, "owner_token", **{
-                 "side_effect" if isinstance(owner_token, Exception) else "return_value": owner_token}), \
-             mock.patch.object(backlog.gh, "api_list", return_value=[comment(BOT, "/approve"), comment(OWNER, "/reject no")]), \
-             mock.patch.object(backlog.gh, "owner_login", return_value=OWNER), \
-             mock.patch.object(backlog.provenance, "fetch", return_value=NO_EDITS), \
-             mock.patch.object(backlog.runlogissue, "acted_on", return_value=([], "")), \
-             mock.patch.object(backlog.gh, "token_login", return_value=agents_login), \
-             mock.patch.object(backlog.gh, "acts_as_owner", return_value=agents_login == OWNER), \
-             mock.patch.object(sys, "stdout", stdout):
-            backlog.main()
-        return posted, stdout.getvalue()
-
-    def test_answer_is_posted_with_the_owners_token(self):
-        posted, _ = self.run_cli(["answer", "7", "--command", "approve", "--owner-said", "да"], app_mode=True)
-        self.assertTrue(posted[0]["auth"] == "owner-pat", "token mismatch")
-        self.assertTrue(posted[0]["body"].startswith("/approve"))
-
-    def test_same_account_answer_uses_the_agents_own_token(self):
-        posted, _ = self.run_cli(["answer", "7", "--command", "approve", "--owner-said", "да"], app_mode=False,
-                                 owner_token=None)
-        self.assertTrue(posted[0]["auth"] is None, "expected no token")
-
-    def test_answer_without_the_owners_token_in_app_mode_fails_cleanly(self):
-        with self.assertRaises(SystemExit) as caught:
-            self.run_cli(["answer", "7", "--command", "approve", "--owner-said", "да"], app_mode=True,
-                         owner_token=backlog.gh.GhError("needs geeera's own token"))
-        self.assertIn("own token", str(caught.exception))
 
 class RunLogAuthorsTest(unittest.TestCase):
     ISSUE = {"user": {"login": OWNER}}

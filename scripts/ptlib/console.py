@@ -19,7 +19,7 @@ import time
 import urllib.parse
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple, Union
 
 from . import transport
 
@@ -44,9 +44,10 @@ class ConsoleError(RuntimeError):
     str() is `<status> <type> (<field>): <detail>`; it never carries the token or a response body."""
 
     def __init__(self, detail: str, *, status: Optional[int] = None, type: str = "request-failed",
-                 field: Optional[str] = None, reason: Optional[str] = None, retry_after: Optional[int] = None):
+                 field: Optional[str] = None, reason: Optional[str] = None, kind: Optional[str] = None,
+                 retry_after: Optional[int] = None):
         self.status, self.type, self.detail = status, type, detail
-        self.field, self.reason, self.retry_after = field, reason, retry_after
+        self.field, self.reason, self.kind, self.retry_after = field, reason, kind, retry_after
         head = " ".join(p for p in (str(status) if status is not None else "", type) if p)
         super().__init__(f"{head}{f' ({field})' if field else ''}: {detail}")
 
@@ -175,8 +176,9 @@ def _problem(status: int, payload: bytes, headers: Dict[str, str], token: str) -
 
     kind = (text("type", 200) or "about:blank").rstrip("/").rsplit("/", 1)[-1]
     detail = text("detail", DETAIL_LIMIT) or text("title") or f"HTTP {status}"
+    # `reason` names a transition refusal, `kind` the sort of secret a 422 `body-secret` found (never its value).
     return ConsoleError(detail, status=status, type=kind, field=text("field"), reason=text("reason"),
-                        retry_after=retry)
+                        kind=text("kind"), retry_after=retry)
 
 
 def _attempt(cfg: Config, method: str, target: str, data: Optional[bytes], headers: Dict[str, str],
@@ -295,14 +297,23 @@ def item(number: int) -> Tuple[Dict[str, Any], str]:
     return dto, etag
 
 
-def update_item(number: int, patch: Dict[str, Any], *, reapply: bool = True) -> Dict[str, Any]:
-    """GET → If-Match → PATCH. On 412 the item is re-read once and the same patch sent again when `reapply` (a
-    label or status delta is safe to re-apply; a title or body edit is not, and fails with the 412)."""
+Patch = Union[Dict[str, Any], Callable[[Dict[str, Any]], Dict[str, Any]]]
+
+
+def update_item(number: int, patch: Patch, *, reapply: bool = True) -> Dict[str, Any]:
+    """GET → If-Match → PATCH; `patch` is the body, or a function of the item just read that builds it. On 412 the
+    item is re-read once and the patch sent again when `reapply` (a label or status delta is safe to re-apply; a
+    title or body edit is not, and fails with the 412)."""
+    return _with_version(number, "PATCH", project_path("items", number), patch, reapply)
+
+
+def _with_version(number: int, method: str, path: str, patch: Patch, reapply: bool) -> Dict[str, Any]:
     for tries_left in (1, 0):
-        _, etag = item(number)
+        current, etag = item(number)
+        body = patch(current) if callable(patch) else patch
         try:
-            dto, _ = request("PATCH", project_path("items", number), patch, etag=etag)
-            return dto
+            dto, _ = request(method, path, body, etag=etag)
+            return _object(dto, f"item {number}")
         except ConsoleError as exc:
             if exc.status != 412 or not reapply or not tries_left:
                 raise
@@ -434,7 +445,32 @@ def decisions(since: Optional[str] = None, command: Optional[str] = None) -> Lis
 def link_pr(number: int, pr_number: int, url: str, head_ref: str) -> Dict[str, Any]:
     dto, _ = request("POST", project_path("items", number, "pr-links"),
                      {"number": pr_number, "url": url, "headRef": head_ref})
-    return dto
+    return _object(dto, f"pr-link on item {number}")
+
+
+def create_item(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """`POST …/items`: title, body, kind, status, severity, tier, sprint and `labels` (flags only) → the ItemDto."""
+    dto, _ = request("POST", project_path("items"), payload)
+    return _object(dto, "created item")
+
+
+def comment(number: int, body: str, kind: str = "note") -> Dict[str, Any]:
+    """`POST …/items/N/comments`; `kind` is `note` or a team `decision` (the owner's decisions are not comments)."""
+    dto, _ = request("POST", project_path("items", number, "comments"), {"kind": kind, "body": body})
+    return _object(dto, f"comment on item {number}")
+
+
+def ask(number: int, category: str, text: str, commands: List[str], recommended: Optional[str]) -> Dict[str, Any]:
+    """`POST …/items/N/asks`: the question to the owner; the `owner:<category>` flag is the server's effect."""
+    dto, _ = request("POST", project_path("items", number, "asks"),
+                     {"category": category, "ask": text, "commands": commands, "recommended": recommended})
+    return _object(dto, f"ask on item {number}")
+
+
+def project_url() -> Optional[str]:
+    """The project's tracker page in the console, or None without TC_CONSOLE_URL."""
+    cfg = config()
+    return f"{cfg.console_url}/p/{urllib.parse.quote(cfg.project, safe='')}" if cfg.console_url else None
 
 
 def item_url(number: int) -> Optional[str]:

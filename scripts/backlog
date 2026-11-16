@@ -1,66 +1,66 @@
 #!/usr/bin/env python3
-"""Backlog adapter (SPEC decision 4): reads come from the team console's tracker (TC_* job environment, ADR 0006);
-the writes still go to GitHub Issues until they move too (team-console #608).
+"""Backlog adapter (SPEC decision 4) on the team console's tracker (TC_* job environment, ADR 0006).
 
 The contract is the subcommand set below and its JSON output; a different tracker replaces this file, not the
 skills. Output is JSON on stdout; errors go to stderr with a non-zero exit (3: the project is still on GitHub).
+Every write is the job's: what only the owner decides (approving, leaving `proposed`, editing approved text) is
+refused with the item's console page, where the owner does it.
 
   backlog init                                   check the console has the plugin's labels (it seeds them at the
                                                  cutover; adding one is the owner's): exit 1 naming the missing ones
   backlog list [--status S] [--kind K] [--label L]... [--milestone M|current|none] [--state open|closed|all]
   backlog show N                                 item with body, labels, comments, asks and owner decisions
-  backlog create --title T --kind K [--status proposed] [--severity SEV] [--label L]...
-                 [--milestone M|current] (--body B | --body-file F)
-                 kind question also needs --owner-category money|scope|release|access|legal|design and
-                 --ask "what to answer" — anything else is the team's call (`backlog decide`)
-  backlog ask N --owner-category C --ask "what to answer"
-                 turn an existing issue into a policy-conform owner question (answer line on top, owner:* label)
-  backlog answer N --command approve|reject|go|no-go|override|done --owner-said "…" [--text T]
-                 the owner's answer given in the team chat (interactive only — scheduled runs never call it);
-                 allowed commands depend on the item: questions and designs approve/reject, the demo issue
-                 go/no-go/override, action items done. With the team GitHub App it posts with PT_OWNER_TOKEN
-                 (the owner's own token; reference/identities.md) and refuses without it
+  backlog create --title T --kind K [--severity SEV] [--label L]... [--milestone M|current]
+                 (--body B | --body-file F)
+                 always `proposed` (#452: the owner approves in the console); kind question also needs
+                 --owner-category money|scope|release|access|legal|design and --ask "what to answer"
+                 [--commands approve,reject] [--recommended C] — anything else is the team's call (`backlog decide`)
+  backlog ask N --owner-category C --ask "what to answer" [--commands approve,reject] [--recommended C]
+                 put a question to the owner on an existing item (replaces its open ask; the console sets owner:*)
+  backlog answer N                               retired: the owner answers in the console (prints the item's URL, exit 2)
   backlog reversals [--days 14]  team decisions the owner answered with /reject since they were made
-  backlog decide N (--body B | --body-file F) [--close] [--handles-reversal COMMENT_ID]
-                 record a team decision on the issue (label team-decided); --close closes a question it answers;
+  backlog decide N (--body B | --body-file F) [--close] [--handles-reversal DECISION_ID]
+                 record a team decision (a `decision` comment); --close closes a question it answers;
                  refused while the owner's /reject of the last decision is open, unless it names that /reject
-  backlog move N STATUS [--reason TEXT]          set the single status:* label (done closes the issue)
-  backlog milestone N TITLE|current|none         put the issue into a sprint (or remove it)
+                 by its decision_id (from `reversals`)
+  backlog move N STATUS [--reason TEXT]          change the status (done closes; approved is the owner's, #452)
+  backlog milestone N TITLE|current|none         put the item into a sprint (or remove it)
   backlog close N [--reason TEXT]                close as not planned (rejected, duplicate, obsolete)
-  backlog edit N [--title T] [--body-file F]    change an issue's title or body (the answer line of a question is kept)
-  backlog label N [+L|-L]...                     add/remove flags
-  backlog comment N (--body B | --body-file F)
-  backlog link-pr N PR                           record the PR on the issue
+  backlog edit N [--title T] [--body-file F]    change title or body (refused once the owner approved the item, #462)
+  backlog label N [+L|-L]...                     add/remove flags; +tier:T / +sev:S set those fields, -tier:T clears
+  backlog comment N (--body B | --body-file F)   a `note` on the item
+  backlog link-pr N PR                           record the PR on the issue (GitHub until the next PR)
   backlog answers N                              the owner's decisions on the item (approve, reject, go, …): rows
                                                  only the owner writes, so "ignored" is always empty
-  backlog vanished [--days 30]                   owner commands a run acted on (`runlog finish --acted`) that
-                                                 were deleted since — once per run, never acted on again
+  backlog vanished [--days 30]                   retired no-op (console rows are append-only): {"vanished": []}
   backlog requests [--milestone M|current|none] [--days 30]
                  pending owner requests from the team console ("sprint → next", "queue → up"); one on a closed
                  item is listed under "ignored"
   backlog request-done N --comment-id ID --result applied|declined [--text REASON]
-                 answer a pending request with the handled marker, as the team (never the owner's token);
+                 answer a pending request with the handled marker, as the team (GitHub until the next PR);
                  declined needs --text
   backlog next [--now ISO]                       what a development run takes now: dispatch list in the console's
                                                  queue order, skipped issues with reasons, missing architect notes
   backlog sprint current|list
-  backlog sprint create TITLE DUE_DATE           DUE_DATE = demo day, YYYY-MM-DD
+  backlog sprint create TITLE DUE_DATE           DUE_DATE = demo day, YYYY-MM-DD (GitHub until the next PR)
 """
 from __future__ import annotations
 
 import argparse
 import json
 import os
-import re
 import sys
 
 sys.dont_write_bytecode = True  # the vendored copy lives in the product repo: no __pycache__ there
 from datetime import date, datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from ptlib import brief, console, gh, inbox, owner, ownerrequests, picker, project, provenance, runlogissue  # noqa: E402
+from typing import Optional  # noqa: E402
+
+from ptlib import brief, console, gh, owner, ownerrequests, picker, project, provenance  # noqa: E402
 from ptlib.calendar import KYIV, compute, pick_current_sprint  # noqa: E402
 from ptlib.labels import LABELS, STATUSES, KINDS, SEVERITIES  # noqa: E402
+from ptlib.tiers import ORDER as TIERS  # noqa: E402
 
 
 def out(data) -> None:
@@ -76,43 +76,6 @@ def body_arg(args) -> str:
         except OSError as exc:
             sys.exit(f"cannot read --body-file {args.body_file}: {exc.strerror}")
     return args.body or ""
-
-
-def slim(issue: dict) -> dict:
-    labels = [l["name"] for l in issue.get("labels", [])]
-    status = next((l[len("status:"):] for l in labels if l.startswith("status:")), None)
-    kind = next((l[len("kind:"):] for l in labels if l.startswith("kind:")), None)
-    ms = issue.get("milestone") or {}
-    return {
-        "number": issue["number"],
-        "title": issue["title"],
-        "state": issue.get("state"),
-        "status": status,
-        "kind": kind,
-        "labels": labels,
-        "milestone": ms.get("title"),
-        "url": issue.get("html_url"),
-        "updated_at": issue.get("updated_at"),
-    }
-
-
-def current_sprint(repo: str):
-    milestones = gh.api_list(f"repos/{repo}/milestones?state=open&per_page=100")
-    return pick_current_sprint(milestones, datetime.now(KYIV).date())
-
-
-def resolve_milestone(repo: str, value):
-    if not value:
-        return None
-    if value == "current":
-        sprint = current_sprint(repo)
-        if not sprint:
-            sys.exit("no open sprint milestone with a due date; run `backlog sprint create`")
-        return sprint
-    for m in gh.api_list(f"repos/{repo}/milestones?state=all&per_page=100"):
-        if m["title"] == value:
-            return m
-    sys.exit(f"milestone not found: {value}")
 
 
 # Reads: the team console's tracker. Its rows are data; each handler prints only fields it checked the type of.
@@ -217,6 +180,11 @@ def cmd_answers(args) -> None:
          "done": [d for d in found if d["command"] == "done"], "source": "console"})
 
 
+def redone_after(number: int, at: datetime) -> bool:
+    """Whether the team recorded a decision on the item after `at` (an owner /reject is answered by a later one)."""
+    return any(c.get("kind") == "decision" and instant(c.get("createdAt")) > at for c in console.comments(number))
+
+
 def cmd_reversals(args) -> None:
     """Owner rejects of a team decision since --days that no later team decision on the item answered."""
     since = days_ago(args.days)
@@ -231,9 +199,8 @@ def cmd_reversals(args) -> None:
     found = []
     for number in sorted(newest):
         reject = newest[number]
-        at = instant(reject.get("decidedAt"))
-        if any(c.get("kind") == "decision" and instant(c.get("createdAt")) > at for c in console.comments(number)):
-            continue  # the team redid the decision after the reject
+        if redone_after(number, instant(reject.get("decidedAt"))):
+            continue
         issue = summary(console.as_issue(console.get_item(number), titles))
         found.append(dict(issue, reason=console.text_of(reject, "text") or "", at=console.text_of(reject, "decidedAt"),
                           decision_id=reject.get("id"), reverses_comment_id=reject.get("reversesCommentId"),
@@ -318,159 +285,264 @@ def cmd_sprint(args) -> None:
              for s in sprints])
 
 
-# Writes: still GitHub Issues until team-console #608 moves them.
+# Writes: the console judges each one by the job's role and the transition table (team-console auth/policy.ts);
+# this side refuses up front what it knows the owner alone does, and turns the console's refusals into the words
+# the skills act on. One Idempotency-Key per request (console.request); a two-step command says how far it got.
 
-def cmd_create(repo: str, args) -> None:
+OWNER_APPROVES = ("approve", "leave-proposed", "not-approved")
+NOT_PLANNED = {"state": "closed", "closedReason": "not-planned"}
+
+
+def approval_hint(number: Optional[int]) -> str:
+    url = console.item_url(number) if number else console.project_url()
+    return f"the owner approves in the console: {url}" if url else \
+        "the owner approves in the console (set TC_CONSOLE_URL for the link)"
+
+
+def explain(exc: console.ConsoleError, number: Optional[int]) -> Optional[str]:
+    """A console refusal a write can meet, as the skills read it; None for anything `console.report` says better."""
+    where = f"#{number}: " if number else ""
+    url = console.item_url(number) if number else None
+    if exc.status == 403 and exc.type == "transition-owner-only":
+        if exc.reason == "edit-after-approval":
+            return (f"{where}the approved title and body are the owner's to change (edit-after-approval): add a "
+                    f"`backlog comment` note, or the owner edits it in the console{f': {url}' if url else ''}")
+        if exc.reason in OWNER_APPROVES:
+            return f"{where}{approval_hint(number)}"
+        return f"{where}only an owner decision makes this change ({exc.reason}): {exc.detail}"
+    if exc.status == 403 and exc.type == "transition-role":
+        return f"{where}this job's role may not make this change ({exc.reason}): {exc.detail}"
+    if exc.status == 404 and exc.type == "item-not-found":
+        return f"{where}no such item in the console project"
+    if exc.status == 409 and exc.type == "item-closed":
+        return f"{where}the item is closed; `backlog move` reopens it first"
+    if exc.status == 409 and exc.type == "request-handled":
+        return f"{where}the request was already answered (`backlog requests` lists the pending ones)"
+    if exc.status == 412:
+        return f"{where}the item changed while it was being written: `backlog show {number}` and repeat the change"
+    if exc.status == 422 and exc.type == "body-secret":
+        return (f"{where}the text carries a secret ({exc.kind or 'credential'} in {exc.field or 'the body'}): remove "
+                "it — a job's text never stores a credential")
+    return None
+
+
+def fail(exc: console.ConsoleError, number: Optional[int] = None, progress: str = "") -> None:
+    """Exit on a console error; `progress` names what an earlier step of the command already wrote."""
+    text = explain(exc, number)
+    if text is None:
+        if progress:
+            print(f"console: {progress}", file=sys.stderr)
+        sys.exit(console.report(exc))
+    print(f"console: {text}" + (f" ({progress})" if progress else ""), file=sys.stderr)
+    sys.exit(console.EXIT_ERROR)
+
+
+def written(dto: dict, sprints: Optional[list] = None) -> dict:
+    """The item a write answered with, in the summary shape; the sprint title is read only when the item has one."""
+    if sprints is None and console._is_number(dto.get("sprint")):
+        sprints = console.sprints()
+    return summary(console.as_issue(dto, sprint_titles(sprints or [])))
+
+
+def label_fields(names: list) -> tuple:
+    """`--label`/`+label` values as the console takes them: (flags, {tier|severity: value}). `tier:*` and `sev:*`
+    are fields; `status:*` and `kind:*` are `move`'s and `create --kind`'s."""
+    flags, fields = [], {}
+    for name in names:
+        prefix, _, value = name.partition(":")
+        if prefix == "status":
+            sys.exit("use `backlog move` to change status")
+        if prefix == "kind":
+            sys.exit("the kind is not a label: `backlog create --kind` sets it")
+        if prefix == "tier":
+            if value not in TIERS:
+                sys.exit(f"unknown tier {value!r}; one of {TIERS}")
+            fields["tier"] = value
+        elif prefix == "sev":
+            if value not in SEVERITIES:
+                sys.exit(f"unknown severity {value!r}; one of {SEVERITIES}")
+            fields["severity"] = value
+        else:
+            flags.append(name)
+    return flags, fields
+
+
+def ask_input(args) -> dict:
+    """The ask's body: category, one-line text, the commands that answer it and the recommended one."""
+    text = brief.one_line(args.ask or "")
+    if not args.owner_category or not text:
+        sys.exit("a question to the owner needs --owner-category and --ask; anything the team may decide is "
+                 "recorded with `backlog decide`")
+    commands = [c for c in (args.commands or "approve,reject").split(",") if c]
+    unknown = [c for c in commands if c not in brief.ANSWERABLE]
+    if unknown or not commands or len(set(commands)) != len(commands) or len(commands) > 6:
+        sys.exit(f"--commands lists 1 to 6 distinct answer commands out of {', '.join(brief.ANSWERABLE)}")
+    if args.recommended and args.recommended not in commands:
+        sys.exit("--recommended must be one of --commands")
+    return {"category": args.owner_category, "text": text, "commands": commands, "recommended": args.recommended or None}
+
+
+def ask_entry(dto: dict) -> dict:
+    text = console.text_of
+    return {"id": dto.get("id"), "category": text(dto, "category"), "ask": text(dto, "ask"),
+            "commands": [c for c in dto["commands"] if isinstance(c, str)] if isinstance(dto.get("commands"), list)
+            else [], "recommended": text(dto, "recommended"), "state": text(dto, "state")}
+
+
+def cmd_create(args) -> None:
     if args.kind not in KINDS:
         sys.exit(f"unknown kind {args.kind}; one of {KINDS}")
-    if args.status not in STATUSES:
-        sys.exit(f"unknown status {args.status}; one of {STATUSES}")
-    labels = [f"kind:{args.kind}", f"status:{args.status}"] + list(args.label or [])
-    body = body_arg(args)
-    if args.kind == "question":
-        # The decision policy, enforced: only owner decisions become questions, and each says how to answer.
-        try:
-            body = owner.question_body(args.ask or "", body, args.owner_category or "", project.owner_language())
-        except ValueError as exc:
-            sys.exit(str(exc))
-        labels.append(f"owner:{args.owner_category}")
+    if args.status != "proposed":  # #452: a job never creates an item past `proposed`
+        sys.exit(f"a job creates items as proposed only; {approval_hint(None)}")
+    flags, fields = label_fields(args.label or [])
     if args.severity:
         if args.severity not in SEVERITIES:
             sys.exit(f"unknown severity {args.severity}; one of {SEVERITIES}")
-        labels.append(f"sev:{args.severity}")
-    payload = {"title": args.title, "body": body, "labels": labels}
-    ms = resolve_milestone(repo, args.milestone)
-    if ms:
-        payload["milestone"] = ms["number"]
-    out(slim(gh.api(f"repos/{repo}/issues", "POST", payload)))
+        fields["severity"] = args.severity
+    question = ask_input(args) if args.kind == "question" else None
+    payload = {"title": args.title, "body": body_arg(args), "kind": args.kind, "status": "proposed",
+               "labels": flags, **fields}
+    sprints = None
+    if args.milestone:
+        sprints = console.sprints()
+        payload["sprint"] = console_sprint(sprints, args.milestone, datetime.now(KYIV).date())["number"]
+    dto = console.create_item(payload)
+    result = written(dto, sprints)
+    if question:
+        # The second write of a question; its failure names the item so a rerun is `backlog ask N …`.
+        try:
+            result["ask"] = ask_entry(console.ask(result["number"], **question))
+        except console.ConsoleError as exc:
+            fail(exc, result["number"], f"item {result['key'] or result['number']} was created without its "
+                                        f"question: add it with `backlog ask {result['number']} …`")
+    out(result)
 
 
-def cmd_ask(repo: str, args) -> None:
-    issue = gh.api(f"repos/{repo}/issues/{args.number}")
-    body = issue.get("body") or ""
-    if owner.ask_of(body):  # replace an existing answer line rather than stacking two
-        body = body.split(owner.ASK_MARKER, 1)[-1]
-    try:
-        body = owner.question_body(args.ask, body, args.owner_category, project.owner_language())
-    except ValueError as exc:
-        sys.exit(str(exc))
-    if any(l["name"] == "design:awaiting-approval" for l in issue["labels"]):
-        sys.exit("designs are answered on their issue as they are (the inbox shows /approve · /reject); not a question")
-    labels = sorted({l["name"] for l in issue["labels"] if not l["name"].startswith(("owner:", "kind:"))}
-                    | {"kind:question", f"owner:{args.owner_category}"})
-    out(slim(gh.api(f"repos/{repo}/issues/{args.number}", "PATCH", {"body": body, "labels": labels})))
+def cmd_ask(args) -> None:
+    question = ask_input(args)
+    dto = console.get_item(args.number)
+    flags = dto.get("flags") if isinstance(dto.get("flags"), list) else []
+    if "design:awaiting-approval" in flags:
+        sys.exit("designs are answered on their item as they are (the console shows approve · reject); not a question")
+    asked = console.ask(args.number, **question)
+    out({"issue": args.number, "key": console.text_of(dto, "key"), "url": console.item_url(args.number),
+         "ask": ask_entry(asked)})
 
 
-def cmd_answer(repo: str, args) -> None:
-    issue = gh.api(f"repos/{repo}/issues/{args.number}")
-    if issue.get("state") != "open":
-        sys.exit(f"#{args.number} is closed; nothing is waiting for an answer there")
-    labels = [l["name"] for l in issue["labels"]]
-    kind = next((l[5:] for l in labels if l.startswith("kind:")), None)
-    section = inbox.classify({"labels": labels, "kind": kind})
-    try:
-        body = brief.answer_comment(args.command, args.text or "", args.owner_said or "", section or "")
-    except ValueError as exc:
-        sys.exit(f"#{args.number}: {exc}")
-    # Commands count only when the owner's login wrote them; in app mode that needs the owner's own token.
-    c = gh.api(f"repos/{repo}/issues/{args.number}/comments", "POST", {"body": body}, auth=gh.owner_token(repo))
-    out({"issue": args.number, "answer": f"/{args.command}", "url": c["html_url"]})
+def cmd_answer(args) -> None:
+    # Retired (ADR 0006): decisions are rows only the owner's identity writes; the team links the item instead.
+    url = console.item_url(args.number)
+    out({"issue": args.number, "url": url, "retired": "backlog answer"})
+    print(f"backlog answer is retired: the owner answers in the console"
+          f"{f': {url}' if url else ' (set TC_CONSOLE_URL for the link)'}", file=sys.stderr)
+    sys.exit(2)
 
 
-def cmd_decide(repo: str, args) -> None:
+def open_reversal(number: int) -> Optional[dict]:
+    """The owner's newest /reject of a team decision on the item, unless a later team decision answered it."""
+    rejects = [d for d in console.item_decisions(number)
+               if d.get("command") == "reject" and isinstance(d.get("reversesCommentId"), int)]
+    if not rejects:
+        return None
+    newest = max(rejects, key=lambda d: instant(d.get("decidedAt")))
+    return None if redone_after(number, instant(newest.get("decidedAt"))) else newest
+
+
+def decision_body(text: str, reversal: Optional[dict]) -> str:
+    if not reversal:
+        return text
+    reason = console.text_of(reversal, "text") or ""
+    return f"**Answers the owner's /reject** (decision {reversal.get('id')}){f': {reason}' if reason else ''}\n\n{text}"
+
+
+def cmd_decide(args) -> None:
     text = body_arg(args).strip()
     if not text:
         sys.exit("a team decision needs its reasoning: --body or --body-file")
-    issue = gh.api(f"repos/{repo}/issues/{args.number}")
-    current = {l["name"] for l in issue["labels"]}
-    if args.close and "kind:question" not in current:
-        sys.exit("--close is only for questions a decision answers; move other issues through their status")
+    dto = console.get_item(args.number)
+    if args.close and console.text_of(dto, "kind") != "question":
+        sys.exit("--close is only for questions a decision answers; move other items through their status")
     # A new decision would move the decision date past an open owner /reject and hide it from `reversals`.
-    comments = gh.api_list(f"repos/{repo}/issues/{args.number}/comments?per_page=100")
-    rejection = owner.reversed_by_owner(comments, gh.owner_login(repo), provenance.fetch(repo, args.number),
-                                        gh.team_logins(repo), gh.acts_as_owner(repo))
-    if rejection and str(rejection.get("comment_id")) != str(args.handles_reversal or ""):
-        sys.exit(f"#{args.number}: the owner reversed the last team decision (/reject {rejection.get('text', '')}, "
-                 f"{rejection.get('url')}). Act on it: record the redone decision with "
-                 f"--handles-reversal {rejection.get('comment_id')}, or turn it into an owner question with "
-                 "`backlog ask`")
-    c = gh.api(f"repos/{repo}/issues/{args.number}/comments", "POST",
-               {"body": owner.decision_comment(text, str(rejection["comment_id"]) if rejection else None,
-                                               rejection.get("url") or "" if rejection else "")})
-    # A decided question is no longer the owner's: drop owner:* so it leaves "Questions" and shows as FYI only.
-    labels = sorted({l for l in current if not l.startswith("owner:")} | {"team-decided"})
-    patch = {"labels": labels}
+    reversal = open_reversal(args.number)
+    if reversal and reversal.get("id") != args.handles_reversal:
+        sys.exit(f"#{args.number}: the owner reversed the last team decision (/reject "
+                 f"{console.text_of(reversal, 'text') or ''}, decision {reversal.get('id')}). Act on it: record "
+                 f"the redone decision with --handles-reversal {reversal.get('id')}, or turn it into an owner "
+                 "question with `backlog ask`")
+    comment = console.comment(args.number, decision_body(text, reversal), kind="decision")
     if args.close:
-        patch.update(state="closed", state_reason="completed")
-    out(dict(slim(gh.api(f"repos/{repo}/issues/{args.number}", "PATCH", patch)), decision_url=c["html_url"]))
+        dto = console.update_item(args.number, NOT_PLANNED)
+    out(dict(written(dto), decision_id=comment.get("id"), handles_reversal=reversal.get("id") if reversal else None))
 
 
-def cmd_move(repo: str, args) -> None:
+def cmd_move(args) -> None:
     if args.status not in STATUSES:
         sys.exit(f"unknown status {args.status}; one of {STATUSES}")
-    issue = gh.api(f"repos/{repo}/issues/{args.number}")
-    labels = [l["name"] for l in issue["labels"] if not l["name"].startswith("status:")]
-    labels.append(f"status:{args.status}")
-    payload = {"labels": labels}
-    if args.status == "done":
-        payload["state"] = "closed"
-        payload["state_reason"] = "completed"
-    elif issue["state"] == "closed":
-        payload["state"] = "open"
-    updated = gh.api(f"repos/{repo}/issues/{args.number}", "PATCH", payload)
+    if args.status == "approved":  # #452: approving is the owner's scope decision
+        sys.exit(f"#{args.number}: {approval_hint(args.number)}")
+
+    def patch(current: dict) -> dict:
+        # `done` closes by itself; any other status on a closed item reopens it (as the GitHub form did).
+        reopen = current.get("state") == "closed" and args.status != "done"
+        return {"status": args.status, **({"state": "open"} if reopen else {})}
+
+    dto = console.update_item(args.number, patch)
     if args.reason:
-        gh.api(f"repos/{repo}/issues/{args.number}/comments", "POST",
-               {"body": f"**Status → `{args.status}`**: {args.reason}"})
-    out(slim(updated))
+        console.comment(args.number, f"**Status → `{args.status}`**: {args.reason}")
+    out(written(dto))
 
 
-def cmd_milestone(repo: str, args) -> None:
-    number = None if args.title == "none" else resolve_milestone(repo, args.title)["number"]
-    out(slim(gh.api(f"repos/{repo}/issues/{args.number}", "PATCH", {"milestone": number})))
+def cmd_milestone(args) -> None:
+    sprints = console.sprints()
+    number = None if args.title == "none" else console_sprint(sprints, args.title, datetime.now(KYIV).date())["number"]
+    out(written(console.update_item(args.number, {"sprint": number}), sprints))
 
 
-def cmd_close(repo: str, args) -> None:
+def cmd_close(args) -> None:
+    dto = console.update_item(args.number, NOT_PLANNED)
     if args.reason:
-        gh.api(f"repos/{repo}/issues/{args.number}/comments", "POST", {"body": f"**Closed as not planned**: {args.reason}"})
-    out(slim(gh.api(f"repos/{repo}/issues/{args.number}", "PATCH", {"state": "closed", "state_reason": "not_planned"})))
+        console.comment(args.number, f"**Closed as not planned**: {args.reason}")
+    out(written(dto))
 
 
-def cmd_edit(repo: str, args) -> None:
+def cmd_edit(args) -> None:
     patch = {}
     if args.title:
         patch["title"] = args.title
     if args.body_file or args.body:
-        body = body_arg(args)
-        current = gh.api(f"repos/{repo}/issues/{args.number}").get("body") or ""
-        ask = owner.ask_of(current)
-        if ask and not owner.ask_of(body):  # never lose the owner's answer line on a question
-            body = current.split(owner.ASK_MARKER, 1)[0] + owner.ASK_MARKER + "\n\n" + body.strip() + "\n"
-        patch["body"] = body
+        patch["body"] = body_arg(args)  # the ask is a row of its own now, nothing in the body to keep
     if not patch:
         sys.exit("nothing to change: --title and/or --body-file")
-    out(slim(gh.api(f"repos/{repo}/issues/{args.number}", "PATCH", patch)))
+    # A lost race on a text edit is reported, never merged: the editor re-reads and edits again.
+    out(written(console.update_item(args.number, patch, reapply=False)))
 
 
-def cmd_label(repo: str, args) -> None:
+def cmd_label(args) -> None:
     for change in args.changes:
         if change[:1] not in "+-" or len(change) < 2:
             sys.exit(f"label changes look like +name or -name, got {change!r}")
-        if change[1:].startswith("status:"):
-            sys.exit("use `backlog move` to change status")
-    issue = gh.api(f"repos/{repo}/issues/{args.number}")
-    labels = {l["name"] for l in issue["labels"]}
-    for change in args.changes:
-        (labels.add if change[0] == "+" else labels.discard)(change[1:])
-    out(slim(gh.api(f"repos/{repo}/issues/{args.number}", "PATCH", {"labels": sorted(labels)})))
+    add, add_fields = label_fields([c[1:] for c in args.changes if c[0] == "+"])
+    remove, remove_fields = label_fields([c[1:] for c in args.changes if c[0] == "-"])
+    patch = {name: None for name in remove_fields}
+    patch.update(add_fields)
+    if add:
+        patch["addLabels"] = add
+    if remove:
+        patch["removeLabels"] = remove
+    out(written(console.update_item(args.number, patch)))
 
 
-def cmd_comment(repo: str, args) -> None:
-    if owner.DECISION_MARKER in body_arg(args):
+def cmd_comment(args) -> None:
+    body = body_arg(args)
+    if owner.DECISION_MARKER in body:
         sys.exit("team decisions are recorded with `backlog decide`, not as a plain comment")
-    if ownerrequests.first_line(body_arg(args)).startswith(ownerrequests.REQUEST_PREFIX):
+    if ownerrequests.first_line(body).startswith(ownerrequests.REQUEST_PREFIX):
         sys.exit("owner requests come only from the team console; answer one with `backlog request-done`")
-    c = gh.api(f"repos/{repo}/issues/{args.number}/comments", "POST", {"body": body_arg(args)})
-    out({"id": c["id"], "url": c["html_url"]})
+    if not body.strip():
+        sys.exit("an empty comment: --body or --body-file")
+    c = console.comment(args.number, body)
+    out({"issue": args.number, "id": c.get("id"), "kind": console.text_of(c, "kind"),
+         "url": console.item_url(args.number)})
 
 
 def cmd_link_pr(repo: str, args) -> None:
@@ -480,30 +552,10 @@ def cmd_link_pr(repo: str, args) -> None:
     out({"issue": args.number, "pr": pr["number"], "pr_url": pr["html_url"], "comment": c["html_url"]})
 
 
-GONE = re.compile(r"→ HTTP (404|410)\b")
-
-
-def cmd_vanished(repo: str, args) -> None:
-    """Owner commands the team acted on (`runlog finish --acted`) that are gone now: deleted after the fact.
-
-    Once per run, not per issue: it reads the whole run log and one comment list per issue it names.
-    """
-    acted, error, history_mode = runlogissue.acted_on(repo)
-    since = (datetime.now(timezone.utc) - timedelta(days=args.days)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    recent = [a for a in acted if (a.get("at") or "") >= since]
-    vanished = []
-    for number in sorted({a["issue"] for a in recent}):
-        try:
-            present = {str(c.get("id")) for c in gh.api_list(f"repos/{repo}/issues/{number}/comments?per_page=100")}
-            gone = ""
-        except gh.GhError as exc:
-            if not GONE.search(str(exc)):
-                raise
-            # The issue itself was deleted or transferred: every command the team acted on there is gone with it.
-            present, gone = set(), f"issue #{number} is gone"
-        vanished += [dict(a, reason=gone) if gone else a
-                     for a in recent if a["issue"] == number and str(a["comment_id"]) not in present]
-    out({"vanished": vanished, "checked": len(recent), "error": error, "history": history_mode})
+def cmd_vanished(_args) -> None:
+    # Retired: console rows are append-only, so a decision the team acted on cannot disappear. Kept one release
+    # for the skills that still call it once per run.
+    out({"vanished": [], "checked": 0, "error": "", "history": "console"})
 
 
 def _request_slugs(repo: str) -> list:
@@ -575,16 +627,18 @@ def main() -> None:
     cr.add_argument("--status", default="proposed"); cr.add_argument("--severity")
     cr.add_argument("--label", action="append"); cr.add_argument("--milestone")
     cr.add_argument("--body"); cr.add_argument("--body-file")
-    cr.add_argument("--owner-category", choices=sorted(owner.CATEGORIES)); cr.add_argument("--ask")
-    an2 = sub.add_parser("answer"); an2.add_argument("number", type=int)
-    an2.add_argument("--command", required=True, choices=list(brief.ANSWERABLE)); an2.add_argument("--text")
-    an2.add_argument("--owner-said", required=True)
-    rv = sub.add_parser("reversals"); rv.add_argument("--days", type=int, default=14)
     ak = sub.add_parser("ask"); ak.add_argument("number", type=int)
-    ak.add_argument("--owner-category", required=True, choices=sorted(owner.CATEGORIES)); ak.add_argument("--ask", required=True)
+    for parser, required in ((cr, False), (ak, True)):
+        parser.add_argument("--owner-category", required=required, choices=sorted(owner.CATEGORIES))
+        parser.add_argument("--ask", required=required)
+        parser.add_argument("--commands", help="comma-separated answer commands (default approve,reject)")
+        parser.add_argument("--recommended", choices=list(brief.ANSWERABLE))
+    an2 = sub.add_parser("answer"); an2.add_argument("number", type=int)
+    an2.add_argument("--command"); an2.add_argument("--text"); an2.add_argument("--owner-said")
+    rv = sub.add_parser("reversals"); rv.add_argument("--days", type=int, default=14)
     de = sub.add_parser("decide"); de.add_argument("number", type=int); de.add_argument("--body"); de.add_argument("--body-file")
     de.add_argument("--close", action="store_true")
-    de.add_argument("--handles-reversal", help="comment id of the owner's /reject this decision answers")
+    de.add_argument("--handles-reversal", type=int, help="decision_id of the owner's /reject this decision answers")
     mv = sub.add_parser("move"); mv.add_argument("number", type=int); mv.add_argument("status"); mv.add_argument("--reason")
     ms = sub.add_parser("milestone"); ms.add_argument("number", type=int); ms.add_argument("title")
     cl = sub.add_parser("close"); cl.add_argument("number", type=int); cl.add_argument("--reason")
@@ -608,24 +662,25 @@ def main() -> None:
         argv = argv[:2] + ["--"] + argv[2:]
     args = p.parse_args(argv)
 
-    reads = {"init": cmd_init, "list": cmd_list, "show": cmd_show, "answers": cmd_answers, "reversals": cmd_reversals,
-             "requests": cmd_requests, "next": cmd_next, "sprint": cmd_sprint}
-    if args.cmd in reads and not (args.cmd == "sprint" and args.action == "create"):
-        try:
-            reads[args.cmd](args)
-        except console.ConsoleError as exc:
-            sys.exit(console.report(exc))
-        return
-    writes = {
-        "create": cmd_create, "move": cmd_move, "close": cmd_close, "decide": cmd_decide, "ask": cmd_ask,
-        "answer": cmd_answer, "milestone": cmd_milestone, "label": cmd_label, "edit": cmd_edit,
-        "comment": cmd_comment, "link-pr": cmd_link_pr, "vanished": cmd_vanished, "sprint": cmd_sprint_create,
-        "request-done": cmd_request_done,
+    handlers = {
+        "init": cmd_init, "list": cmd_list, "show": cmd_show, "answers": cmd_answers, "reversals": cmd_reversals,
+        "requests": cmd_requests, "next": cmd_next, "sprint": cmd_sprint,
+        "create": cmd_create, "ask": cmd_ask, "answer": cmd_answer, "decide": cmd_decide, "move": cmd_move,
+        "milestone": cmd_milestone, "close": cmd_close, "edit": cmd_edit, "label": cmd_label,
+        "comment": cmd_comment, "vanished": cmd_vanished,
     }
+    # Still GitHub until the next PR (team-console #608, part 2): the PR link, owner requests and sprint creation.
+    github = {"link-pr": cmd_link_pr, "request-done": cmd_request_done, "sprint": cmd_sprint_create}
+    if args.cmd in github and (args.cmd != "sprint" or args.action == "create"):
+        try:
+            github[args.cmd](gh.repo(), args)
+        except gh.GhError as exc:
+            sys.exit(str(exc))
+        return
     try:
-        writes[args.cmd](gh.repo(), args)
-    except gh.GhError as exc:
-        sys.exit(str(exc))
+        handlers[args.cmd](args)
+    except console.ConsoleError as exc:
+        fail(exc, getattr(args, "number", None))
 
 
 if __name__ == "__main__":

@@ -109,6 +109,12 @@ Communication is from the phone.
   themselves, through the same PR flow as everything else. Routines use one repository each (project agents and
   skills load only in single-repository sessions).
 - **No `gh` dependency**: cloud images may lack the CLI; scripts use the REST API with the session token.
+- **`backlog`'s partial-write result** (team-console#623, follow-up team-console#654): `create --kind question`,
+  `decide --close`, `move --reason` and `close --reason` each make two writes (the item/decision, then a note or
+  the close). When the second write fails, `backlog` still prints the first write's result on stdout with
+  `partial: {stored, failed, next, error}` and exits non-zero; stderr carries the same `next` command. A caller
+  reads `partial.next` on a non-zero exit and runs that instead of rerunning the original command — rerunning
+  would repeat the first write (e.g. a second decision comment).
 
 ## To verify before building on it
 

@@ -21,7 +21,8 @@ leave it as it is. Every decision you apply goes into the run's `runlog finish` 
 
 ## 2. Apply
 - Proposal `approve` → the console already approved it; `B milestone N "<next sprint>"`. `reject` → `B close N --reason "rejected at
-  demo: <comment>"`. Comment only → add it to the issue.
+  demo: <comment>"` (a non-zero exit that still carries `partial` on stdout means the close is stored and the
+  reason note is not: run `partial.next`, never rerun `close`). Comment only → add it to the issue.
 - Feedback on a shipped item → comment on that issue; if it describes a defect, `B create --kind bug` with the
   severity `pm` assigns.
 - **Release**:

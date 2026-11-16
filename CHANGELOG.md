@@ -48,6 +48,12 @@ release it precedes: `0.12.0-pre.1 < 0.12.0-pre.2 < 0.12.0`).
 - `backlog next`/`list` follow the console's own queue order (`(rank, number)`, `items.rank`, team-console#456)
   instead of issue number; `backlog queue N first|up|down` (PM only) reorders it to honour an owner `priority`
   request (ADR 0005).
+- The console client (`scripts/ptlib/console.py`) now refuses, instead of hanging or trusting a bad peer
+  (team-console#616): an answer over the size cap (`answer-too-large`, never retried), a malformed `ETag` the
+  console returned or a malformed `If-Match` about to be sent (`unexpected-answer` / `etag-invalid`), a header or
+  path `http.client` itself refuses (`request-invalid`, without quoting the value), and a runner socket that is
+  not this user's or not a socket at all (`socket-untrusted`). These are new refusals a job may now see from a
+  call that previously hung or went through unchecked.
 - `tests/contract/console.lock` pins the team-console commit the vendored fixtures
   (`tests/contract/fixtures/tracker/*.json`) were copied from; a `fixtures` CI job checks out team-console at
   that commit and fails the build if its `apps/api/fixtures/tracker` no longer matches the vendored copy.

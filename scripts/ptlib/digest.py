@@ -39,6 +39,12 @@ def is_fyi(title: str) -> bool:
     return title.startswith(FYI_KEYS)
 
 
+def _single_line(text: str) -> str:
+    """Flatten a console-supplied title/ask (team-console#661): a newline would otherwise forge extra
+    lines — e.g. a fake "Answer:" row — in this plain-text message."""
+    return text.replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
+
+
 def format_digest(product: str, sections: List[Tuple[str, List[dict]]], language: str = "en") -> str:
     needs = needs_count(sections)
     lines = [HEADER.get(language, HEADER["en"]).format(product=product, n=needs), ""]
@@ -48,9 +54,9 @@ def format_digest(product: str, sections: List[Tuple[str, List[dict]]], language
         lines.append(title)
         for item in items:
             number = f"#{item['number']} " if item["number"] else ""
-            lines.append(f"• {number}{item['title']}")
+            lines.append(f"• {number}{_single_line(item['title'])}")
             if item["ask"]:
-                lines.append(f"  {ANSWER.get(language, ANSWER['en'])}: {item['ask']}")
+                lines.append(f"  {ANSWER.get(language, ANSWER['en'])}: {_single_line(item['ask'])}")
             if item["url"]:
                 lines.append(f"  {item['url']}")
         lines.append("")

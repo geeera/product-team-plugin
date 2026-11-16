@@ -2,12 +2,16 @@
 console its `GET …/inbox` read model (ADR 0006 decision 12), rendered the same way for `inbox show` and the digest."""
 from __future__ import annotations
 
+import re
 import urllib.parse
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .transport import is_loopback
 
 MARKER = "<!-- pt-inbox -->"
+# Markdown control characters that could close/open a construct (a link, emphasis, code span) inside
+# console-supplied text; a literal backslash is escaped first so re.sub never double-escapes it.
+_MARKDOWN_CONTROL = re.compile(r"[\\\[\]()<>*_`]")
 
 # key -> (title, the one action the owner takes), per owner language
 TEXT: Dict[str, Dict[str, tuple]] = {
@@ -109,6 +113,14 @@ def console_groups(dto: Dict[str, Any], item_url: Callable[[int], Optional[str]]
     return groups
 
 
+def escape_markdown(text: str) -> str:
+    """Neutralize `title`/`ask` from the console (team-console#661): a raw title like `x](javascript:alert(1))`
+    closes the markdown link early and opens its own. Escapes `\\ [ ] ( ) < > * _ \\`` and flattens newlines so
+    the text can never span or spoof a link/line of its own."""
+    escaped = _MARKDOWN_CONTROL.sub(lambda m: "\\" + m.group(0), text)
+    return escaped.replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
+
+
 def linkable(url: Any) -> Optional[str]:
     """`url` when it may go into a markdown link: https, or http to this machine (a local console). Anything else —
     `javascript:`, `data:`, a relative path, a space, parenthesis or angle bracket that would end the link — is None
@@ -127,9 +139,10 @@ def linkable(url: Any) -> Optional[str]:
 
 def item_line(item: dict) -> str:
     number = f"#{item['number']} " if "number" in item else ""
-    ask = f" — {item['ask']}" if item.get("ask") else ""
+    ask = f" — {escape_markdown(item['ask'])}" if item.get("ask") else ""
     url = linkable(item.get("url"))
-    title = f"[{item['title']}]({url})" if url else item["title"]
+    title = escape_markdown(item["title"])
+    title = f"[{title}]({url})" if url else title
     return f"- {number}{title}{ask}"
 
 

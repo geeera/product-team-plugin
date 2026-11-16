@@ -13,6 +13,7 @@ import json
 import os
 import re
 import socket
+import stat
 import sys
 import time
 import urllib.parse
@@ -36,6 +37,7 @@ _TOKEN = re.compile(r"^[\x21-\x7e]+$")  # header-safe: a CR/LF or space would sp
 _PROJECT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
 _RETRY_AFTER = re.compile(r"^\d{1,6}$")
 _IDEMPOTENCY_KEY = re.compile(r"^[A-Za-z0-9_-]{8,128}$")  # what the console accepts (tracker/idempotency.ts)
+_ETAG = re.compile(r'^(W/)?"[\x21\x23-\x7e]{0,200}"$')  # RFC 9110 entity-tag; the console sends `"<version>"`
 
 
 class ConsoleError(RuntimeError):
@@ -115,6 +117,7 @@ class UnixHTTPConnection(http.client.HTTPConnection):
         self.socket_path = path
 
     def connect(self) -> None:
+        check_socket(self.socket_path)
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         try:
             sock.settimeout(self.timeout)
@@ -123,6 +126,25 @@ class UnixHTTPConnection(http.client.HTTPConnection):
             sock.close()
             raise
         self.sock = sock
+
+
+def check_socket(path: str) -> None:
+    """Refuses a TC_RUNNER_SOCKET the job cannot trust with its token: not a socket (a symlink, a file), open to
+    every user, or owned by another user who shares no group with the job. The runner makes it 0600 for its own
+    user, or 0660 under a group the job user is in (team-console runner socket-server.ts, backends/user.ts).
+    A missing path is the OSError connect would raise, so it stays `unreachable`."""
+    info = os.lstat(path)
+    problem = None
+    if not stat.S_ISSOCK(info.st_mode):
+        problem = "is not a socket"
+    elif info.st_mode & stat.S_IWOTH:
+        problem = "is writable by every user"
+    elif hasattr(os, "geteuid") and info.st_uid not in (os.geteuid(), 0) \
+            and info.st_gid not in {os.getegid(), *os.getgroups()}:
+        problem = "belongs to another user and none of this job's groups"
+    if problem:
+        raise ConsoleError(f"TC_RUNNER_SOCKET {problem}: not the runner's job socket", type="socket-untrusted",
+                           field="TC_RUNNER_SOCKET")
 
 
 def _connection(cfg: Config, timeout: float) -> http.client.HTTPConnection:
@@ -178,32 +200,39 @@ def _attempt(cfg: Config, method: str, target: str, data: Optional[bytes], heade
     if now >= deadline:
         raise transport.Deadline()
     attempt_deadline = min(deadline, now + ATTEMPT_DEADLINE)
-    conn = _connection(cfg, min(ATTEMPT_DEADLINE, deadline - now))
+    conn = _connection(cfg, attempt_deadline - now)
+    # Every read, the status line and headers included, waits at most what is left of this attempt.
+    conn.response_class = transport.deadline_response(attempt_deadline, ATTEMPT_DEADLINE)  # type: ignore[assignment]
     where = f"{method} {target}"
     try:
+        conn.connect()
+        if conn.sock is not None:
+            conn.sock.settimeout(transport.remaining(attempt_deadline))  # sending gets only what connect left
         # putrequest, not request(): no Accept-Encoding or other header the proxy would drop.
         conn.putrequest(method, target, skip_accept_encoding=True)
         for name, value in headers.items():
             conn.putheader(name, value)
         conn.endheaders(data)
         resp = conn.getresponse()
-        payload = transport.read_until(resp, attempt_deadline, ATTEMPT_DEADLINE)
+        payload = transport.read_until(resp, attempt_deadline, ATTEMPT_DEADLINE, transport.RESPONSE_LIMIT)
         return resp.status, {k.lower(): v for k, v in resp.getheaders()}, payload
     except transport.Deadline:
         if time.monotonic() >= deadline:
             raise
         raise transport.Retryable(ConsoleError(f"{where}: no complete answer within {ATTEMPT_DEADLINE:g} s",
                                                type="timeout")) from None
+    except transport.TooLarge as exc:
+        raise ConsoleError(f"{where}: {exc}", type="answer-too-large") from None
+    except ValueError:
+        # http.client refusing a header value or the target; its message would quote the value.
+        raise ConsoleError(f"{where}: a request header or the path is not valid HTTP",
+                           type="request-invalid") from None
     except (OSError, http.client.HTTPException) as exc:
         # The exception's class and errno only: its text could quote what was being sent.
         error = ConsoleError(f"{where} failed: {type(exc).__name__}"
                              f"{f' (errno {exc.errno})' if getattr(exc, 'errno', None) else ''}",
                              type="timeout" if transport.is_timeout(exc) else "unreachable")
-        if transport.is_timeout(exc):
-            if time.monotonic() >= deadline:
-                raise transport.Deadline() from None
-            raise transport.Retryable(error) from None
-        raise error from None
+        raise transport.network_failure(exc, error, deadline) from None
     finally:
         conn.close()
 
@@ -230,6 +259,8 @@ def request(method: str, path: str, body: Any = None, *, etag: Optional[str] = N
         headers["Content-Type"] = "application/json"
         headers["Content-Length"] = str(len(data))
     if etag is not None:
+        if not _ETAG.match(etag):
+            raise ConsoleError("the If-Match value is not an entity tag", type="etag-invalid")
         headers["If-Match"] = etag
     if method != "GET":
         key = idempotency_key or str(uuid.uuid4())
@@ -291,8 +322,9 @@ def item(number: int) -> Tuple[Dict[str, Any], str]:
     """The item and its ETag (the version an If-Match names)."""
     dto, headers = request("GET", project_path("items", number))
     etag = headers.get("etag")
-    if not isinstance(dto, dict) or not etag:
-        raise ConsoleError(f"GET item {number}: no item or no ETag in the answer", type="unexpected-answer")
+    if not isinstance(dto, dict) or not etag or not _ETAG.match(etag):
+        raise ConsoleError(f"GET item {number}: no item or no well-formed ETag in the answer",
+                           type="unexpected-answer")
     return dto, etag
 
 

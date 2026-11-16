@@ -14,7 +14,7 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from ptlib import checks, gh  # noqa: E402
+from ptlib import checks, gh, transport  # noqa: E402
 
 
 class RemoteTest(unittest.TestCase):
@@ -179,12 +179,26 @@ class DeadlineRetryTest(unittest.TestCase):
         self.assertIn("within 90 s", str(result))
         self.assertEqual(opener.call_count, 1)  # the budget is spent: no retry
 
+    def test_an_answer_over_the_size_cap_is_an_error_and_not_retried(self):
+        with mock.patch.object(transport, "RESPONSE_LIMIT", 10):
+            result, opener, _ = self.call([FakeResponse([b"[1,2,3,4,", b"5,6,7]"]), FakeResponse([b"{}"])])
+            self.assertIsInstance(result, gh.GhError)
+            self.assertIn("the answer is over", str(result))
+            self.assertEqual(opener.call_count, 1)
+            result, _, _ = self.call([FakeResponse([b"[1,2,3,4]"])])  # exactly at the cap
+            self.assertEqual(result[0], "[1,2,3,4]")
+
+    def test_an_error_body_is_read_only_as_far_as_the_message_quotes(self):
+        result, _, _ = self.call([http_error(404, b"x" * 100_000)])
+        self.assertIn("x" * transport.ERROR_BODY_LIMIT, str(result))
+        self.assertNotIn("x" * (transport.ERROR_BODY_LIMIT + 1), str(result))
+
     def test_the_deadline_comes_from_the_environment_and_bounds_the_socket_timeout(self):
         result, opener, _ = self.call([FakeResponse([b"{}"])], env={"PT_HTTP_DEADLINE": "5"})
         self.assertEqual(result[0], "{}")
         self.assertEqual(opener.call_args[1]["timeout"], 5.0)
         _, opener, _ = self.call([FakeResponse([b"{}"])])
-        self.assertEqual(opener.call_args[1]["timeout"], gh.SOCKET_TIMEOUT)
+        self.assertEqual(opener.call_args[1]["timeout"], transport.SOCKET_TIMEOUT)
 
     def test_no_retry_when_the_backoff_would_outlast_the_deadline(self):
         clock = Clock()

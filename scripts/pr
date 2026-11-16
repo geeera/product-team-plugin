@@ -11,13 +11,14 @@
   pr reviews N         review bodies, oldest first
   pr update-branch N   merge the base into the PR branch on GitHub (no force-push); fails on conflicts
   pr files N           changed paths
-  pr security-check N  does this PR need a security review? reasons from the paths and the labels of the items it
-                       names (`feature/tc-412-…` head branch, `Closes TC-412, TC-413` / `#412` in title or body),
-                       read from the team console; an item it cannot read there, a PR naming no item and a closing
-                       reference that is no key (URL, owner/repo#N) each make the review required (fails closed)
+  pr security-check N  does this PR need a security review? reasons from the paths and the labels of the items the
+                       team console links it to (`pr link-pr`), never what the PR's text names; links it cannot
+                       read, a console project of another repository and a PR linked to no item each make the
+                       review required (fails closed)
   pr link-pr N [--item KEY]
                        record PR N on its item in the team console (`pr-links`); the item is the head branch's
-                       (`feature/tc-412-…`) unless --item names it, which the PR must name too (`Closes KEY`).
+                       (`feature/tc-412-…`) unless --item names it, which the PR must name too (`Closes KEY`;
+                       a bare #412 names this project's item 412, never another project's ST-412).
                        A dev job links only an item it holds
   pr gate N            CI plus the independent verdicts it needs, each APPROVED on the current head commit: QA and
                        REVIEW as the `review:` block of project.yml on the PR's base branch requires them (both on
@@ -121,45 +122,52 @@ def changed_files(repo: str, n: int) -> list:
     return paths
 
 
-def item_labels(ref: str) -> list:
-    """The item's labels from the console; ConsoleError when it cannot be read or the answer has no label list."""
-    labels = console.get_item(ref).get("labels")
-    if not isinstance(labels, list) or not all(isinstance(x, str) for x in labels):
-        raise console.ConsoleError(f"item {ref} has no label list", type="unexpected-answer")
-    return labels
+def _cause(exc: console.ConsoleError) -> str:
+    # The type and status only: the detail is the console's text, and a reason must name the cause.
+    return " ".join(p for p in (str(exc.status) if exc.status else "", exc.type) if p)
 
 
 def linked_labels(repo: str, n: int) -> tuple:
-    """(the PR's labels plus those of every item it names, reasons for the items that could not be read).
+    """(the PR's labels plus those of every item the console links it to, reasons the gate could not tell).
 
-    The gate fails closed: an item the console does not answer for — no TC_* job environment, unreachable, a
-    refusal, a 404, an answer without labels — is a reason to require the security review, never a skipped one.
-    So is a PR that names no item, and a closing reference that is no item key (a URL, `owner/repo#N`): the console
-    has no read of the items a PR was linked to (team-console#627), so what the PR names is all the gate can check,
-    and `link-pr --item` refuses an item the PR does not name."""
+    The links are the console's `pr-links` (`GET …/prs/N/items`, team-console#627), never what the PR's title, body
+    or branch name, which its author writes. The gate fails closed: links it cannot read in full (no TC_* job
+    environment, unreachable, a refusal, a page it cannot follow), a project whose repository is not this PR's
+    (#628: a misconfigured job would judge another repository's PR N by this one's items) and a PR linked to no item
+    each make the security review required, never a skipped one."""
     pr = gh.api(f"repos/{repo}/pulls/{n}")
     labels = [l["name"] for l in pr.get("labels", [])]
-    title, body = pr.get("title") or "", pr.get("body") or ""
-    refs = review.item_refs((pr.get("head") or {}).get("ref") or "", title, body)
-    unread = []
-    if not refs:
-        unread.append("PR names no item (a feature/tc-412-… head branch or Closes TC-412 in the title or body): "
-                      "review required")
-    for ref in review.opaque_refs(title, body):
-        unread.append(f"PR closes {ref}, which is no item key the console can read: review required")
-    for ref in refs:
-        try:
-            labels += item_labels(ref)
-        except console.ConsoleError as exc:
-            # The type and status only: the detail is the console's text, and the reason must name the cause.
-            got = " ".join(p for p in (str(exc.status) if exc.status else "", exc.type) if p)
-            unread.append(f"linked item {ref} could not be read from the console ({got}): review required")
-    return labels, unread
+    try:
+        linked = console.pr_items(n)
+    except console.ConsoleError as exc:
+        return labels, [f"the items linked to PR #{n} could not be read from the console ({_cause(exc)}): "
+                        "review required"]
+    if linked["provider"] != "github" or linked["repo"].lower() != repo.lower():
+        return labels, [f"PR #{n} is in {repo}, but the console project's repository is {linked['provider'][:20]} "
+                        f"{linked['repo'][:100]}: review required"]
+    if not linked["items"]:
+        return labels, [f"PR #{n} is linked to no item in the console (pr link-pr {n}): review required"]
+    for row in linked["items"]:
+        labels += row["labels"]
+    return labels, []
 
 
 def security_check(repo: str, n: int, paths: Optional[list] = None) -> list:
     labels, unread = linked_labels(repo, n)
     return review.security_reasons(changed_files(repo, n) if paths is None else paths, labels) + unread
+
+
+def item_key(ref: str) -> str:
+    """The item's key for a reference that may be a bare number: a PR naming `ST-412` must not pass for item 412."""
+    if "-" in ref:
+        return ref
+    try:
+        key = review.item_ref(console.text_of(console.get_item(ref), "key") or "")
+    except console.ConsoleError as exc:
+        sys.exit(console.report(exc))
+    if not key or "-" not in key:
+        sys.exit(f"console: item {ref} has no key")
+    return key
 
 
 def link_pr(repo: str, n: int, item: Optional[str]) -> dict:
@@ -169,10 +177,10 @@ def link_pr(repo: str, n: int, item: Optional[str]) -> dict:
         ref = review.item_ref(item)
         if not ref:
             sys.exit(f"--item {item!r} is not an item key (TC-412) or number")
-        # The gate reads only the items a PR names: a link it would not see could carry a `security` label.
-        if not review.names_item(review.item_refs(head, pr.get("title") or "", pr.get("body") or ""), ref):
-            sys.exit(f"PR #{n} does not name {ref}: add `Closes {ref}` to its body (or name it in the head branch, "
-                     f"feature/{ref.lower()}-slug) so the review gate reads its labels, then link again")
+        ref = item_key(ref)
+        refusal = review.naming_refusal(pr, ref)
+        if refusal:
+            sys.exit(refusal)
     else:
         refs = review.item_refs(head, branch_only=True)
         if not refs:

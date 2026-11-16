@@ -9,7 +9,6 @@ line or an exception chain. Everything the console returns is data: callers vali
 from __future__ import annotations
 
 import http.client
-import ipaddress
 import json
 import os
 import re
@@ -20,7 +19,7 @@ import urllib.parse
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional, Set, Tuple, Union
 
 from . import transport
 
@@ -66,15 +65,6 @@ class Config:
     console_url: Optional[str] = None
 
 
-def _is_loopback(host: str) -> bool:
-    if host == "localhost":
-        return True
-    try:
-        return ipaddress.ip_address(host).is_loopback
-    except ValueError:
-        return False
-
-
 def _base_url(name: str, raw: str) -> urllib.parse.SplitResult:
     parts = urllib.parse.urlsplit(raw)
     if parts.scheme not in ("http", "https") or not parts.hostname or parts.username or parts.password \
@@ -107,7 +97,7 @@ def config(environ: Optional[Mapping[str, str]] = None) -> Config:
         raise ConsoleError("TC_RUNNER_SOCKET must be an absolute path", type="config-invalid",
                            field="TC_RUNNER_SOCKET")
     # Over the socket the runner is the only hop; anywhere else the token must not cross a network in clear.
-    if runner_socket is None and base.scheme == "http" and not _is_loopback(base.hostname or ""):
+    if runner_socket is None and base.scheme == "http" and not transport.is_loopback(base.hostname or ""):
         raise ConsoleError("TC_API_URL must be https unless it is a loopback address or TC_RUNNER_SOCKET is set",
                            type="config-invalid", field="TC_API_URL")
     console_url = env.get("TC_CONSOLE_URL", "").strip() or None
@@ -268,9 +258,11 @@ def request(method: str, path: str, body: Any = None, *, etag: Optional[str] = N
                                                           f"{budget:g} s (PT_HTTP_DEADLINE)", type="timeout"))
 
 
-def list_all(path: str, member: str) -> List[Any]:
-    """Every row of a cursor-paged list (`?after=<next>&limit=100`), in the order the console returns them."""
-    rows: List[Any] = []
+def pages(path: str, member: str) -> Iterator[Dict[str, Any]]:
+    """Each page of a cursor-paged list (`?after=<next>&limit=100`), in the order the console returns them; every
+    page is an object with a `member` list of objects. The cursor is the last row's item number in queue order, so
+    it need not grow; one that repeats would loop and is an error, as is one that is not an item number."""
+    seen: Set[int] = set()
     after: Optional[int] = None
     joiner = "&" if "?" in path else "?"
     for _ in range(10_000):  # a cursor that never ends is a console bug, not a reason to loop forever
@@ -279,14 +271,20 @@ def list_all(path: str, member: str) -> List[Any]:
         if not isinstance(page, dict) or not isinstance(page.get(member), list) \
                 or not all(isinstance(row, dict) for row in page[member]):
             raise ConsoleError(f"GET {path}: the answer has no {member!r} list of objects", type="unexpected-answer")
-        rows.extend(page[member])
+        yield page
         cursor = page.get("next")
         if cursor is None:
-            return rows
-        if not isinstance(cursor, int) or isinstance(cursor, bool) or (after is not None and cursor <= after):
+            return
+        if not isinstance(cursor, int) or isinstance(cursor, bool) or cursor < 1 or cursor in seen:
             raise ConsoleError(f"GET {path}: the next cursor {cursor!r} does not advance", type="unexpected-answer")
+        seen.add(cursor)
         after = cursor
     raise ConsoleError(f"GET {path}: more than 10000 pages", type="unexpected-answer")
+
+
+def list_all(path: str, member: str) -> List[Any]:
+    """Every row of a cursor-paged list, in the order the console returns them."""
+    return [row for page in pages(path, member) for row in page[member]]
 
 
 def item(number: int) -> Tuple[Dict[str, Any], str]:
@@ -458,6 +456,31 @@ def link_pr(number: Union[int, str], pr_number: int, url: str, head_ref: str) ->
     dto, _ = request("POST", project_path("items", number, "pr-links"),
                      {"number": pr_number, "url": url, "headRef": head_ref})
     return _object(dto, f"pr-link on item {number}")
+
+
+def pr_items(pr_number: int) -> Dict[str, Any]:
+    """`GET …/prs/N/items` (team-console#627): the items `pr-links` linked to pull request N, closed ones included,
+    every page of them, with the project's `provider` and `repo` (#628). ConsoleError when any page cannot be read,
+    the pages disagree on the pull request or its repository, or an item has no key or label list: the gate reads
+    every such doubt as a required security review."""
+    head: Optional[Tuple[Any, Any, Any]] = None
+    rows: List[Dict[str, Any]] = []
+    for page in pages(project_path("prs", pr_number, "items"), "items"):
+        meta = (page.get("number"), page.get("provider"), page.get("repo"))
+        if meta[0] != pr_number or isinstance(meta[0], bool) or not isinstance(meta[1], str) \
+                or not isinstance(meta[2], str) or not meta[2] or (head is not None and meta != head):
+            raise ConsoleError(f"GET prs/{pr_number}/items: the answer does not name pull request {pr_number} and "
+                               "one repository", type="unexpected-answer")
+        head = meta
+        for row in page["items"]:
+            labels = row.get("labels")
+            if not text_of(row, "key") or not isinstance(labels, list) or not all(isinstance(x, str) for x in labels):
+                raise ConsoleError(f"GET prs/{pr_number}/items: an item without a key or a label list",
+                                   type="unexpected-answer")
+            rows.append(row)
+    if head is None:  # pages() yields a page or raises; kept explicit so the gate never reads "no page" as none
+        raise ConsoleError(f"GET prs/{pr_number}/items: no page", type="unexpected-answer")
+    return {"number": pr_number, "provider": head[1], "repo": head[2], "items": rows}
 
 
 def pr_link_refusal(exc: ConsoleError) -> Optional[str]:

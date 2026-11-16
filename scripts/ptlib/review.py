@@ -37,17 +37,15 @@ DEPENDENCY_FILES = re.compile(
 
 # The items a PR names (ADR 0006 decision 2): a key (`TC-412`, any prefix the console uses) or a bare number, as the
 # head branch's first segment after its type (`feature/tc-412-slug`, `Fix/412-slug`) or after a closing keyword in
-# the title or body (`Closes TC-412`, `Fixes #412, #413 and TC-9`). Reading more than was meant only costs a lookup:
-# every name is read back from the console, an item it cannot read makes the security review required, and so
-# does a PR that names no item at all.
+# the title or body (`Closes TC-412`, `Fixes #412, #413 and TC-9`). The gate no longer reads them (it reads the
+# console's links, team-console#627); a link is refused unless the PR names its item, so the PR's text, which the
+# reviewers read, and the link the gate reads agree.
 _REF = r"(?:[A-Za-z]{2,5}-|#)?[1-9][0-9]{0,8}"
 _BRANCH_REF = re.compile(rf"(?i)^[a-z]+/({_REF})(?:[-_/.]|$)")
 _KEYWORD = re.compile(r"(?i)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?|refs?)\s*:?\s+")
 _FIRST_REF = re.compile(rf"({_REF})\b")
 # Every key of a list after one keyword: `TC-1, TC-2`, `TC-1 TC-2`, `TC-1 and TC-2`, `TC-1 & TC-2`.
 _NEXT_REF = re.compile(rf"(?i)(?:\s*(?:,|&|\band\b)\s*|\s+)({_REF})\b")
-# A closing reference the gate cannot address as an item of the console project: a URL, `owner/repo#412`.
-_OPAQUE_REF = re.compile(r"(?i)(?:https?://|[\w.-]+/[\w.-]+#[0-9])\S*")
 # Markdown a reader does not see as part of a key (`**TC-412**`, `` `TC-412` ``, `[TC-412](…)`), and the other
 # hyphens a key may be typed with.
 _MARKUP = re.compile(r"[*_`~\[\]()<>\"']")
@@ -60,21 +58,16 @@ def item_ref(raw: str) -> Optional[str]:
     return raw.upper() if re.fullmatch(_REF, raw) else None
 
 
-def _closing_refs(text: str) -> Tuple[List[str], List[str]]:
-    """(every key after a closing keyword in `text`, the closing references that are not keys)."""
-    refs, opaque = [], []
+def _closing_refs(text: str) -> List[str]:
+    """Every key after a closing keyword in `text`."""
+    refs = []
     text = _MARKUP.sub(" ", _HYPHENS.sub("-", text or ""))
     for keyword in _KEYWORD.finditer(text):
         match = _FIRST_REF.match(text, keyword.end())
-        if not match:
-            other = _OPAQUE_REF.match(text, keyword.end())
-            if other:
-                opaque.append(other.group(0)[:120])
-            continue
         while match:
             refs.append(match.group(1))
             match = _NEXT_REF.match(text, match.end())
-    return refs, opaque
+    return refs
 
 
 def item_refs(head_ref: str, title: str = "", body: str = "", *, branch_only: bool = False) -> List[str]:
@@ -85,7 +78,7 @@ def item_refs(head_ref: str, title: str = "", body: str = "", *, branch_only: bo
         found.append(match.group(1))
     if not branch_only:
         for text in (title or "", body or ""):
-            found += _closing_refs(text)[0]
+            found += _closing_refs(text)
     refs = []
     for raw in found:
         ref = item_ref(raw)
@@ -94,19 +87,21 @@ def item_refs(head_ref: str, title: str = "", body: str = "", *, branch_only: bo
     return refs
 
 
-def opaque_refs(title: str = "", body: str = "") -> List[str]:
-    """Closing references in the title or body that are no item key (`Closes https://…`, `Fixes acme/x#4`), each
-    once: the gate cannot read them from the console, so they make the security review required."""
-    found = []
-    for text in (title or "", body or ""):
-        found += [ref for ref in _closing_refs(text)[1] if ref not in found]
-    return found
+def names_item(refs: Iterable[str], key: str) -> bool:
+    """Whether the item `key` (`TC-412`) is among the references a PR names: that key, or its bare number. Only that
+    way round (team-console#628): a PR naming `ST-412` does not name item 412 of this project, so a caller holding a
+    bare number resolves it to the item's key first."""
+    number = key.rsplit("-", 1)[-1]
+    return any(r == key or r == number for r in refs)
 
 
-def names_item(refs: Iterable[str], ref: str) -> bool:
-    """Whether `ref` is among the references a PR names; a bare number matches a key with that number."""
-    number = ref.rsplit("-", 1)[-1]
-    return any(r == ref or ("-" not in r or "-" not in ref) and r.rsplit("-", 1)[-1] == number for r in refs)
+def naming_refusal(pr: dict, key: str) -> str:
+    """'' when the PR (a GitHub pull) names item `key`, else why linking it is refused and how to fix that."""
+    head = (pr.get("head") or {}).get("ref") or ""
+    if names_item(item_refs(head, pr.get("title") or "", pr.get("body") or ""), key):
+        return ""
+    return (f"PR #{pr.get('number')} does not name {key}: add `Closes {key}` to its body (or name it in the head "
+            f"branch, feature/{key.lower()}-slug) so the PR says which item it is for, then link again")
 
 
 def security_reasons(paths: Iterable[str], labels: Iterable[str] = ()) -> List[str]:

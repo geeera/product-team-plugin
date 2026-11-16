@@ -64,5 +64,23 @@ class RenderTest(unittest.TestCase):
         self.assertTrue(inbox.render([]).startswith(inbox.MARKER))
 
 
+class LinkSchemeTest(unittest.TestCase):
+    """team-console#628: the console's rows are data, so only a web URL becomes a markdown link."""
+
+    def test_https_and_local_http_become_links(self):
+        for url in ("https://console.example/p/tc/t/4", "http://localhost:4200/p/tc/t/4", "http://127.0.0.1:8787/x",
+                    "http://[::1]:8787/x"):
+            with self.subTest(url=url):
+                self.assertEqual(inbox.item_line({"number": 4, "title": "T", "url": url}), f"- #4 [T]({url})")
+
+    def test_any_other_url_leaves_the_title_as_plain_text(self):
+        for url in ("javascript:alert(1)", "JAVASCRIPT:alert(1)", "data:text/html,x", "http://console.example/x",
+                    "/p/tc/t/4", "//evil.example/x", "https://x.example/a) [b](javascript:1", "https://a b.example",
+                    "https://user:pw@x.example/", "https://[::1/x", "ftp://x.example/", 42):
+            with self.subTest(url=url):
+                self.assertEqual(inbox.item_line({"number": 4, "title": "T", "url": url, "ask": "/approve"}),
+                                 "- #4 T — /approve")
+
+
 if __name__ == "__main__":
     unittest.main()

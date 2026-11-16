@@ -114,79 +114,101 @@ class DemoDecisionsTest(ScriptTestCase):
         self.assertEqual(out["source"], "console")
 
 
+def linked(*rows, number=57, repo="acme/tc", provider="github", next=None):
+    """A page of `GET …/prs/N/items` (pr-items.linked fixture shape)."""
+    return 200, {"number": number, "provider": provider, "repo": repo, "items": list(rows), "next": next}, {}
+
+
 class SecurityCheckTest(ScriptTestCase):
-    """`pr security-check` decides whether SECURITY is required; every doubt about an item's labels requires it."""
+    """`pr security-check` decides whether SECURITY is required from the items the console links the PR to
+    (team-console#627); every doubt about those links requires it."""
 
-    def check(self, pull=PULL, files=("docs/a.md",)):
+    ITEMS = f"{P}/prs/57/items"
+
+    def check(self, pull=PULL, files=("docs/a.md",), number=57):
         with mock.patch.object(pr.gh, "repo", return_value="acme/tc"), \
-                mock.patch.object(pr.gh, "api", return_value=pull), \
+                mock.patch.object(pr.gh, "api", return_value=dict(pull, number=number)), \
                 mock.patch.object(pr, "changed_files", return_value=list(files)):
-            return self.run_cli(pr, "security-check", "57")
+            return self.run_cli(pr, "security-check", str(number))
 
-    def test_an_item_labelled_security_requires_the_review(self):
-        self.fake.on("GET", f"{P}/items/1", (200, dto(1, flags=["security"]), {}))
+    def test_the_fixture_links_decide(self):
+        self.fake.load_fixtures()
+        with as_job(stand_in("orchestrator")):
+            code, out, _ = self.check()
+            self.assertEqual((code, out), (0, {"required": True, "reasons": ["issue labelled security"]}))
+            code, out, _ = self.check(number=58)
+        self.assertEqual(out, {"required": True, "reasons": [
+            "PR #58 is linked to no item in the console (pr link-pr 58): review required"]})
+
+    def test_an_unlabelled_link_needs_none_and_the_prs_text_decides_nothing(self):
+        self.fake.on("GET", self.ITEMS, linked(dto(1)))
+        pull = dict(PULL, head={"ref": "feature/tc-9-x"}, body="Closes #9, Fixes ST-4 and https://x.example/1")
+        code, out, _ = self.check(pull)
+        self.assertEqual((code, out), (0, {"required": False, "reasons": []}))
+        self.assertEqual([p.split("?")[0] for p in self.paths()], [self.ITEMS])
+
+    def test_a_pr_linked_to_no_item_requires_the_review_whatever_it_names(self):
+        self.fake.on("GET", self.ITEMS, linked())
+        code, out, _ = self.check(files=["apps/api/auth.ts"])
+        self.assertEqual(out["reasons"], ["sensitive path: apps/api/auth.ts",
+                                          "PR #57 is linked to no item in the console (pr link-pr 57): review "
+                                          "required"])
+
+    def test_every_page_is_read_in_the_consoles_order(self):
+        # The cursor is the last item's number in queue order: it may go down from one page to the next.
+        self.fake.on("GET", self.ITEMS, linked(dto(9), next=9))
+        self.fake.on("GET", f"{self.ITEMS}?after=9", linked(dto(4), next=4))
+        self.fake.on("GET", f"{self.ITEMS}?after=4", linked(dto(6, flags=["security"])))
         code, out, _ = self.check()
         self.assertEqual((code, out), (0, {"required": True, "reasons": ["issue labelled security"]}))
+        self.assertEqual(len(self.fake.seen), 3)
+        self.assertTrue(all("limit=100" in s["path"] for s in self.fake.seen))
 
-    def test_an_unlabelled_item_and_plain_paths_need_none(self):
-        self.fake.on("GET", f"{P}/items/1", (200, dto(1), {}))
-        self.fake.on("GET", f"{P}/items/9", (200, dto(9), {}))
-        code, out, _ = self.check(dict(PULL, body="Closes #9"))
-        self.assertEqual((code, out), (0, {"required": False, "reasons": []}))
-        self.assertEqual(sorted(self.paths()), [f"{P}/items/9", f"{P}/items/TC-1"])
-
-    def test_the_gate_fails_closed_on_any_item_it_cannot_read(self):
-        cases = {"not found": problem(404, "item-not-found"), "refused": problem(403, "owner-only"),
-                 "no labels": (200, {**dto(1), "labels": None}, {}), "not json": (200, b"<html>", {})}
-        for name, answer in cases.items():
+    def test_the_gate_fails_closed_on_links_it_cannot_read_in_full(self):
+        cases = {
+            "not found": [problem(404, "project-not-found")], "refused": [problem(403, "owner-only")],
+            "unavailable": [problem(503, "unavailable")], "not json": [(200, b"<html>", {})],
+            "no items list": [(200, {"number": 57, "provider": "github", "repo": "acme/tc", "next": None}, {})],
+            "another pull request": [linked(dto(1), number=56)], "no repository": [linked(dto(1), repo="")],
+            "an item without labels": [linked({**dto(1), "labels": None})],
+            "an item without key": [linked({**dto(1), "key": None})],
+            "a cursor that is no number": [linked(dto(1), next="2")],
+            "a cursor that repeats": [linked(dto(1), next=3), linked(dto(3), next=3)],
+            "a failing second page": [linked(dto(1), next=1), problem(503, "unavailable")],
+            "pages of two repositories": [linked(dto(1), next=1), linked(dto(2), repo="acme/other")],
+        }
+        for name, answers in cases.items():
             with self.subTest(name):
-                self.fake.on("GET", f"{P}/items/1", answer)
+                self.fake.routes.clear()
+                self.fake.on("GET", self.ITEMS, answers[0])
+                for answer in answers[1:]:
+                    cursor = answers[0][1]["next"]
+                    self.fake.on("GET", f"{self.ITEMS}?after={cursor}", answer)
                 code, out, _ = self.check()
                 self.assertEqual((code, out["required"]), (0, True))
-                self.assertRegex(out["reasons"][-1], r"^linked item TC-1 could not be read from the console")
+                self.assertEqual(len(out["reasons"]), 1)
+                self.assertRegex(out["reasons"][0],
+                                 r"^the items linked to PR #57 could not be read from the console \(.+\): review "
+                                 r"required$")
 
     def test_no_job_environment_requires_the_review_too(self):
         with mock.patch.dict(os.environ, {"TC_JOB_TOKEN": ""}):
             code, out, _ = self.check()
         self.assertEqual(out, {"required": True, "reasons": [
-            "linked item TC-1 could not be read from the console (config-missing): review required"]})
+            "the items linked to PR #57 could not be read from the console (config-missing): review required"]})
         self.assertEqual(self.fake.seen, [])
 
-    def test_another_projects_key_is_read_as_that_key_and_fails_closed(self):
-        code, out, _ = self.check(dict(PULL, head={"ref": "fix/typo"}, body="Fixes ST-4"))
-        self.assertTrue(out["required"])
-        self.assertEqual(self.paths(), [f"{P}/items/ST-4"])
-
-    def test_a_pr_naming_no_item_requires_the_review(self):
-        no_item = ("PR names no item (a feature/tc-412-… head branch or Closes TC-412 in the title or body): "
-                   "review required")
-        for pull in (dict(PULL, head={"ref": "feature/csv-export"}, body="Implements TC-412"),
-                     dict(PULL, head={"ref": "chore/product-team-0.12"})):
-            with self.subTest(head=pull["head"]["ref"]):
-                code, out, _ = self.check(pull)
-                self.assertEqual((code, out), (0, {"required": True, "reasons": [no_item]}))
-                self.assertEqual(self.fake.seen, [])
-        code, out, _ = self.check(dict(PULL, head={"ref": "fix/typo"}), files=["apps/api/auth.ts"])
-        self.assertEqual(out["reasons"], ["sensitive path: apps/api/auth.ts", no_item])
-
-    def test_a_closing_reference_that_is_no_key_requires_the_review(self):
-        self.fake.on("GET", f"{P}/items/1", (200, dto(1), {}))
-        code, out, _ = self.check(dict(PULL, body="Closes https://console.example/p/tc/t/412"))
-        self.assertEqual(out, {"required": True, "reasons": [
-            "PR closes https://console.example/p/tc/t/412, which is no item key the console can read: review "
-            "required"]})
-
-    def test_a_security_item_is_found_in_every_form_the_pr_names_it(self):
-        self.fake.on("GET", f"{P}/items/1", (200, dto(1), {}))
-        self.fake.on("GET", f"{P}/items/412", (200, dto(412, flags=["security"]), {}))
-        pulls = {"capitalised branch": dict(PULL, head={"ref": "Feature/TC-412-x"}),
-                 "markdown": dict(PULL, body="Closes **TC-412**"),
-                 "second key of a list": dict(PULL, body="Closes TC-1, TC-412"),
-                 "second key without a comma": dict(PULL, title="Fixes TC-1 TC-412")}
-        for name, pull in pulls.items():
-            with self.subTest(name):
-                code, out, _ = self.check(pull)
-                self.assertEqual((code, out), (0, {"required": True, "reasons": ["issue labelled security"]}))
+    def test_a_console_project_of_another_repository_requires_the_review(self):
+        for answer in (linked(dto(1), repo="acme/elsewhere"), linked(dto(1), provider="gitlab")):
+            with self.subTest(repo=answer[1]["repo"], provider=answer[1]["provider"]):
+                self.fake.on("GET", self.ITEMS, answer)
+                code, out, _ = self.check()
+                self.assertEqual((code, out["required"]), (0, True))
+                self.assertEqual(out["reasons"], [
+                    f"PR #57 is in acme/tc, but the console project's repository is {answer[1]['provider']} "
+                    f"{answer[1]['repo']}: review required"])
+        self.fake.on("GET", self.ITEMS, linked(dto(1), repo="Acme/TC"))
+        self.assertEqual(self.check()[1], {"required": False, "reasons": []})
 
     def gate(self, reviews):
         with mock.patch.object(pr.gh, "api", return_value=PULL), \
@@ -200,14 +222,15 @@ class SecurityCheckTest(ScriptTestCase):
                 mock.patch.object(pr.gh, "acts_as_owner", return_value=False):
             return pr.gate("acme/tc", 57)
 
-    def test_the_gate_passes_and_fails_on_the_items_labels(self):
+    def test_the_gate_passes_and_fails_on_the_linked_items_labels(self):
         reviews = [{"body": f"{role}: APPROVED", "commit_id": "head1", "submitted_at": "2026-11-12T10:00:00Z",
                     "user": {"login": "x"}} for role in ("QA", "REVIEW")]
-        self.fake.on("GET", f"{P}/items/1", (200, dto(1), {}))
+        self.fake.on("GET", self.ITEMS, linked(dto(1)))
         self.assertTrue(self.gate(reviews)["passed"])
-        for answer in ((200, dto(1, flags=["security"]), {}), problem(503, "unavailable")):
-            with self.subTest(answer=answer[0]):
-                self.fake.on("GET", f"{P}/items/1", answer)
+        for answer in (linked(dto(1), dto(2, flags=["security"])), linked(), problem(503, "unavailable"),
+                       linked(dto(1), repo="acme/elsewhere")):
+            with self.subTest(answer=answer[1].get("items", answer[0])):
+                self.fake.on("GET", self.ITEMS, answer)
                 result = self.gate(reviews)
                 self.assertFalse(result["passed"])
                 self.assertEqual(result["missing"], ["SECURITY: no verdict"])
@@ -261,6 +284,22 @@ class LinkPrTest(ScriptTestCase):
                 code, _, err = self.link("--item", "TC-7", pull=pull, role=("dev", [7]))
                 self.assertEqual((code, self.fake.seen), (1, []))
                 self.assertIn("does not name TC-7: add `Closes TC-7` to its body", err)
+
+    def test_a_bare_item_number_is_named_by_its_key_or_number_never_another_projects_key(self):
+        # team-console#628: `--item 412` used to pass on a PR naming only ST-412.
+        self.fake.on("GET", f"{P}/items/412", (200, dto(412), {}))
+        self.fake.on("POST", f"{P}/items/TC-412/pr-links", (201, {"linkedAt": "2026-11-12T10:00:00.000Z"}, {}))
+        code, _, err = self.link("--item", "412", pull=dict(PULL, head={"ref": "fix/typo"}, body="Closes ST-412"),
+                                 role=("dev", [412]))
+        self.assertEqual(code, 1)
+        self.assertIn("does not name TC-412", err)
+        self.assertEqual(self.paths(), [f"{P}/items/412"])
+        for body in ("Closes #412", "Closes TC-412"):
+            with self.subTest(body=body):
+                code, out, _ = self.link("--item", "#412", pull=dict(PULL, head={"ref": "fix/typo"}, body=body),
+                                         role=("dev", [412]))
+                self.assertEqual((code, out["item"]), (0, "TC-412"))
+        self.assertEqual(self.paths()[-1], f"{P}/items/TC-412/pr-links")
 
 
 if __name__ == "__main__":

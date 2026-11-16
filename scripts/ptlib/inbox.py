@@ -2,7 +2,10 @@
 console its `GET …/inbox` read model (ADR 0006 decision 12), rendered the same way for `inbox show` and the digest."""
 from __future__ import annotations
 
+import urllib.parse
 from typing import Any, Callable, Dict, List, Optional, Tuple
+
+from .transport import is_loopback
 
 MARKER = "<!-- pt-inbox -->"
 
@@ -106,10 +109,27 @@ def console_groups(dto: Dict[str, Any], item_url: Callable[[int], Optional[str]]
     return groups
 
 
+def linkable(url: Any) -> Optional[str]:
+    """`url` when it may go into a markdown link: https, or http to this machine (a local console). Anything else —
+    `javascript:`, `data:`, a relative path, a space, parenthesis or angle bracket that would end the link — is None
+    and the title is shown as plain text (team-console#628: the console's rows are data)."""
+    if not isinstance(url, str) or any(c.isspace() or c in "()<>" for c in url):
+        return None
+    try:
+        parts = urllib.parse.urlsplit(url)
+        host = parts.hostname
+    except ValueError:
+        return None
+    if not host or parts.username or parts.password:
+        return None
+    return url if parts.scheme == "https" or (parts.scheme == "http" and is_loopback(host)) else None
+
+
 def item_line(item: dict) -> str:
     number = f"#{item['number']} " if "number" in item else ""
     ask = f" — {item['ask']}" if item.get("ask") else ""
-    title = f"[{item['title']}]({item['url']})" if item.get("url") else item["title"]
+    url = linkable(item.get("url"))
+    title = f"[{item['title']}]({url})" if url else item["title"]
     return f"- {number}{title}{ask}"
 
 

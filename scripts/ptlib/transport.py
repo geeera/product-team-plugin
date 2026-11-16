@@ -4,6 +4,7 @@ build their own requests and errors and decide what may be retried.
 """
 from __future__ import annotations
 
+import ipaddress
 import os
 import socket
 import time
@@ -16,6 +17,16 @@ CHUNK = 64 * 1024
 ERROR_BODY_LIMIT = 500  # an error message quotes at most this much of a response body
 
 T = TypeVar("T")
+
+
+def is_loopback(host: str) -> bool:
+    """Whether `host` names this machine (`localhost`, 127.0.0.0/8, ::1): the only place plain http is acceptable."""
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
 
 
 class Deadline(Exception):

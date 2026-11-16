@@ -256,6 +256,7 @@ It does not:
 | `TC_… is not set: run this inside a console job` | the console scripts run only in a console job, which gets `TC_API_URL`, `TC_JOB_TOKEN`, `TC_PROJECT` from its runner |
 | `the owner approves in the console: <url>` | approving, leaving `proposed` and editing approved text are yours: the team asks (`backlog ask`) and links the item |
 | `this job does not hold the item (item-not-held)` | `pr link-pr`: a developer's job links a PR only to the item it was given; the branch or `--item` names another |
-| `security-check`: `linked item … could not be read from the console` | the gate failed closed and requires SECURITY: run the review, or fix the reference or the console and check again |
-| `security-check`: `PR names no item` / `PR closes …, which is no item key` | the gate failed closed: name the item (`feature/tc-412-…` branch or `Closes TC-412` in the body) or run the SECURITY review |
-| `pr link-pr`: `PR #N does not name TC-…` | `--item` names an item the gate would not read: add `Closes TC-…` to the PR body, then link again |
+| `security-check`: `the items linked to PR #N could not be read from the console` | the gate failed closed and requires SECURITY: run the review, or fix the console or the job environment and check again |
+| `security-check`: `PR #N is linked to no item in the console` | the gate failed closed: link the PR to its item (`pr link-pr N`) or run the SECURITY review |
+| `security-check`: `PR #N is in …, but the console project's repository is …` | `TC_PROJECT` names another project than this repository's: fix the job environment; until then SECURITY is required |
+| `pr link-pr` / `backlog link-pr`: `PR #N does not name TC-…` | the PR does not say which item it is for: add `Closes TC-…` to the PR body, then link again |

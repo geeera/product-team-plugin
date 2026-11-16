@@ -39,6 +39,13 @@ class FillTest(unittest.TestCase):
         self.assertNotIn("</script", payload)
         self.assertEqual(extract(html)["shipped"][0]["title"], "</script><b>x</b>")
 
+    def test_the_page_offers_no_decision_block_demo_apply_cannot_read(self):
+        # team-console#626: demo-apply reads the console's decisions; the page links the demo item instead.
+        for dead in ('id="copy"', "/demo-decisions", "clipboard", "copy button"):
+            self.assertNotIn(dead, self.template)
+        self.assertIn('id="decide"', self.template)
+        self.assertIn("data.demo_issue.url", self.template)
+
     def test_rejects_incomplete_data(self):
         with self.assertRaises(ValueError):
             demo.fill(self.template, {"product": "p"})

@@ -203,7 +203,7 @@ class ConsoleTestCase(unittest.TestCase):
 class FixtureTest(ConsoleTestCase):
     def test_the_client_replays_every_vendored_fixture(self):
         fixtures = self.fake.load_fixtures()
-        self.assertEqual(len(fixtures), 30)
+        self.assertEqual(len(fixtures), 35)
         for fx in fixtures:
             req, expected = fx["request"], fx["response"]
             with self.subTest(fixture=fx["route"], path=req["path"], status=expected["status"]):
@@ -360,6 +360,37 @@ class PaginationTest(ConsoleTestCase):
         with self.assertRaisesRegex(console.ConsoleError, "does not advance"):
             console.requests("all")
 
+    def test_a_cursor_may_go_down_in_queue_order(self):
+        # The items cursor is the last item's number in (rank, number) order (team-console#456).
+        base = "/api/v1/projects/tc/items?state=open"
+        self.fake.on("GET", base, (200, {"items": [{"number": 9}], "next": 9}, {}))
+        self.fake.on("GET", base + "&after=9", (200, {"items": [{"number": 2}], "next": 2}, {}))
+        self.fake.on("GET", base + "&after=2", (200, {"items": [{"number": 5}], "next": None}, {}))
+        self.assertEqual([r["number"] for r in console.list_all("projects/tc/items?state=open", "items")], [9, 2, 5])
+
+
+class PrItemsTest(ConsoleTestCase):
+    ITEMS = "/api/v1/projects/tc/prs/57/items"
+
+    def test_the_linked_fixture_is_read_with_its_repository(self):
+        self.fake.load_fixtures()
+        with as_job(stand_in("orchestrator")):
+            linked = console.pr_items(57)
+        self.assertEqual((linked["number"], linked["provider"], linked["repo"]), (57, "github", "acme/tc"))
+        self.assertEqual([(i["key"], i["labels"][-1]) for i in linked["items"]], [("TC-1", "security")])
+
+    def test_pages_are_joined_and_must_agree(self):
+        def page(rows, nxt, repo="acme/tc"):
+            return 200, {"number": 57, "provider": "github", "repo": repo, "next": nxt,
+                         "items": [{"key": f"TC-{n}", "labels": []} for n in rows]}, {}
+
+        self.fake.on("GET", self.ITEMS, page([3], 3))
+        self.fake.on("GET", self.ITEMS + "?after=3", page([1], None))
+        self.assertEqual([i["key"] for i in console.pr_items(57)["items"]], ["TC-3", "TC-1"])
+        self.fake.on("GET", self.ITEMS + "?after=3", page([1], None, repo="acme/other"))
+        with self.assertRaisesRegex(console.ConsoleError, "one repository"):
+            console.pr_items(57)
+
 
 class NotCutOverTest(ConsoleTestCase):
     def test_a_project_still_on_github_exits_3(self):
@@ -443,6 +474,12 @@ class ConfigTest(unittest.TestCase):
             self.assertEqual(console.config({**self.ENV, "TC_API_URL": url}).api_url, url)
         cfg = console.config({**self.ENV, "TC_API_URL": "http://tc/api/v1", "TC_RUNNER_SOCKET": "/run/tc.sock"})
         self.assertEqual(cfg.runner_socket, "/run/tc.sock")
+
+    def test_loopback_is_this_machine_only(self):
+        for host in ("localhost", "127.0.0.1", "127.8.0.1", "::1"):
+            self.assertTrue(transport.is_loopback(host), host)
+        for host in ("localhost.example", "10.0.0.1", "0.0.0.0", "", "tc"):
+            self.assertFalse(transport.is_loopback(host), host)
 
     def test_unusable_values_are_refused(self):
         for name, value in (("TC_API_URL", "https://user:pw@console.example/api/v1"),

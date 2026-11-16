@@ -60,7 +60,7 @@ from datetime import date, datetime, timedelta, timezone
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from typing import Optional  # noqa: E402
 
-from ptlib import brief, console, gh, owner, ownerrequests, picker, project  # noqa: E402
+from ptlib import brief, console, gh, owner, ownerrequests, picker, project, review  # noqa: E402
 from ptlib.console import instant  # noqa: E402
 from ptlib.calendar import KYIV, compute, pick_current_sprint  # noqa: E402
 from ptlib.labels import LABELS, STATUSES, KINDS, SEVERITIES  # noqa: E402
@@ -586,6 +586,13 @@ def cmd_link_pr(args) -> None:
         pr = gh.api(f"repos/{gh.repo()}/pulls/{args.pr}")
     except gh.GhError as exc:
         sys.exit(str(exc))
+    # Same rule as `pr link-pr --item` (team-console#628): the PR must name the item it is linked to.
+    key = review.item_ref(console.text_of(console.get_item(args.number), "key") or "")
+    if not key or "-" not in key:
+        sys.exit(f"console: item {args.number} has no key")
+    refusal = review.naming_refusal(pr, key)
+    if refusal:
+        sys.exit(refusal)
     link = console.link_pr(args.number, pr["number"], pr["html_url"], pr["head"]["ref"])
     out({"issue": args.number, "pr": pr["number"], "pr_url": pr["html_url"], "head_ref": pr["head"]["ref"],
          "linked_at": console.text_of(link, "linkedAt"), "url": console.item_url(args.number)})

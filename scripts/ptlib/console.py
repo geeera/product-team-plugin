@@ -37,7 +37,7 @@ _TOKEN = re.compile(r"^[\x21-\x7e]+$")  # header-safe: a CR/LF or space would sp
 _PROJECT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
 _RETRY_AFTER = re.compile(r"^\d{1,6}$")
 _IDEMPOTENCY_KEY = re.compile(r"^[A-Za-z0-9_-]{8,128}$")  # what the console accepts (tracker/idempotency.ts)
-_ETAG = re.compile(r'^(W/)?"[\x21\x23-\x7e]{0,200}"$')  # RFC 9110 entity-tag; the console sends `"<version>"`
+_ETAG = re.compile(r'(W/)?"[\x21\x23-\x7e]{0,200}"')  # RFC 9110 entity-tag; the console sends `"<version>"`
 
 
 class ConsoleError(RuntimeError):
@@ -128,6 +128,12 @@ class UnixHTTPConnection(http.client.HTTPConnection):
         self.sock = sock
 
 
+def _job_identity() -> Tuple[int, Set[int]]:
+    """This process's effective uid and the gids it belongs to (its own seam, narrower than mocking the three
+    `os` calls separately)."""
+    return os.geteuid(), {os.getegid(), *os.getgroups()}
+
+
 def check_socket(path: str) -> None:
     """Refuses a TC_RUNNER_SOCKET the job cannot trust with its token: not a socket (a symlink, a file), open to
     every user, or owned by another user who shares no group with the job. The runner makes it 0600 for its own
@@ -139,9 +145,10 @@ def check_socket(path: str) -> None:
         problem = "is not a socket"
     elif info.st_mode & stat.S_IWOTH:
         problem = "is writable by every user"
-    elif hasattr(os, "geteuid") and info.st_uid not in (os.geteuid(), 0) \
-            and info.st_gid not in {os.getegid(), *os.getgroups()}:
-        problem = "belongs to another user and none of this job's groups"
+    elif hasattr(os, "geteuid"):
+        euid, gids = _job_identity()
+        if info.st_uid not in (euid, 0) and info.st_gid not in gids:
+            problem = "belongs to another user and none of this job's groups"
     if problem:
         raise ConsoleError(f"TC_RUNNER_SOCKET {problem}: not the runner's job socket", type="socket-untrusted",
                            field="TC_RUNNER_SOCKET")
@@ -204,6 +211,7 @@ def _attempt(cfg: Config, method: str, target: str, data: Optional[bytes], heade
     # Every read, the status line and headers included, waits at most what is left of this attempt.
     conn.response_class = transport.deadline_response(attempt_deadline, ATTEMPT_DEADLINE)  # type: ignore[assignment]
     where = f"{method} {target}"
+    resp = None
     try:
         conn.connect()
         if conn.sock is not None:
@@ -234,6 +242,10 @@ def _attempt(cfg: Config, method: str, target: str, data: Optional[bytes], heade
                              type="timeout" if transport.is_timeout(exc) else "unreachable")
         raise transport.network_failure(exc, error, deadline) from None
     finally:
+        # `_DeadlineReader` holds a reference to the socket: close `resp` explicitly, not just the connection,
+        # or a read stopped early (`TooLarge`, `Deadline` mid-body) leaves the fd open until GC.
+        if resp is not None:
+            resp.close()
         conn.close()
 
 
@@ -259,7 +271,7 @@ def request(method: str, path: str, body: Any = None, *, etag: Optional[str] = N
         headers["Content-Type"] = "application/json"
         headers["Content-Length"] = str(len(data))
     if etag is not None:
-        if not _ETAG.match(etag):
+        if not _ETAG.fullmatch(etag):
             raise ConsoleError("the If-Match value is not an entity tag", type="etag-invalid")
         headers["If-Match"] = etag
     if method != "GET":
@@ -322,7 +334,7 @@ def item(number: int) -> Tuple[Dict[str, Any], str]:
     """The item and its ETag (the version an If-Match names)."""
     dto, headers = request("GET", project_path("items", number))
     etag = headers.get("etag")
-    if not isinstance(dto, dict) or not etag or not _ETAG.match(etag):
+    if not isinstance(dto, dict) or not etag or not _ETAG.fullmatch(etag):
         raise ConsoleError(f"GET item {number}: no item or no well-formed ETag in the answer",
                            type="unexpected-answer")
     return dto, etag

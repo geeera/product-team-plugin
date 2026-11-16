@@ -612,7 +612,6 @@ class RunnerSocketTest(ConsoleTestCase):
         self.assertEqual(caught.exception.type, "unreachable")
         self.assert_no_token(str(caught.exception))
 
-
     def test_a_socket_open_to_every_user_or_not_a_socket_is_refused(self):
         os.chmod(self.socket_path, 0o666)
         try:
@@ -635,14 +634,15 @@ class RunnerSocketTest(ConsoleTestCase):
     def test_a_socket_of_another_user_is_used_only_through_a_shared_group(self):
         self.fake.on("GET", "/api/v1/projects/tc/inbox", (200, {"items": []}, {}))
         info = os.stat(self.socket_path)
-        other = mock.patch.object(console.os, "geteuid", return_value=info.st_uid + 1000)
-        with other, mock.patch.object(console.os, "getegid", return_value=info.st_gid + 1000), \
-                mock.patch.object(console.os, "getgroups", return_value=[info.st_gid + 1001]):
+        other_euid = info.st_uid + 1000
+        with mock.patch.object(console, "_job_identity",
+                               return_value=(other_euid, {info.st_gid + 1000, info.st_gid + 1001})):
             with self.assertRaisesRegex(console.ConsoleError, "belongs to another user"):
                 console.inbox()
         self.assertEqual(self.fake.seen, [])
-        with other, mock.patch.object(console.os, "getgroups", return_value=[info.st_gid]):
+        with mock.patch.object(console, "_job_identity", return_value=(other_euid, {info.st_gid})):
             self.assertEqual(console.inbox(), {"items": []})  # the runner's 0660 socket under the job's group
+
 
 if __name__ == "__main__":
     unittest.main()

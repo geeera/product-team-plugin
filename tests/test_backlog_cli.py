@@ -41,5 +41,29 @@ class BodyFileTest(unittest.TestCase):
         self.assertIn("cannot read --body-file", str(caught.exception))
 
 
+class AskCommandTest(unittest.TestCase):
+    """`partial.next` for a failed `create --kind question` (team-console#703): it must be the full, runnable
+    `backlog ask` command, not a template the caller has to fill in."""
+
+    def test_default_commands_and_no_recommended_stay_out_of_the_line(self):
+        question = {"category": "scope", "text": "what to answer", "commands": ["approve", "reject"],
+                     "recommended": None}
+        self.assertEqual(backlog.ask_command(42, question),
+                         "backlog ask 42 --owner-category scope --ask 'what to answer'")
+
+    def test_custom_commands_and_recommended_are_carried_over(self):
+        question = {"category": "release", "text": "go or no-go", "commands": ["go", "no-go"],
+                     "recommended": "go"}
+        self.assertEqual(backlog.ask_command(7, question),
+                         "backlog ask 7 --owner-category release --ask 'go or no-go' --commands go,no-go "
+                         "--recommended go")
+
+    def test_ask_text_is_shell_quoted(self):
+        question = {"category": "scope", "text": "it's ok; rm -rf /", "commands": ["approve", "reject"],
+                     "recommended": None}
+        self.assertTrue(backlog.ask_command(1, question).startswith(
+            "backlog ask 1 --owner-category scope --ask 'it'\"'\"'s ok; rm -rf /'"))
+
+
 if __name__ == "__main__":
     unittest.main()

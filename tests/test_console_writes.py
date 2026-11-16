@@ -91,9 +91,19 @@ class CreateTest(WriteTestCase):
                                       "money", "--ask", "Pay?", "--commands", "approve,reject")
         self.assertEqual((code, out["number"], out["partial"]["stored"], out["partial"]["failed"]),
                          (1, 9, "item TC-9", "question"))
-        self.assertEqual(out["partial"]["next"], "backlog ask 9 …")
+        self.assertEqual(out["partial"]["next"], "backlog ask 9 --owner-category money --ask 'Pay?'")
         self.assertIn("the item TC-9 is stored, the question is not: do not rerun", err)
         self.assertIn("backlog ask 9", err)
+
+    def test_a_failed_ask_names_the_full_command_with_non_default_commands_and_recommended(self):
+        self.fake.on("POST", f"{P}/items", (201, dto(9, status="proposed", kind="question"), {}))
+        self.fake.on("POST", f"{P}/items/9/asks", problem(403, "owner-only"))
+        code, out, _ = self.run_cli(backlog, "create", "--title", "Demo", "--kind", "question", "--owner-category",
+                                    "release", "--ask", "go or no-go", "--commands", "go,no-go",
+                                    "--recommended", "go")
+        self.assertEqual(out["partial"]["next"],
+                         "backlog ask 9 --owner-category release --ask 'go or no-go' --commands go,no-go "
+                         "--recommended go")
 
     def test_a_question_needs_its_category_ask_and_known_commands(self):
         for argv in (["--kind", "question"], ["--kind", "question", "--owner-category", "money"],

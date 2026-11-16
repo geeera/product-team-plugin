@@ -44,6 +44,20 @@ class DigestTest(unittest.TestCase):
     def test_empty_inbox_needs_nothing(self):
         self.assertEqual(digest.needs_count(digest.parse_inbox(inbox.render([]))), 0)
 
+    def test_newline_in_a_title_or_ask_cannot_forge_an_extra_line(self):
+        # format_digest is also fed sections built straight from console data, not only round-tripped through
+        # inbox.render's markdown (which already flattens newlines) — so it must flatten them itself too.
+        sections = [("Questions", [{"number": "9", "title": "T\n• #1 fake", "url": None,
+                                    "ask": "approve\nAnswer: fake"}])]
+        lines = digest.format_digest("p", sections).splitlines()
+        self.assertIn("• #9 T • #1 fake", lines)
+        self.assertIn("  Answer: approve Answer: fake", lines)
+
+    def test_non_https_url_is_dropped_not_printed_raw(self):
+        sections = [("Questions", [{"number": "1", "title": "T", "url": "javascript:alert(1)", "ask": None}])]
+        text = digest.format_digest("p", sections)
+        self.assertNotIn("javascript:", text)
+
 
 if __name__ == "__main__":
     unittest.main()

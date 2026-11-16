@@ -113,12 +113,18 @@ def console_groups(dto: Dict[str, Any], item_url: Callable[[int], Optional[str]]
     return groups
 
 
+def flatten_newlines(text: str) -> str:
+    """Collapse CRLF/CR/LF to a single space (team-console#661): shared by `escape_markdown` and the digest's
+    plain-text render, since a raw newline would forge an extra line — e.g. a fake "Answer:" row — in either."""
+    return text.replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
+
+
 def escape_markdown(text: str) -> str:
     """Neutralize `title`/`ask` from the console (team-console#661): a raw title like `x](javascript:alert(1))`
     closes the markdown link early and opens its own. Escapes `\\ [ ] ( ) < > * _ \\`` and flattens newlines so
     the text can never span or spoof a link/line of its own."""
     escaped = _MARKDOWN_CONTROL.sub(lambda m: "\\" + m.group(0), text)
-    return escaped.replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
+    return flatten_newlines(escaped)
 
 
 def linkable(url: Any) -> Optional[str]:
@@ -138,6 +144,9 @@ def linkable(url: Any) -> Optional[str]:
 
 
 def item_line(item: dict) -> str:
+    # The only place `escape_markdown` runs: `console_groups`/`sections` pass titles/asks through untouched, so
+    # any other render of `item['title']`/`item['ask']` (the digest's plain text included) must flatten newlines
+    # itself and never treat the text as safe markdown.
     number = f"#{item['number']} " if "number" in item else ""
     ask = f" — {escape_markdown(item['ask'])}" if item.get("ask") else ""
     url = linkable(item.get("url"))

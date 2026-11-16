@@ -48,5 +48,10 @@ Rules:
   `approved` (#452), editing an approved item's title or body (`edit-after-approval`, #462: add a `comment`
   note instead). Closing a `proposed` item still works. A secret in a job's text is refused (`body-secret`).
 - Write bodies to a temp file and use `--body-file` for anything longer than a line (no shell-quoting bugs).
+- `create --kind question`, `decide --close`, `move --reason` and `close --reason` each make two writes. If the
+  second one fails, the command still exits non-zero but stdout still carries the first write's result with
+  `partial: {stored, failed, next, error}` (`next` is the command that finishes the change). On a non-zero exit
+  from one of these, check stdout for `partial` before deciding what happened: run `partial.next`, never rerun
+  the original command (it would repeat the first write, e.g. post a second decision comment).
 - Talks to the team console's API with the job's environment (`TC_API_URL`, `TC_JOB_TOKEN`, `TC_PROJECT`);
   `link-pr` also reads the pull request from GitHub (`GH_TOKEN`).

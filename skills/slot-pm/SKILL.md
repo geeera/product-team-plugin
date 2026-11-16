@@ -61,7 +61,9 @@ team, the owner approved an earlier text: ask again instead of acting.
   - it asks for money, scope, a release, an account/secret/permission, a legal call or a design approval → it
     stays: `B ask N --owner-category <c> --ask "<what to answer, recommendation first>"`;
   - it asks for a technical choice, a name, an identifier, a key layout, an order of work → the right role decides
-    now and closes it: `B decide N --close --body-file <decision and why>`;
+    now and closes it: `B decide N --close --body-file <decision and why>`. A non-zero exit still carrying
+    `partial` on stdout means the decision comment is stored and the close is not: run `partial.next`, never
+    rerun `decide`;
   - `team:demo` issues are always the owner's (`release`) — never close them this way.
 - **Owner reports done**: an open `needs:owner` / `needs:local` issue whose `B answers N` lists an entry under
   `done` newer than the last team comment (the owner said in the team chat that an account, secret or local task
@@ -115,7 +117,9 @@ still holds (a request never approves scope, never changes a status, never moves
 - For approved `needs-design` issues without an approved design (at most 2 per run, 4 in burn):
   1. no `ux-spec` label → `ux-designer` writes the UX spec and wireframe on the issue and adds `ux-spec`;
   2. then `ui-designer` builds the design on that spec and sends it for approval — link comment on the issue,
-     `+design:awaiting-approval`, `B move N blocked --reason "waiting for design approval"`.
+     `+design:awaiting-approval`, `B move N blocked --reason "waiting for design approval"` (a non-zero exit
+     still carrying `partial` on stdout means the status moved and the reason note is not: run `partial.next`,
+     never rerun `move`).
   The owner approves once, the final design; the UX spec is the team's input, not a second approval.
 - Security-relevant `complexity:high` issues: `security` adds a threat model next to the architect's note.
 - Issues labelled `agent:<name>` go to that project-specific agent; check `.claude/agents/<name>.md` exists —
@@ -137,7 +141,9 @@ still holds (a request never approves scope, never changes a status, never moves
 (this is the release candidate; the owner approves the release at the demo, not the cut). Everything still
 `in-progress` moves to the next sprint milestone. Comment on the `team:demo` issue (create it with
 `B create --kind question --owner-category release --ask "/go to release <sprint> after the demo · /no-go why"
---commands go,no-go --label team:demo --title "<sprint> demo" …` if missing) with the stage URL.
+--commands go,no-go --label team:demo --title "<sprint> demo" …` if missing) with the stage URL. A non-zero exit
+from `create --kind question` that still carries `partial` on stdout means the item is created without its
+question: run `partial.next`, never rerun `create`.
 
 ## 5. Close
 Summary: answers applied, owner requests applied or declined (with the reason), designs waiting for the owner

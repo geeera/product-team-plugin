@@ -48,6 +48,8 @@ Each agent returns a PR URL or a blocked reason:
   branch or `--item`, never link it to another item to get past the refusal.
 - Blocked → `B move N blocked --reason "<reason>"`; if the owner must act, add `needs:owner` (or
   `needs:local` for work that needs a local machine) so it lands in the owner's inbox and later runs skip it.
+  A non-zero exit that still carries `partial` on stdout means the status moved and the reason note is not: run
+  `partial.next`, never rerun `move`.
 
 Kit-first: if two dispatched tasks need the same missing UI primitive, run the primitive first as its own
 `kind:chore` issue and hold the dependants for the next run.

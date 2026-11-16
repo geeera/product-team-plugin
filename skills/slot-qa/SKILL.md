@@ -21,7 +21,9 @@ For each linked open PR, oldest first:
    `PR push`; review it in a later slot. `behind` alone is fine — GitHub merges it as is, and updating the branch would make every
    existing verdict stale.
 2. `PR checks <pr>` — pending: skip (next slot); red: comment the failing job on the PR,
-   `B move N in-progress --reason "CI red: <job>"`, `B label N +qa:changes-requested`.
+   `B move N in-progress --reason "CI red: <job>"`, `B label N +qa:changes-requested`. A non-zero exit from
+   `move` that still carries `partial` on stdout means the status moved and the reason note is not: run
+   `partial.next`, never rerun `move`.
 3. Green → `PR gate <pr>` first: its `required` list and `why` say which verdicts this PR needs under the base
    branch's `review:` policy (`reference/workflow.md` → Review gate). Start **only those** reviewers, **in
    parallel**, each with only `PLUGIN_ROOT=<path>`, repo, PR number, issue number — never the developer's summary

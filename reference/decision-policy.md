@@ -54,3 +54,5 @@ Mixing the two gives the owner the wrong buttons.
   command that answers it: "`/approve` to use Cloudflare R2 (free, recommended) · `/reject why` to keep SeaweedFS".
 - Put the recommendation first; the body holds the options, costs and consequences — short.
 - One decision per question. Never ask for a secret value; ask the owner to put it in GitHub Secrets.
+- A non-zero exit that still carries `partial` on stdout means the item is created without its question: run
+  `partial.next`, never rerun `create`.

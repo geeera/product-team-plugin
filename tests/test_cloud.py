@@ -248,13 +248,6 @@ class CloudSessionTest(unittest.TestCase):
         code, out, _ = self.start()
         self.assertEqual((code, out["decision"]), (3, "paused"))
         self.assertIn("team:paused", {l["name"] for l in self.log["labels"]})
-        _, answers, _ = self.run_cli(backlog, "answers", "1")
-        self.assertEqual(answers["commands"], [])
-        reason = answers["ignored"][0]["reason"]
-        self.assertEqual(answers["ignored"][0]["comment_id"], forged["id"])
-        self.assertIn("could not be fetched", reason)
-        self.assertIn("write the command again in a new comment", reason)
-
         self.github.comment(1, OWNER, "/resume")
         code, out, _ = self.start()
         self.assertEqual((code, out["decision"]), (0, "proceed"))
@@ -307,18 +300,6 @@ class CloudSessionTest(unittest.TestCase):
         self.assertEqual((code, out["decision"]), (3, "overlap"))
         self.assertIn(started["run_id"], out["reason"])
 
-    def test_backlog_owner_commands_unedited_count_edited_do_not(self):
-        issue = self.github.create_issue(BOT, "Use R2?", ["kind:question", "owner:money"])
-        genuine = self.github.comment(issue["number"], OWNER, "/approve")
-        forged = self.github.comment(issue["number"], OWNER, "/reject never", edited=True)
-        _, answers, _ = self.run_cli(backlog, "answers", str(issue["number"]))
-        self.assertEqual([(c["command"], c["comment_id"]) for c in answers["commands"]], [("approve", genuine["id"])])
-        self.assertEqual([(i["kind"], i["comment_id"]) for i in answers["ignored"]], [("edited", forged["id"])])
-        self.assertEqual(answers["history"], "rest-only")
-        self.assertIn("GraphQL is not available", answers["history_error"])
-        # REST cannot date a body edit (updated_at moves with every label): the body is never the owner's here.
-        self.assertFalse(answers["body"]["owner_statement"])
-
     def test_vanished_reads_the_appended_log_in_rest_only_mode(self):
         issue = self.github.create_issue(BOT, "Use R2?", ["kind:question"])
         gone = self.github.comment(issue["number"], OWNER, "/approve")
@@ -351,17 +332,11 @@ class CloudSessionTest(unittest.TestCase):
         self.assertEqual((code, out["since"]), (0, "2026-09-30T10:00:00Z"))
         self.assertEqual(out["runs"], {"total": 0, "failed": 0})
 
-    def test_owner_requests_are_read_and_answered_without_graphql(self):
+    def test_owner_requests_are_answered_without_graphql(self):
         issue = self.github.create_issue(BOT, "Export to CSV", ["kind:feature", "status:approved"])
         request = self.github.comment(issue["number"], OWNER, REQUEST_NEXT, app=CONSOLE)
-        typed = self.github.comment(issue["number"], OWNER, REQUEST_NEXT)  # the owner's gh token: no app
+        self.github.comment(issue["number"], OWNER, REQUEST_NEXT)  # the owner's gh token: no app, never pending
         self.github.comment(issue["number"], OWNER, "/approve")
-        code, out, _ = self.run_cli(backlog, "requests")
-        self.assertEqual((code, out["history"], out["acts_as_owner"]), (0, "rest-only", False))
-        self.assertEqual([(r["issue"], r["comment_id"], r["kind"], r["target"], r["via"]) for r in out["requests"]],
-                         [(issue["number"], request["id"], "sprint", "next", CONSOLE)])
-        self.assertEqual([(i["comment_id"], "performed_via_github_app: none" in i["reason"]) for i in out["ignored"]],
-                         [(typed["id"], True)])
 
         code, done, err = self.run_cli(backlog, "request-done", str(issue["number"]), "--comment-id",
                                        str(request["id"]), "--result", "declined")
@@ -374,21 +349,15 @@ class CloudSessionTest(unittest.TestCase):
         self.assertEqual((posted["user"]["login"], self.github.auths[-1]), (BOT, None))  # the team's own token
         self.assertTrue(posted["body"].startswith(
             '<!-- pt-owner-request-handled {"comment_id":%d,"result":"declined","v":1} -->\n' % request["id"]))
-        code, out, _ = self.run_cli(backlog, "requests")
-        self.assertEqual((out["requests"], [(h["comment_id"], h["result"]) for h in out["handled"]]),
-                         ([], [(request["id"], "declined")]))
         code, _, err = self.run_cli(backlog, "request-done", str(issue["number"]), "--comment-id",
                                     str(request["id"]), "--result", "applied")
         self.assertNotEqual(code, 0)
         self.assertIn("already answered", err)
 
-    def test_no_request_counts_and_none_is_answered_while_an_agent_can_act_as_the_owner(self):
+    def test_no_request_is_answered_while_an_agent_can_act_as_the_owner(self):
         issue = self.github.create_issue(BOT, "Export to CSV", ["kind:feature"])
         request = self.github.comment(issue["number"], OWNER, REQUEST_NEXT, app=CONSOLE)
         self.acts_as_owner = True
-        _, out, _ = self.run_cli(backlog, "requests")
-        self.assertEqual(out["requests"], [])
-        self.assertIn("acts_as_owner", out["ignored"][0]["reason"])
         code, _, err = self.run_cli(backlog, "request-done", str(issue["number"]), "--comment-id",
                                     str(request["id"]), "--result", "applied")
         self.assertNotEqual(code, 0)
@@ -398,31 +367,6 @@ class CloudSessionTest(unittest.TestCase):
                                     str(request["id"]), "--result", "applied")
         self.assertIn("only as the team's identity", err)
         self.assertEqual([w for w in self.github.writes if w[0] == "POST"], [])
-
-    def test_requests_read_at_most_the_cap_of_issues_newest_first_and_say_so(self):
-        older = self.github.create_issue(BOT, "Older", ["kind:feature"])
-        newer = self.github.create_issue(BOT, "Newer", ["kind:feature"])
-        self.github.comment(older["number"], OWNER, REQUEST_NEXT, app=CONSOLE)
-        request = self.github.comment(newer["number"], OWNER, REQUEST_NEXT, app=CONSOLE)
-        with mock.patch.object(backlog, "MAX_REQUEST_ISSUES", 1):
-            code, out, err = self.run_cli(backlog, "requests")
-        self.assertEqual(code, 0)
-        self.assertEqual([(r["issue"], r["comment_id"]) for r in out["requests"]], [(newer["number"], request["id"])])
-        self.assertIn("2 issues carry request markers", out["truncated"])
-        self.assertIn("wait for the next run", err)
-
-    def test_outsiders_flooding_markers_cannot_push_a_genuine_request_past_the_cap(self):
-        genuine = self.github.create_issue(BOT, "Genuine", ["kind:feature"])
-        request = self.github.comment(genuine["number"], OWNER, REQUEST_NEXT, app=CONSOLE)
-        for i in range(30):  # all newer than the genuine request
-            flood = self.github.create_issue(STRANGER, f"Flood {i}", [])
-            self.github.comment(flood["number"], STRANGER, REQUEST_NEXT, app=CONSOLE)
-        code, out, _ = self.run_cli(backlog, "requests")
-        self.assertEqual(backlog.MAX_REQUEST_ISSUES, 25)
-        self.assertEqual(code, 0)
-        self.assertIn("31 issues carry request markers", out["truncated"])
-        self.assertEqual([(r["issue"], r["comment_id"]) for r in out["requests"]],
-                         [(genuine["number"], request["id"])])
 
     def test_a_plain_comment_cannot_carry_a_request_or_handled_marker(self):
         issue = self.github.create_issue(BOT, "Export to CSV", ["kind:feature"])

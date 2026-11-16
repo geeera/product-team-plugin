@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Backlog adapter (SPEC decision 4): reads come from the team console's tracker (TC_* job environment, ADR 0006);
-the item reads (show, answers, reversals, requests) and the writes still go to GitHub Issues until they move
-too (team-console #607, #608).
+the writes still go to GitHub Issues until they move too (team-console #608).
 
 The contract is the subcommand set below and its JSON output; a different tracker replaces this file, not the
 skills. Output is JSON on stdout; errors go to stderr with a non-zero exit (3: the project is still on GitHub).
@@ -9,7 +8,7 @@ skills. Output is JSON on stdout; errors go to stderr with a non-zero exit (3: t
   backlog init                                   check the console has the plugin's labels (it seeds them at the
                                                  cutover; adding one is the owner's): exit 1 naming the missing ones
   backlog list [--status S] [--kind K] [--label L]... [--milestone M|current|none] [--state open|closed|all]
-  backlog show N                                 issue with body, labels, comments
+  backlog show N                                 item with body, labels, comments, asks and owner decisions
   backlog create --title T --kind K [--status proposed] [--severity SEV] [--label L]...
                  [--milestone M|current] (--body B | --body-file F)
                  kind question also needs --owner-category money|scope|release|access|legal|design and
@@ -32,14 +31,13 @@ skills. Output is JSON on stdout; errors go to stderr with a non-zero exit (3: t
   backlog label N [+L|-L]...                     add/remove flags
   backlog comment N (--body B | --body-file F)
   backlog link-pr N PR                           record the PR on the issue
-  backlog answers N                              owner commands (/approve, /reject, /go, …) on the issue; owner
-                                                 comments someone else edited are listed under "ignored"
+  backlog answers N                              the owner's decisions on the item (approve, reject, go, …): rows
+                                                 only the owner writes, so "ignored" is always empty
   backlog vanished [--days 30]                   owner commands a run acted on (`runlog finish --acted`) that
                                                  were deleted since — once per run, never acted on again
   backlog requests [--milestone M|current|none] [--days 30]
-                 pending owner requests from the team console ("sprint → next", "queue → up"): owner-written,
-                 never edited, posted by an app in team.console_app_slugs, and never while an agent here can
-                 write as the owner; the rest are listed under "ignored" with the reason
+                 pending owner requests from the team console ("sprint → next", "queue → up"); one on a closed
+                 item is listed under "ignored"
   backlog request-done N --comment-id ID --result applied|declined [--text REASON]
                  answer a pending request with the handled marker, as the team (never the owner's token);
                  declined needs --text
@@ -58,10 +56,9 @@ import sys
 
 sys.dont_write_bytecode = True  # the vendored copy lives in the product repo: no __pycache__ there
 from datetime import date, datetime, timedelta, timezone
-from urllib.parse import quote
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from ptlib import brief, commands, console, gh, inbox, owner, ownerrequests, picker, project, provenance, runlogissue  # noqa: E402
+from ptlib import brief, console, gh, inbox, owner, ownerrequests, picker, project, provenance, runlogissue  # noqa: E402
 from ptlib.calendar import KYIV, compute, pick_current_sprint  # noqa: E402
 from ptlib.labels import LABELS, STATUSES, KINDS, SEVERITIES  # noqa: E402
 
@@ -146,6 +143,27 @@ def console_sprint(sprints: list, value: str, today: date) -> dict:
     return found
 
 
+def instant(value) -> datetime:
+    """A console timestamp (`2026-11-12T10:00:00.000Z`) as an aware datetime; the epoch when it is not one."""
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (AttributeError, ValueError):
+        return datetime.fromtimestamp(0, timezone.utc)
+
+
+def days_ago(days: int) -> datetime:
+    return (datetime.now(timezone.utc) - timedelta(days=days)).replace(microsecond=0)
+
+
+def decision_entry(d: dict) -> dict:
+    command = console.text_of(d, "command")
+    if not command:
+        raise console.ConsoleError("a decision in the answer has no command", type="unexpected-answer")
+    return {"command": command, "text": console.text_of(d, "text") or "", "at": console.text_of(d, "decidedAt"),
+            "via": console.text_of(d, "via"), "id": d.get("id"), "ask_id": d.get("askId"),
+            "reverses_comment_id": d.get("reversesCommentId"), "url": console.text_of(d, "sourceUrl")}
+
+
 def cmd_init(_args) -> None:
     # The console seeds the plugin's labels at the cutover and only the owner adds labels: this checks, never writes.
     present = {console.text_of(label, "name") for label in console.labels() if isinstance(label, dict)}
@@ -166,6 +184,110 @@ def cmd_list(args) -> None:
         filters["label"] = labels[0]  # the console takes one label per request; the rest narrow the answer here
     found = console.issues(sprint_titles(sprints), **filters)
     out([summary(i) for i in found if set(labels) <= set(i["labels"])])
+
+
+def cmd_show(args) -> None:
+    number = args.number
+    dto = console.get_item(number)
+    asks = console.asks(number)
+    open_asks = [console.text_of(a, "ask") for a in asks if a.get("state") == "open"]
+    data = summary(console.as_issue(dto, sprint_titles(console.sprints()), ask=open_asks[-1] if open_asks else None))
+    data["body"] = console.text_of(dto, "body") or ""
+    text = console.text_of
+    data["comments"] = []
+    for c in console.comments(number):
+        author = c.get("author") if isinstance(c.get("author"), dict) else {}
+        data["comments"].append({"id": c.get("id"), "kind": text(c, "kind"), "author": text(author, "name"),
+                                 "author_kind": text(author, "kind"), "at": text(c, "createdAt"),
+                                 "body": text(c, "body") or ""})
+    data["asks"] = [{"id": a.get("id"), "category": text(a, "category"), "ask": text(a, "ask"),
+                     "commands": [x for x in a["commands"] if isinstance(x, str)]
+                     if isinstance(a.get("commands"), list) else [],
+                     "recommended": text(a, "recommended"), "state": text(a, "state"),
+                     "at": text(a, "createdAt")} for a in asks]
+    data["decisions"] = [decision_entry(d) for d in console.item_decisions(number)]
+    out(data)
+
+
+def cmd_answers(args) -> None:
+    # Decisions are rows only the owner's identity writes: nothing to screen, so nothing is ever ignored, and no
+    # agent can write as the owner (same_account is false by construction).
+    found = sorted((decision_entry(d) for d in console.item_decisions(args.number)), key=lambda d: d["at"] or "")
+    out({"same_account": False, "commands": found, "ignored": [],
+         "done": [d for d in found if d["command"] == "done"], "source": "console"})
+
+
+def cmd_reversals(args) -> None:
+    """Owner rejects of a team decision since --days that no later team decision on the item answered."""
+    since = days_ago(args.days)
+    newest = {}
+    for d in console.decisions(since=since.strftime("%Y-%m-%dT%H:%M:%SZ"), command="reject"):
+        number = d["item"].get("number") if isinstance(d.get("item"), dict) else None
+        if d.get("reversesCommentId") is None or not isinstance(number, int):
+            continue
+        if number not in newest or instant(d.get("decidedAt")) >= instant(newest[number].get("decidedAt")):
+            newest[number] = d
+    titles = sprint_titles(console.sprints()) if newest else {}
+    found = []
+    for number in sorted(newest):
+        reject = newest[number]
+        at = instant(reject.get("decidedAt"))
+        if any(c.get("kind") == "decision" and instant(c.get("createdAt")) > at for c in console.comments(number)):
+            continue  # the team redid the decision after the reject
+        issue = summary(console.as_issue(console.get_item(number), titles))
+        found.append(dict(issue, reason=console.text_of(reject, "text") or "", at=console.text_of(reject, "decidedAt"),
+                          decision_id=reject.get("id"), reverses_comment_id=reject.get("reversesCommentId"),
+                          comment_url=console.text_of(reject, "sourceUrl")))
+    out(found)
+
+
+def request_of(row: dict):
+    """The request's {kind, target} or {kind, direction} when it is one the plugin knows, else None."""
+    request = row.get("request")
+    if not isinstance(request, dict):
+        return None
+    if request.get("kind") == "sprint" and set(request) == {"kind", "target"} \
+            and request["target"] in ownerrequests.TARGETS:
+        return {"kind": "sprint", "target": request["target"]}
+    if request.get("kind") == "priority" and set(request) == {"kind", "direction"} \
+            and request["direction"] in ownerrequests.DIRECTIONS:
+        return {"kind": "priority", "direction": request["direction"]}
+    return None
+
+
+def cmd_requests(args) -> None:
+    """Pending owner requests from the team console (ADR 0005), for the PM at planning time. The console keeps the
+    newest per item and only the owner's identity creates them, so there is no provenance to check here."""
+    since = days_ago(args.days)
+    result = {"requests": [], "handled": [], "ignored": [], "since": since.strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "source": "console"}
+    pending = [r for r in console.requests("pending") if instant(r.get("requestedAt")) >= since]
+    if not pending:
+        out(result)
+        return
+    sprints = console.sprints()
+    open_items = {i["number"]: i for i in console.issues(sprint_titles(sprints), state="open")}
+    want = None
+    if args.milestone and args.milestone != "none":
+        want = console_sprint(sprints, args.milestone, datetime.now(KYIV).date())["title"]
+    for row in pending:
+        item = row.get("item") if isinstance(row.get("item"), dict) else {}
+        number = item.get("number")
+        about = open_items.get(number)
+        if args.milestone and (about or {}).get("milestone") != want:
+            continue
+        entry = {"issue": number, "key": console.text_of(item, "key"), "title": console.text_of(item, "title"),
+                 "milestone": about["milestone"] if about else None, "status": about["status"] if about else None,
+                 "request_id": row.get("id"), "at": console.text_of(row, "requestedAt")}
+        request = request_of(row)
+        reason = "the item is closed" if about is None else "" if request else "not a request the plugin knows"
+        if reason:
+            result["ignored"].append(dict(entry, reason=reason))
+        else:
+            result["requests"].append(dict(entry, **request))
+    for key in ("requests", "ignored"):
+        result[key].sort(key=lambda e: (e["issue"] if isinstance(e["issue"], int) else 0, e["at"] or ""))
+    out(result)
 
 
 def cmd_next(args) -> None:
@@ -196,20 +318,7 @@ def cmd_sprint(args) -> None:
              for s in sprints])
 
 
-# Still GitHub Issues: the item reads until their console form lands, the writes until team-console #608.
-
-def cmd_show(repo: str, args) -> None:
-    issue = gh.api(f"repos/{repo}/issues/{args.number}")
-    data = slim(issue)
-    data["body"] = issue.get("body") or ""
-    # A reading aid only: whose words count as the owner's comes from `answers`, which checks the edit history.
-    data["comments"] = [
-        {"author": c["user"]["login"], "at": c["created_at"], "body": c["body"],
-         "edited": not provenance.rest_unedited(c)}
-        for c in gh.api_list(f"repos/{repo}/issues/{args.number}/comments?per_page=100")
-    ]
-    out(data)
-
+# Writes: still GitHub Issues until team-console #608 moves them.
 
 def cmd_create(repo: str, args) -> None:
     if args.kind not in KINDS:
@@ -266,24 +375,6 @@ def cmd_answer(repo: str, args) -> None:
     # Commands count only when the owner's login wrote them; in app mode that needs the owner's own token.
     c = gh.api(f"repos/{repo}/issues/{args.number}/comments", "POST", {"body": body}, auth=gh.owner_token(repo))
     out({"issue": args.number, "answer": f"/{args.command}", "url": c["html_url"]})
-
-
-def cmd_reversals(repo: str, args) -> None:
-    owner_login = gh.owner_login(repo)
-    team = gh.team_logins(repo)
-    same_account = gh.acts_as_owner(repo)
-    since = (datetime.now(KYIV) - timedelta(days=args.days)).isoformat(timespec="seconds")
-    found = []
-    for issue in gh.api_list(f"repos/{repo}/issues?state=all&labels=team-decided&since={quote(since)}&per_page=100"):
-        if "pull_request" in issue:
-            continue
-        comments = gh.api_list(f"repos/{repo}/issues/{issue['number']}/comments?per_page=100")
-        rejection = owner.reversed_by_owner(comments, owner_login, provenance.fetch(repo, issue["number"]), team,
-                                           same_account)
-        if rejection:
-            found.append(dict(slim(issue), reason=rejection.get("text", ""), at=rejection.get("at"),
-                              comment_id=rejection.get("comment_id"), comment_url=rejection.get("url")))
-    out(found)
 
 
 def cmd_decide(repo: str, args) -> None:
@@ -389,27 +480,6 @@ def cmd_link_pr(repo: str, args) -> None:
     out({"issue": args.number, "pr": pr["number"], "pr_url": pr["html_url"], "comment": c["html_url"]})
 
 
-def cmd_answers(repo: str, args) -> None:
-    owner = gh.owner_login(repo)
-    issue = gh.api(f"repos/{repo}/issues/{args.number}")
-    comments = gh.api_list(f"repos/{repo}/issues/{args.number}/comments?per_page=100")
-    # Anyone with Issues write can edit an owner comment into a command: only unedited or owner-edited ones count.
-    history = provenance.fetch(repo, args.number)
-    # When the agents act as the owner's account, an agent can write a comment that looks like the owner's (team
-    # notes are then skipped); as an app they cannot, and commands.parse counts only the owner's login.
-    same_account = gh.acts_as_owner(repo)
-    trusted, _ = provenance.screen(comments, [owner], history)
-    out({"owner": owner, "agents": gh.token_login(), "same_account": same_account,
-         "commands": commands.parse(comments, owner, history, same_account),
-         "ignored": commands.rejected(comments, owner, history, same_account),
-         "done": [{"at": c.get("created_at"), "comment_id": c.get("id"), "url": c.get("html_url")}
-                  for c in trusted if brief.DONE_MARKER in (c.get("body") or "")],
-         "body": provenance.body_statement(issue, owner, history),
-         # rest-only: no edit history here (GraphQL blocked or down); every edited owner comment is ignored.
-         "history": provenance.mode(history),
-         "history_error": history.get("error", "")})
-
-
 GONE = re.compile(r"→ HTTP (404|410)\b")
 
 
@@ -436,10 +506,6 @@ def cmd_vanished(repo: str, args) -> None:
     out({"vanished": vanished, "checked": len(recent), "error": error, "history": history_mode})
 
 
-# Each issue costs up to three reads (issue, comments, edit history); a run never spends more than this on requests.
-MAX_REQUEST_ISSUES = 25
-
-
 def _request_slugs(repo: str) -> list:
     # The trust root comes from the default branch, never the working tree: changing it takes a merged PR.
     try:
@@ -455,68 +521,6 @@ def _issue_requests(repo: str, number: int, owner_login: str, slugs: list, team:
     history = provenance.fetch(repo, number)
     found = ownerrequests.evaluate(comments, owner_login, history, slugs, team, acts, since)
     return found, provenance.mode(history)
-
-
-def cmd_requests(repo: str, args) -> None:
-    """Pending owner requests from the team console (geeera/team-console ADR 0005), for the PM at planning time.
-
-    One repository-wide comments read finds the issues that carry a request marker since --days; each of those is
-    then read in full and checked with the provenance rules of ownerrequests.evaluate.
-    """
-    since = (datetime.now(timezone.utc) - timedelta(days=args.days)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    recent = gh.api_list(f"repos/{repo}/issues/comments?since={quote(since)}&per_page=100")
-    markers = [c for c in recent if c.get("issue_url") and ownerrequests.request_marker_of(c.get("body") or "")]
-    result = {"requests": [], "handled": [], "ignored": [], "since": since, "console_app_slugs": [],
-              "acts_as_owner": None, "history": provenance.GRAPHQL, "truncated": ""}
-    if not markers:
-        out(result)
-        return
-    owner_login = gh.owner_login(repo)
-    slugs = _request_slugs(repo)
-    # Ranking key per issue: (has a plausible request, newest marker). Plausible = the owner's login and a console
-    # slug on the REST record, so outsiders flooding markers cannot push a real request past the cap. Only a
-    # ranking hint: every issue read is verified in full by ownerrequests.evaluate.
-    rank = {}
-    for c in markers:
-        number = int(c["issue_url"].rstrip("/").rsplit("/", 1)[-1])
-        plausible = (provenance.author_of(c).lower() == owner_login.lower()
-                     and ((c.get("performed_via_github_app") or {}).get("slug") or "") in slugs)
-        rank[number] = max(rank.get(number, (False, "")), (plausible, c.get("created_at") or ""))
-    numbers = sorted(rank, key=lambda n: (rank[n], n), reverse=True)
-    if len(numbers) > MAX_REQUEST_ISSUES:
-        result["truncated"] = (f"{len(numbers)} issues carry request markers; read the {MAX_REQUEST_ISSUES} with "
-                               f"the owner's console requests first, then the newest; the other "
-                               f"{len(numbers) - MAX_REQUEST_ISSUES} wait for the next run")
-        print(result["truncated"], file=sys.stderr)
-        numbers = numbers[:MAX_REQUEST_ISSUES]
-    acts = gh.acts_as_owner(repo)
-    team = gh.team_logins(repo)
-    result.update(console_app_slugs=slugs, acts_as_owner=acts)
-    milestone = None
-    if args.milestone and args.milestone != "none":
-        milestone = resolve_milestone(repo, args.milestone)["title"]
-    for number in numbers:
-        issue = gh.api(f"repos/{repo}/issues/{number}")
-        about = slim(issue)
-        if args.milestone and about["milestone"] != milestone:
-            continue
-        found, mode = _issue_requests(repo, number, owner_login, slugs, team, acts, since)
-        if mode == provenance.REST_ONLY:
-            result["history"] = provenance.REST_ONLY
-        where = {"issue": number, "title": about["title"], "milestone": about["milestone"], "status": about["status"]}
-        not_open = "it is on a pull request" if "pull_request" in issue else \
-            "the issue is closed" if issue.get("state") != "open" else ""
-        if not_open and found["pending"]:
-            found["ignored"].append({"comment_id": found["pending"]["comment_id"], "url": found["pending"]["url"],
-                                     "author": owner_login, "at": found["pending"]["at"], "reason": not_open})
-            found["pending"] = None
-        if found["pending"]:
-            result["requests"].append(dict(where, **found["pending"]))
-        result["handled"] += [dict(h, issue=number) for h in found["handled"]]
-        result["ignored"] += [dict(e, issue=number) for e in found["ignored"]]
-    for key in ("requests", "handled", "ignored"):
-        result[key].sort(key=lambda e: (e["issue"], e.get("at") or ""))
-    out(result)
 
 
 def cmd_request_done(repo: str, args) -> None:
@@ -604,7 +608,8 @@ def main() -> None:
         argv = argv[:2] + ["--"] + argv[2:]
     args = p.parse_args(argv)
 
-    reads = {"init": cmd_init, "list": cmd_list, "next": cmd_next, "sprint": cmd_sprint}
+    reads = {"init": cmd_init, "list": cmd_list, "show": cmd_show, "answers": cmd_answers, "reversals": cmd_reversals,
+             "requests": cmd_requests, "next": cmd_next, "sprint": cmd_sprint}
     if args.cmd in reads and not (args.cmd == "sprint" and args.action == "create"):
         try:
             reads[args.cmd](args)
@@ -615,8 +620,7 @@ def main() -> None:
         "create": cmd_create, "move": cmd_move, "close": cmd_close, "decide": cmd_decide, "ask": cmd_ask,
         "answer": cmd_answer, "milestone": cmd_milestone, "label": cmd_label, "edit": cmd_edit,
         "comment": cmd_comment, "link-pr": cmd_link_pr, "vanished": cmd_vanished, "sprint": cmd_sprint_create,
-        "request-done": cmd_request_done, "show": cmd_show, "answers": cmd_answers, "reversals": cmd_reversals,
-        "requests": cmd_requests,
+        "request-done": cmd_request_done,
     }
     try:
         writes[args.cmd](gh.repo(), args)

@@ -315,10 +315,28 @@ def _object(dto: Any, what: str) -> Dict[str, Any]:
     return dto
 
 
+def get_item(number: int) -> Dict[str, Any]:
+    """The item with its body, for reading; `item()` is the form a write uses (it needs the ETag)."""
+    dto, _ = request("GET", project_path("items", number))
+    return _object(dto, f"item {number}")
+
+
 def items(**filters: Any) -> List[Dict[str, Any]]:
     """`GET …/items` with its filters (state, status, kind, label, sprint), in the console's queue order: (rank,
     number), the order `backlog next` dispatches in (#456). Callers must not re-sort it by number."""
     return list_all(project_path("items", **filters), "items")
+
+
+def comments(number: int) -> List[Dict[str, Any]]:
+    return list_all(project_path("items", number, "comments"), "comments")
+
+
+def asks(number: int) -> List[Dict[str, Any]]:
+    return list_all(project_path("items", number, "asks"), "asks")
+
+
+def item_decisions(number: int) -> List[Dict[str, Any]]:
+    return list_all(project_path("items", number, "decisions"), "decisions")
 
 
 def events(number: int) -> List[Dict[str, Any]]:

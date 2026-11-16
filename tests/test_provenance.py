@@ -384,50 +384,6 @@ class DecideCliTest(unittest.TestCase):
         self.assertIn("backlog decide", str(caught.exception))
 
 
-class AnswersCliTest(unittest.TestCase):
-    def run_answers(self, comments, graphql):
-        def api(path, method="GET", fields=None, auth=None):
-            if path == "repos/o/r/issues/7" and method == "GET":
-                return {"user": {"login": BOT}, "body": "ask", "labels": [], "created_at": CREATED,
-                        "updated_at": EDITED}
-            raise AssertionError(f"{method} {path}")
-
-        stdout = io.StringIO()
-        with mock.patch.object(sys, "argv", ["backlog", "answers", "7"]), \
-             mock.patch.object(backlog.gh, "repo", return_value="o/r"), \
-             mock.patch.object(backlog.gh, "api", side_effect=api), \
-             mock.patch.object(backlog.gh, "api_list", return_value=comments), \
-             mock.patch.object(backlog.gh, "graphql", **graphql), \
-             mock.patch.object(backlog.runlogissue, "acted_on", side_effect=AssertionError("once per run only")), \
-             mock.patch.object(backlog.gh, "owner_login", return_value=OWNER), \
-             mock.patch.object(backlog.gh, "token_login", return_value=BOT), \
-             mock.patch.object(backlog.gh, "acts_as_owner", return_value=False), \
-             mock.patch.object(sys, "stdout", stdout):
-            backlog.main()
-        return json.loads(stdout.getvalue())
-
-    def test_forged_go_is_listed_as_ignored_and_done_reports_are_verified(self):
-        done = brief.answer_comment("done", "created", "сделал", "owner")
-        comments = [rest(1, OWNER, "/go", edited=True), rest(2, OWNER, "/approve"),
-                    rest(3, OWNER, done), rest(4, OWNER, done, edited=True)]
-        nodes = [node(comments[0], [BOT]), node(comments[1]), node(comments[2]), node(comments[3], [STRANGER])]
-        data = self.run_answers(comments, {"return_value": graphql_page(nodes, issue_author=BOT)})
-        self.assertEqual([c["command"] for c in data["commands"]], ["approve"])
-        self.assertEqual([i["comment_id"] for i in data["ignored"]], [1])
-        self.assertEqual([d["comment_id"] for d in data["done"]], [3])
-        self.assertFalse(data["body"]["owner_statement"])
-        self.assertEqual(data["history_error"], "")
-        self.assertNotIn("vanished", data)
-
-    def test_history_outage_is_reported(self):
-        data = self.run_answers([rest(1, OWNER, "/go", edited=True)],
-                                {"side_effect": gh.GhError("POST graphql failed: timeout")})
-        self.assertEqual(data["commands"], [])
-        self.assertIn("timeout", data["history_error"])
-        self.assertIn("timeout", data["ignored"][0]["reason"])
-
-
-
 class VanishedCliTest(unittest.TestCase):
     NOW = "2099-01-01T00:00:00Z"  # every entry below is recent
 

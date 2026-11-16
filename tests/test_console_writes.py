@@ -291,7 +291,7 @@ class LabelMilestoneCloseTest(WriteTestCase):
         self.assertEqual(self.sent("POST", f"{P}/items/7/comments")[0]["body"]["body"], "**Closed as not planned**: duplicate of TC-3")
 
 
-class CommentTest(WriteTestCase):
+class CommentLinkTest(WriteTestCase):
     def test_comment_posts_a_note_and_refuses_the_markers(self):
         self.fake.on("POST", f"{P}/items/7/comments", (201, {"id": 5, "kind": "note", "body": "Hi"}, {}))
         code, out, _ = self.run_cli(backlog, "comment", "7", "--body", "Hi")
@@ -306,8 +306,89 @@ class CommentTest(WriteTestCase):
             self.assertEqual((code, self.fake.seen), (1, []), body)
             self.assertIn(text, err)
 
+    def test_link_pr_reads_the_pull_request_and_posts_the_link(self):
+        pull = {"number": 57, "html_url": "https://github.com/acme/tc/pull/57", "head": {"ref": "feature/tc-7-x"}}
+        self.fake.on("POST", f"{P}/items/7/pr-links", (201, {**{k: pull[k] for k in ("number",)}, "url": pull["html_url"],
+                                                             "headRef": "feature/tc-7-x",
+                                                             "linkedAt": "2026-11-12T10:00:00.000Z",
+                                                             "linkedBy": {"kind": "job", "name": "dev"}}, {}))
+        with mock.patch.object(backlog.gh, "repo", return_value="acme/tc"), \
+                mock.patch.object(backlog.gh, "api", return_value=pull) as api:
+            code, out, _ = self.run_cli(backlog, "link-pr", "7", "57")
+        api.assert_called_once_with("repos/acme/tc/pulls/57")
+        self.assertEqual(code, 0)
+        self.assertEqual(self.sent("POST", f"{P}/items/7/pr-links")[0]["body"],
+                         {"number": 57, "url": pull["html_url"], "headRef": "feature/tc-7-x"})
+        self.assertEqual(out, {"issue": 7, "pr": 57, "pr_url": pull["html_url"], "head_ref": "feature/tc-7-x",
+                               "linked_at": "2026-11-12T10:00:00.000Z", "url": f"{CONSOLE}/p/tc/t/7"})
+        self.assert_writes_are_idempotent()
 
-class RetiredTest(WriteTestCase):
+
+class QueueTest(WriteTestCase):
+    def test_queue_moves_with_the_item_version_and_rereads_once_on_412(self):
+        self.fake.on("GET", f"{P}/items/7", item(7, version=1), item(7, version=2))
+        self.fake.on("POST", f"{P}/items/7/queue", problem(412, "item-version"),
+                     item(7, version=3, queue={"position": 1, "total": 4}))
+        code, out, _ = self.run_cli(backlog, "queue", "7", "up")
+        self.assertEqual((code, out["move"], out["position"], out["total"], out["number"]), (0, "up", 1, 4, 7))
+        posts = self.sent("POST", f"{P}/items/7/queue")
+        self.assertEqual([(p["body"], p["headers"]["if-match"]) for p in posts], [({"move": "up"}, '"1"'), ({"move": "up"}, '"2"')])
+        self.assert_writes_are_idempotent()
+
+    def test_queue_refusals_are_explained(self):
+        self.fake.on("GET", f"{P}/items/7", item(7))
+        self.fake.on("POST", f"{P}/items/7/queue", problem(403, "transition-role", reason="role-cannot-edit"))
+        code, _, err = self.run_cli(backlog, "queue", "7", "first")
+        self.assertEqual(code, 1)
+        self.assertIn("this job's role may not make this change (role-cannot-edit)", err)
+        self.fake.on("GET", f"{P}/items/9", problem(404, "item-not-found"))
+        code, _, err = self.run_cli(backlog, "queue", "9", "down")
+        self.assertEqual(code, 1)
+        self.assertIn("#9: no such item", err)
+        code, _, err = self.run_cli(backlog, "queue", "7", "sideways")
+        self.assertEqual(code, 2)  # argparse: not a move
+
+
+class RequestDoneTest(WriteTestCase):
+    def setUp(self):
+        super().setUp()
+        self.fake.on("GET", f"{P}/items/7/requests", page("requests", [
+            {"id": 2, "request": {"kind": "sprint", "target": "next"}, "requestedAt": "2026-11-10T10:00:00.000Z",
+             "result": "applied", "reason": "", "handledAt": "2026-11-11T10:00:00.000Z"},
+            {"id": 3, "request": {"kind": "priority", "direction": "up"}, "requestedAt": "2026-11-12T10:00:00.000Z",
+             "result": None, "reason": None, "handledAt": None}]))
+        self.fake.on("POST", f"{P}/requests/3/handled", (200, {
+            "id": 3, "request": {"kind": "priority", "direction": "up"}, "requestedAt": "2026-11-12T10:00:00.000Z",
+            "result": "declined", "reason": "The sprint is full.", "handledAt": "2026-11-13T10:00:00.000Z"}, {}))
+
+    def test_a_pending_request_is_answered_with_the_result_and_reason(self):
+        code, _, err = self.run_cli(backlog, "request-done", "7", "--request-id", "3", "--result", "declined")
+        self.assertEqual((code, self.sent("POST", f"{P}/requests/3/handled")), (1, []))
+        self.assertIn("needs the reason", err)
+        code, out, _ = self.run_cli(backlog, "request-done", "7", "--request-id", "3", "--result", "declined",
+                                    "--text", "The sprint\nis full.")
+        self.assertEqual(code, 0)
+        self.assertEqual(self.sent("POST", f"{P}/requests/3/handled")[0]["body"],
+                         {"result": "declined", "reason": "The sprint is full."})
+        self.assertEqual(out, {"issue": 7, "request_id": 3, "result": "declined",
+                               "handled_at": "2026-11-13T10:00:00.000Z", "url": f"{CONSOLE}/p/tc/t/7"})
+        self.assert_writes_are_idempotent()
+
+    def test_an_answered_or_unknown_request_is_refused_here_and_a_409_is_explained(self):
+        code, _, err = self.run_cli(backlog, "request-done", "7", "--request-id", "2", "--result", "applied")
+        self.assertEqual(code, 1)
+        self.assertIn("already answered (applied)", err)
+        code, _, err = self.run_cli(backlog, "request-done", "7", "--request-id", "9", "--result", "applied")
+        self.assertEqual(code, 1)
+        self.assertIn("not a request on this item", err)
+        self.assertEqual([s["method"] for s in self.fake.seen], ["GET", "GET"])
+        self.fake.on("POST", f"{P}/requests/3/handled", problem(409, "request-handled"))
+        code, _, err = self.run_cli(backlog, "request-done", "7", "--request-id", "3", "--result", "applied")
+        self.assertEqual(code, 1)
+        self.assertIn("#7: the request was already answered", err)
+
+
+class RetiredAndSprintTest(WriteTestCase):
     def test_answer_is_retired_and_points_at_the_console(self):
         code, out, err = self.run_cli(backlog, "answer", "7", "--command", "approve", "--owner-said", "да")
         self.assertEqual((code, out, self.fake.seen), (2, {"issue": 7, "url": f"{CONSOLE}/p/tc/t/7", "retired": "backlog answer"}, []))
@@ -316,6 +397,17 @@ class RetiredTest(WriteTestCase):
     def test_vanished_is_a_no_op(self):
         code, out, _ = self.run_cli(backlog, "vanished")
         self.assertEqual((code, out, self.fake.seen), (0, {"vanished": [], "checked": 0, "error": "", "history": "console"}, []))
+
+    def test_sprint_create_posts_the_due_date_and_title(self):
+        self.fake.on("POST", f"{P}/sprints", (201, sprint(6, "2026-12-04", "Sprint 06"), {}))
+        code, out, _ = self.run_cli(backlog, "sprint", "create", "Sprint 06", "2026-12-04")
+        self.assertEqual(code, 0)
+        self.assertEqual(self.sent("POST", f"{P}/sprints")[0]["body"], {"dueOn": "2026-12-04", "title": "Sprint 06"})
+        self.assertEqual(out, {"title": "Sprint 06", "number": 6, "due": "2026-12-04", "url": None})
+        self.fake.on("POST", f"{P}/sprints", problem(403, "owner-only"))
+        code, _, err = self.run_cli(backlog, "sprint", "create", "Sprint 07", "2026-12-18")
+        self.assertEqual(code, 1)
+        self.assertIn("403 owner-only", err)
 
 
 if __name__ == "__main__":

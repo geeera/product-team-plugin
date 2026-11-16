@@ -26,7 +26,6 @@ from ptlib import gh, project, runstate  # noqa: E402
 
 OWNER, BOT, STRANGER = "geeera", "acme-team[bot]", "collaborator"
 CONSOLE = "team-console-stage"
-REQUEST_NEXT = '<!-- pt-owner-request {"kind":"sprint","target":"next","v":1} -->\nNext sprint, please.\n'
 REPO = "o/r"
 BLOCKED = ('POST https://api.github.com/graphql → HTTP 403: {"message":"GitHub GraphQL is not available from '
            'Claude Code sessions; use the REST API"}')
@@ -40,7 +39,7 @@ def load(name):
     return module
 
 
-runlog, backlog, inbox, brief = load("runlog"), load("backlog"), load("inbox"), load("brief")
+runlog, inbox, brief = load("runlog"), load("inbox"), load("brief")
 
 
 def iso(moment: datetime) -> str:
@@ -321,50 +320,6 @@ class CloudSessionTest(unittest.TestCase):
         code, out, _ = self.run_cli(brief, "show")
         self.assertEqual((code, out["since"]), (0, "2026-09-30T10:00:00Z"))
         self.assertEqual(out["runs"], {"total": 0, "failed": 0})
-
-    def test_owner_requests_are_answered_without_graphql(self):
-        issue = self.github.create_issue(BOT, "Export to CSV", ["kind:feature", "status:approved"])
-        request = self.github.comment(issue["number"], OWNER, REQUEST_NEXT, app=CONSOLE)
-        self.github.comment(issue["number"], OWNER, REQUEST_NEXT)  # the owner's gh token: no app, never pending
-        self.github.comment(issue["number"], OWNER, "/approve")
-
-        code, done, err = self.run_cli(backlog, "request-done", str(issue["number"]), "--comment-id",
-                                       str(request["id"]), "--result", "declined")
-        self.assertNotEqual(code, 0)
-        self.assertIn("needs the reason", err)
-        code, done, _ = self.run_cli(backlog, "request-done", str(issue["number"]), "--comment-id",
-                                     str(request["id"]), "--result", "declined", "--text", "The sprint is full.")
-        self.assertEqual((code, done["result"]), (0, "declined"))
-        posted = self.github.comments[-1]
-        self.assertEqual((posted["user"]["login"], self.github.auths[-1]), (BOT, None))  # the team's own token
-        self.assertTrue(posted["body"].startswith(
-            '<!-- pt-owner-request-handled {"comment_id":%d,"result":"declined","v":1} -->\n' % request["id"]))
-        code, _, err = self.run_cli(backlog, "request-done", str(issue["number"]), "--comment-id",
-                                    str(request["id"]), "--result", "applied")
-        self.assertNotEqual(code, 0)
-        self.assertIn("already answered", err)
-
-    def test_no_request_is_answered_while_an_agent_can_act_as_the_owner(self):
-        issue = self.github.create_issue(BOT, "Export to CSV", ["kind:feature"])
-        request = self.github.comment(issue["number"], OWNER, REQUEST_NEXT, app=CONSOLE)
-        self.acts_as_owner = True
-        code, _, err = self.run_cli(backlog, "request-done", str(issue["number"]), "--comment-id",
-                                    str(request["id"]), "--result", "applied")
-        self.assertNotEqual(code, 0)
-        self.assertIn("does not count", err)
-        self.agents = OWNER
-        code, _, err = self.run_cli(backlog, "request-done", str(issue["number"]), "--comment-id",
-                                    str(request["id"]), "--result", "applied")
-        self.assertIn("only as the team's identity", err)
-        self.assertEqual([w for w in self.github.writes if w[0] == "POST"], [])
-
-    def test_a_plain_comment_cannot_carry_a_request_or_handled_marker(self):
-        issue = self.github.create_issue(BOT, "Export to CSV", ["kind:feature"])
-        for body in (REQUEST_NEXT, '<!-- pt-owner-request-handled {"comment_id":5,"result":"applied","v":1} -->'):
-            code, _, err = self.run_cli(backlog, "comment", str(issue["number"]), "--body", body)
-            self.assertNotEqual(code, 0)
-            self.assertIn("request-done", err)
-        self.assertEqual(self.github.writes, [])
 
 
 if __name__ == "__main__":

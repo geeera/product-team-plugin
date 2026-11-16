@@ -307,6 +307,12 @@ def update_item(number: int, patch: Patch, *, reapply: bool = True) -> Dict[str,
     return _with_version(number, "PATCH", project_path("items", number), patch, reapply)
 
 
+def queue_move(number: int, move: str) -> Dict[str, Any]:
+    """`POST …/items/N/queue {move}` with the item's version (#456); a 412 is one re-read, the move is one step
+    from wherever the item is now."""
+    return _with_version(number, "POST", project_path("items", number, "queue"), {"move": move}, True)
+
+
 def _with_version(number: int, method: str, path: str, patch: Patch, reapply: bool) -> Dict[str, Any]:
     for tries_left in (1, 0):
         current, etag = item(number)
@@ -465,6 +471,25 @@ def ask(number: int, category: str, text: str, commands: List[str], recommended:
     dto, _ = request("POST", project_path("items", number, "asks"),
                      {"category": category, "ask": text, "commands": commands, "recommended": recommended})
     return _object(dto, f"ask on item {number}")
+
+
+def item_requests(number: int) -> List[Dict[str, Any]]:
+    return list_all(project_path("items", number, "requests"), "requests")
+
+
+def handle_request(request_id: int, result: str, reason: str) -> Dict[str, Any]:
+    """`POST …/requests/ID/handled {result, reason}`: the PM's answer; which job answered is the token's."""
+    dto, _ = request("POST", project_path("requests", request_id, "handled"), {"result": result, "reason": reason})
+    return _object(dto, f"request {request_id}")
+
+
+def create_sprint(due_on: str, title: Optional[str]) -> Dict[str, Any]:
+    """`POST …/sprints`: the console numbers it; `title` None names it `Sprint NN`."""
+    dto, _ = request("POST", project_path("sprints"), {"dueOn": due_on, "title": title})
+    sprint = _object(dto, "created sprint")
+    if not _is_number(sprint.get("number")):
+        raise ConsoleError("POST sprints: the answer has no sprint number", type="unexpected-answer")
+    return sprint
 
 
 def project_url() -> Optional[str]:

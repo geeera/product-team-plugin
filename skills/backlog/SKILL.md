@@ -22,6 +22,7 @@ Conventions (statuses, kinds, severities, flags, milestones) are in
 | New issue (always `proposed`; the owner approves in the console) | `backlog create --title "…" --kind feature --body-file /tmp/body.md [--severity high] [--label needs-design] [--milestone current]` |
 | Question to the owner | `backlog ask 42 --owner-category scope --ask "…" [--commands approve,reject] [--recommended approve]` |
 | Change status | `backlog move 42 in-progress [--reason "…"]` (`done` closes the issue; `approved` is the owner's tap in the console) |
+| Order within the sprint | `backlog queue 42 first\|up\|down` (`next` dispatches in this order) |
 | Rewrite title or body (e.g. after grooming) | `backlog edit 42 [--title "…"] [--body-file /tmp/b.md]` |
 | Flags | `backlog label 42 +design:approved -design:awaiting-approval` |
 | Move to a sprint | `backlog milestone 42 "Sprint 04"` (`current`, or `none` to remove) |
@@ -30,7 +31,7 @@ Conventions (statuses, kinds, severities, flags, milestones) are in
 | Record a PR | `backlog link-pr 42 57` |
 | Owner's commands | `backlog answers 42` → `/approve`, `/reject why`, `/go`, `/no-go why`, `/resume`, `/override why` |
 | Owner requests from the team console | `backlog requests [--milestone current]` → pending sprint / queue requests, `ignored` with reasons |
-| Answer an owner request | `backlog request-done 42 --comment-id 123 --result applied\|declined --text "why"` |
+| Answer an owner request | `backlog request-done 42 --request-id 123 --result applied\|declined --text "why"` |
 
 Rules:
 - Exactly one `status:*` label per issue — only `move` changes it.
@@ -48,4 +49,4 @@ Rules:
   note instead). Closing a `proposed` item still works. A secret in a job's text is refused (`body-secret`).
 - Write bodies to a temp file and use `--body-file` for anything longer than a line (no shell-quoting bugs).
 - Talks to the team console's API with the job's environment (`TC_API_URL`, `TC_JOB_TOKEN`, `TC_PROJECT`);
-  `link-pr`, `request-done` and `sprint create` still use GitHub (`GH_TOKEN`) until the next release step.
+  `link-pr` also reads the pull request from GitHub (`GH_TOKEN`).

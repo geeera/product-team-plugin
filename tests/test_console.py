@@ -118,20 +118,8 @@ class FakeConsole:
         return fixtures
 
 
-# `items.other-project.json` is the one vendored fixture whose `as` never names the job's own project (unlike its
-# sibling `decisions.other-project.json`, which does) — an authoring gap in team-console's C3 fixtures, not this
-# plugin's to fix by hand-editing a vendored file (that would break the drift check). Its request and identity are
-# otherwise byte-identical to `items.list.json`'s, so it needs a project no fixture actually names to replay as its
-# own route instead of shadowing (or being shadowed by) that one; nothing in the plugin ever sends a job token
-# whose project differs from `TC_PROJECT`, so this sentinel is never reachable outside the fixture replay itself.
-OTHER_PROJECT = "project-the-fixture-never-names"
-
-
 def fixture_identity(fx):
-    project = fx["as"].get("project")
-    if project is None and fx["response"]["body"].get("type", "").endswith("/project-not-found"):
-        project = OTHER_PROJECT
-    return {"role": fx["as"]["role"], "items": fx["as"]["items"], "project": project or "tc"}
+    return {"role": fx["as"]["role"], "items": fx["as"]["items"], "project": fx["as"].get("project") or "tc"}
 
 
 def as_job(token):
@@ -203,7 +191,7 @@ class ConsoleTestCase(unittest.TestCase):
 class FixtureTest(ConsoleTestCase):
     def test_the_client_replays_every_vendored_fixture(self):
         fixtures = self.fake.load_fixtures()
-        self.assertEqual(len(fixtures), 35)
+        self.assertEqual(len(fixtures), 36)
         for fx in fixtures:
             req, expected = fx["request"], fx["response"]
             with self.subTest(fixture=fx["route"], path=req["path"], status=expected["status"]):

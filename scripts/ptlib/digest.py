@@ -9,6 +9,8 @@ from __future__ import annotations
 import re
 from typing import List, Tuple
 
+from . import inbox
+
 _HEADING = re.compile(r"^### (.+?) \((\d+)\)\s*$")
 _ITEM = re.compile(r"^- (?:#(\d+) )?\[(.+?)\]\((\S+?)\)(?: — (.+))?$")
 
@@ -39,12 +41,6 @@ def is_fyi(title: str) -> bool:
     return title.startswith(FYI_KEYS)
 
 
-def _single_line(text: str) -> str:
-    """Flatten a console-supplied title/ask (team-console#661): a newline would otherwise forge extra
-    lines — e.g. a fake "Answer:" row — in this plain-text message."""
-    return text.replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
-
-
 def format_digest(product: str, sections: List[Tuple[str, List[dict]]], language: str = "en") -> str:
     needs = needs_count(sections)
     lines = [HEADER.get(language, HEADER["en"]).format(product=product, n=needs), ""]
@@ -54,11 +50,14 @@ def format_digest(product: str, sections: List[Tuple[str, List[dict]]], language
         lines.append(title)
         for item in items:
             number = f"#{item['number']} " if item["number"] else ""
-            lines.append(f"• {number}{_single_line(item['title'])}")
+            lines.append(f"• {number}{inbox.flatten_newlines(item['title'])}")
             if item["ask"]:
-                lines.append(f"  {ANSWER.get(language, ANSWER['en'])}: {_single_line(item['ask'])}")
-            if item["url"]:
-                lines.append(f"  {item['url']}")
+                lines.append(f"  {ANSWER.get(language, ANSWER['en'])}: {inbox.flatten_newlines(item['ask'])}")
+            # Same check the inbox's own render uses: a non-https/non-loopback url (javascript:, data:, …) is
+            # dropped rather than printed raw (team-console#703).
+            url = inbox.linkable(item["url"])
+            if url:
+                lines.append(f"  {url}")
         lines.append("")
     lines.append(FOOTER.get(language, FOOTER["en"]))
     return "\n".join(lines).rstrip() + "\n"

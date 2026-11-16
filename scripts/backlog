@@ -352,6 +352,19 @@ def note_command(number: int, text: str) -> str:
     return f"backlog comment {number} --body {shlex.quote(text)}"
 
 
+def ask_command(number: int, question: dict) -> str:
+    """The full `backlog ask` invocation that finishes a question whose second write failed — the same
+    `--owner-category`/`--ask` (and `--commands`/`--recommended` when not the default) the failed `create` used,
+    so `partial.next` is runnable as written instead of a template the caller has to fill in (team-console#703)."""
+    parts = [f"backlog ask {number}", "--owner-category", question["category"], "--ask",
+             shlex.quote(question["text"])]
+    if question["commands"] != ["approve", "reject"]:
+        parts += ["--commands", ",".join(question["commands"])]
+    if question["recommended"]:
+        parts += ["--recommended", question["recommended"]]
+    return " ".join(parts)
+
+
 def written(dto: dict, sprints: Optional[list] = None) -> dict:
     """The item a write answered with, in the summary shape; the sprint title is read only when the item has one."""
     if sprints is None and console._is_number(dto.get("sprint")):
@@ -424,12 +437,12 @@ def cmd_create(args) -> None:
     dto = console.create_item(payload)
     result = written(dto, sprints)
     if question:
-        # The second write of a question; its failure names the item so a rerun is `backlog ask N …`.
+        # The second write of a question; its failure names the full `backlog ask` command that finishes it.
         try:
             result["ask"] = ask_entry(console.ask(result["number"], **question))
         except console.ConsoleError as exc:
             fail_after_first_write(exc, result, f"item {result['key'] or result['number']}", "question",
-                                   f"backlog ask {result['number']} …")
+                                   ask_command(result["number"], question))
     out(result)
 
 

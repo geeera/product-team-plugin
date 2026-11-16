@@ -3,6 +3,8 @@
 
 The contract is the subcommand set below and its JSON output; a different tracker replaces this file, not the
 skills. Output is JSON on stdout; errors go to stderr with a non-zero exit (3: the project is still on GitHub).
+When the second write of a two-write command fails (create --kind question, decide --close, move/close --reason),
+stdout still carries the result with "partial": {"stored", "failed", "next", "error"}: do not rerun, run `next`.
 Every write is the job's: what only the owner decides (approving, leaving `proposed`, editing approved text) is
 refused with the item's console page, where the owner does it.
 
@@ -49,6 +51,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
 import sys
 
 sys.dont_write_bytecode = True  # the vendored copy lives in the product repo: no __pycache__ there
@@ -333,6 +336,22 @@ def fail(exc: console.ConsoleError, number: Optional[int] = None, progress: str 
     sys.exit(console.EXIT_ERROR)
 
 
+def fail_after_first_write(exc: console.ConsoleError, result: dict, stored: str, failed: str, next_step: str) -> None:
+    """Exit on a failed second write of a two-write command, saying the first one is stored.
+
+    A rerun would repeat the first write (a second decision comment, say), so stdout still carries the result so
+    far with `partial` naming both writes and the one command that finishes the change; stderr says the same.
+    """
+    out(dict(result, partial={"stored": stored, "failed": failed, "next": next_step,
+                              "error": explain(exc, result["number"]) or str(exc)}))
+    fail(exc, result["number"], f"the {stored} is stored, the {failed} is not: do not rerun this command; "
+                                f"finish with `{next_step}`")
+
+
+def note_command(number: int, text: str) -> str:
+    return f"backlog comment {number} --body {shlex.quote(text)}"
+
+
 def written(dto: dict, sprints: Optional[list] = None) -> dict:
     """The item a write answered with, in the summary shape; the sprint title is read only when the item has one."""
     if sprints is None and console._is_number(dto.get("sprint")):
@@ -409,8 +428,8 @@ def cmd_create(args) -> None:
         try:
             result["ask"] = ask_entry(console.ask(result["number"], **question))
         except console.ConsoleError as exc:
-            fail(exc, result["number"], f"item {result['key'] or result['number']} was created without its "
-                                        f"question: add it with `backlog ask {result['number']} …`")
+            fail_after_first_write(exc, result, f"item {result['key'] or result['number']}", "question",
+                                   f"backlog ask {result['number']} …")
     out(result)
 
 
@@ -466,9 +485,15 @@ def cmd_decide(args) -> None:
                  f"the redone decision with --handles-reversal {reversal.get('id')}, or turn it into an owner "
                  "question with `backlog ask`")
     comment = console.comment(args.number, decision_body(text, reversal), kind="decision")
+    result = dict(written(dto), decision_id=comment.get("id"),
+                  handles_reversal=reversal.get("id") if reversal else None)
     if args.close:
-        dto = console.update_item(args.number, NOT_PLANNED)
-    out(dict(written(dto), decision_id=comment.get("id"), handles_reversal=reversal.get("id") if reversal else None))
+        try:
+            result.update(written(console.update_item(args.number, NOT_PLANNED)))
+        except console.ConsoleError as exc:
+            fail_after_first_write(exc, result, f"decision {comment.get('id')}", "close",
+                                   f"backlog close {args.number}")
+    out(result)
 
 
 def cmd_move(args) -> None:
@@ -482,10 +507,14 @@ def cmd_move(args) -> None:
         reopen = current.get("state") == "closed" and args.status != "done"
         return {"status": args.status, **({"state": "open"} if reopen else {})}
 
-    dto = console.update_item(args.number, patch)
+    result = written(console.update_item(args.number, patch))
     if args.reason:
-        console.comment(args.number, f"**Status → `{args.status}`**: {args.reason}")
-    out(written(dto))
+        note = f"**Status → `{args.status}`**: {args.reason}"
+        try:
+            console.comment(args.number, note)
+        except console.ConsoleError as exc:
+            fail_after_first_write(exc, result, f"status {args.status}", "reason note", note_command(args.number, note))
+    out(result)
 
 
 def cmd_milestone(args) -> None:
@@ -495,10 +524,14 @@ def cmd_milestone(args) -> None:
 
 
 def cmd_close(args) -> None:
-    dto = console.update_item(args.number, NOT_PLANNED)
+    result = written(console.update_item(args.number, NOT_PLANNED))
     if args.reason:
-        console.comment(args.number, f"**Closed as not planned**: {args.reason}")
-    out(written(dto))
+        note = f"**Closed as not planned**: {args.reason}"
+        try:
+            console.comment(args.number, note)
+        except console.ConsoleError as exc:
+            fail_after_first_write(exc, result, "close", "reason note", note_command(args.number, note))
+    out(result)
 
 
 def cmd_edit(args) -> None:

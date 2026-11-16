@@ -89,8 +89,10 @@ class CreateTest(WriteTestCase):
         self.fake.on("POST", f"{P}/items/9/asks", problem(403, "owner-only"))
         code, out, err = self.run_cli(backlog, "create", "--title", "Plan", "--kind", "question", "--owner-category",
                                       "money", "--ask", "Pay?", "--commands", "approve,reject")
-        self.assertEqual((code, out), (1, None))
-        self.assertIn("TC-9 was created without its question", err)
+        self.assertEqual((code, out["number"], out["partial"]["stored"], out["partial"]["failed"]),
+                         (1, 9, "item TC-9", "question"))
+        self.assertEqual(out["partial"]["next"], "backlog ask 9 …")
+        self.assertIn("the item TC-9 is stored, the question is not: do not rerun", err)
         self.assertIn("backlog ask 9", err)
 
     def test_a_question_needs_its_category_ask_and_known_commands(self):
@@ -137,6 +139,18 @@ class DecideTest(WriteTestCase):
         self.assertEqual((patch["body"], patch["headers"]["if-match"]), (NOT_PLANNED, '"1"'))
         self.assertEqual((out["decision_id"], out["handles_reversal"], out["state"]), (12, None, "closed"))
         self.assert_writes_are_idempotent()
+
+    def test_a_failed_close_says_the_decision_is_stored_and_how_to_finish(self):
+        self.fake.on("PATCH", f"{P}/items/7", problem(500, "internal"))
+        code, out, err = self.run_cli(backlog, "decide", "7", "--close", "--body", "We take B.")
+        self.assertEqual(code, 1)
+        self.assertEqual(len(self.sent("POST", f"{P}/items/7/comments")), 1)
+        self.assertEqual((out["decision_id"], out["state"]), (12, "open"))
+        self.assertEqual({k: out["partial"][k] for k in ("stored", "failed", "next")},
+                         {"stored": "decision 12", "failed": "close", "next": "backlog close 7"})
+        self.assertTrue(out["partial"]["error"])
+        self.assertIn("the decision 12 is stored, the close is not: do not rerun this command; finish with "
+                      "`backlog close 7`", err)
 
     def test_close_is_only_for_questions_and_a_decision_needs_text(self):
         self.fake.on("GET", f"{P}/items/7", item(7, kind="feature"))
@@ -186,6 +200,19 @@ class MoveTest(WriteTestCase):
         self.fake.seen.clear()
         code, out, _ = self.run_cli(backlog, "move", "7", "done")
         self.assertEqual((code, out["state"], self.sent("PATCH", f"{P}/items/7")[0]["body"]), (0, "closed", {"status": "done"}))
+
+    def test_a_failed_reason_note_says_the_status_is_stored_and_how_to_finish(self):
+        self.fake.on("GET", f"{P}/items/7", item(7, status="blocked"))
+        self.fake.on("PATCH", f"{P}/items/7", item(7, status="in-progress"))
+        self.fake.on("POST", f"{P}/items/7/comments", problem(403, "transition-role", reason="note", detail="no"))
+        code, out, err = self.run_cli(backlog, "move", "7", "in-progress", "--reason", "it's unblocked")
+        self.assertEqual((code, out["status"]), (1, "in-progress"))
+        self.assertEqual({k: out["partial"][k] for k in ("stored", "failed")},
+                         {"stored": "status in-progress", "failed": "reason note"})
+        self.assertEqual(out["partial"]["next"],
+                         "backlog comment 7 --body '**Status → `in-progress`**: it'\"'\"'s unblocked'")
+        self.assertIn("this job's role may not make this change", out["partial"]["error"])
+        self.assertIn("the status in-progress is stored, the reason note is not: do not rerun", err)
 
     def test_move_to_approved_is_refused_with_the_console_link(self):
         code, out, err = self.run_cli(backlog, "move", "7", "approved")
@@ -289,6 +316,18 @@ class LabelMilestoneCloseTest(WriteTestCase):
         code, out, _ = self.run_cli(backlog, "close", "7", "--reason", "duplicate of TC-3")
         self.assertEqual((code, out["state"], self.sent("PATCH", f"{P}/items/7")[0]["body"]), (0, "closed", NOT_PLANNED))
         self.assertEqual(self.sent("POST", f"{P}/items/7/comments")[0]["body"]["body"], "**Closed as not planned**: duplicate of TC-3")
+
+
+    def test_a_failed_close_note_says_the_close_is_stored(self):
+        self.fake.on("GET", f"{P}/items/7", item(7, status="proposed"))
+        self.fake.on("PATCH", f"{P}/items/7", item(7, status="proposed", state="closed"))
+        self.fake.on("POST", f"{P}/items/7/comments", problem(500, "internal"))
+        code, out, err = self.run_cli(backlog, "close", "7", "--reason", "duplicate of TC-3")
+        self.assertEqual((code, out["state"], out["partial"]["stored"], out["partial"]["failed"]),
+                         (1, "closed", "close", "reason note"))
+        self.assertEqual(out["partial"]["next"],
+                         "backlog comment 7 --body '**Closed as not planned**: duplicate of TC-3'")
+        self.assertIn("the close is stored, the reason note is not", err)
 
 
 class CommentLinkTest(WriteTestCase):

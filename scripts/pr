@@ -35,7 +35,8 @@
                        also reset the author to the bot
   pr push [--branch B] push a feature/ fix/ hotfix/ chore/ backmerge/ revert/ design/ docs/ branch (default: the
                        current one), never forced. With the team GitHub App configured it pushes as the app straight
-                       to GitHub and refuses URL rewrites (reference/identities.md); otherwise `git push -u origin B`
+                       to GitHub and refuses URL rewrites (reference/identities.md); otherwise `git push -u origin B`.
+                       Refuses unless local B is at HEAD, and fails unless the remote B then names HEAD's commit
   pr git-identity      the bot's GIT_AUTHOR_…/GIT_COMMITTER_… as `export` lines (for inspection; commit with
                        `pr commit`); prints nothing without a team app
 
@@ -309,10 +310,11 @@ def push(repo: str, branch: str) -> dict:
     git proxy, the push fails loudly; it never falls back to the proxy.
     """
     check_pushable(branch)
-    sha = git("rev-parse", "--verify", f"refs/heads/{branch}").decode().strip()
+    sha = pushed_sha(branch)
     refspec = f"refs/heads/{branch}:refs/heads/{branch}"
     if not gh.app_mode():
         git("push", "-u", "origin", refspec)
+        check_remote_moved(branch, sha, git("ls-remote", "origin", f"refs/heads/{branch}").decode())
         return {"branch": branch, "sha": sha, "as": "session remote (no team app configured)"}
     token = gh.token()
     login = gh.token_login()
@@ -325,7 +327,42 @@ def push(repo: str, branch: str) -> dict:
     if proc.returncode != 0:
         detail = proc.stderr.decode(errors="replace").replace(token, "***").replace(basic, "***").strip()
         raise gh.GhError(f"git push as {login} to {url} failed: {detail[-400:]}")
+    remote = _git_env(["ls-remote", url, f"refs/heads/{branch}"], env)
+    if remote.returncode != 0:
+        detail = remote.stderr.decode(errors="replace").replace(token, "***").replace(basic, "***").strip()
+        raise gh.GhError(f"pushed {branch} as {login}, but could not read it back from {url}: {detail[-300:]}")
+    check_remote_moved(branch, sha, remote.stdout.decode(errors="replace"))
     return {"branch": branch, "sha": sha, "as": login}
+
+
+def pushed_sha(branch: str) -> str:
+    """HEAD's commit, provided the local branch `branch` points at it: the commit `pr push` publishes.
+
+    The push sends the local branch ref, so in a worktree on another branch a stale ref of that name (left in a
+    shared clone) would be pushed, or be "up to date", while the caller's HEAD never reaches GitHub (#625).
+    """
+    head = git("rev-parse", "--verify", "HEAD").decode().strip()
+    ref = subprocess.run(["git", "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"], capture_output=True,
+                         check=False, env=gh.child_env()).stdout.decode().strip()
+    if ref == head:
+        return head
+    on = git("rev-parse", "--abbrev-ref", "HEAD").decode().strip()
+    where = "a detached HEAD" if on == "HEAD" else f"branch {on}"
+    if not ref:
+        raise gh.GhError(f"refusing to push {branch}: there is no local branch of that name and HEAD is on {where} "
+                         f"({head[:12]}); create it at HEAD with `git branch {branch} HEAD`, or push the branch you "
+                         "are on")
+    raise gh.GhError(f"refusing to push {branch}: the local branch is at {ref[:12]}, but HEAD ({where}) is at "
+                     f"{head[:12]}; check out {branch}, or point it at HEAD with `git branch -f {branch} HEAD` if "
+                     "it is not checked out elsewhere")
+
+
+def check_remote_moved(branch: str, sha: str, ls_remote: str) -> None:
+    """Fail unless GitHub's branch now names `sha`: a push git calls a success may still have moved nothing."""
+    remote = ls_remote.split()[0] if ls_remote.strip() else ""
+    if remote != sha:
+        raise gh.GhError(f"git reported the push of {branch} as done, but the remote branch is at "
+                         f"{remote[:12] or 'nothing'}, not {sha[:12]}")
 
 
 def bot_identity_env() -> dict:

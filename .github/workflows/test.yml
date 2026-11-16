@@ -34,3 +34,24 @@ jobs:
           ! grep -rl 'CLAUDE_PLUGIN_ROOT' .claude/agents .claude/skills
       - name: Scripts start
         run: for s in backlog runlog slot-context demo-page inbox sprint-metrics pr vendor workflows digest brief; do python scripts/$s --help > /dev/null; done
+
+  fixtures:
+    # team-console#436-P5: the vendored tracker fixtures (tests/contract/fixtures/tracker) are the console client's
+    # contract. They must stay byte-identical to apps/api/fixtures/tracker at the pinned team-console commit — a
+    # route change there bumps tests/contract/console.lock and re-vendors the fixtures in the same PR (team-console
+    # CLAUDE.md carries the matching rule on its side).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - id: lock
+        run: echo "sha=$(cat tests/contract/console.lock)" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          repository: geeera/team-console
+          ref: ${{ steps.lock.outputs.sha }}
+          path: team-console
+          persist-credentials: false
+      - run: diff -rq tests/contract/fixtures/tracker team-console/apps/api/fixtures/tracker

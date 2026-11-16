@@ -153,6 +153,21 @@ class SelfUpdateVerificationTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             vendoring.parse_version("0.5.0 -->\n<!--")
 
+    def test_pre_releases_sort_before_their_release_and_in_their_own_order(self):
+        self.assertLess(vendoring.parse_version("0.12.0-pre.1"), vendoring.parse_version("0.12.0-pre.2"))
+        self.assertLess(vendoring.parse_version("0.12.0-pre.2"), vendoring.parse_version("0.12.0"))
+        self.assertLess(vendoring.parse_version("0.11.0"), vendoring.parse_version("0.12.0-pre.1"))
+        with self.assertRaises(ValueError):
+            vendoring.parse_version("0.12.0-pre")
+        with self.assertRaises(ValueError):
+            vendoring.parse_version("0.12.0-pre.1.2")
+        with self.assertRaises(ValueError):
+            vendoring.parse_version("0.12.0-rc.1")
+
+    def test_is_prerelease(self):
+        self.assertTrue(vendoring.is_prerelease(vendoring.parse_version("0.12.0-pre.1")))
+        self.assertFalse(vendoring.is_prerelease(vendoring.parse_version("0.12.0")))
+
 
 class PluginRefTest(unittest.TestCase):
     def test_reviewer_logins_inline_and_block_lists(self):

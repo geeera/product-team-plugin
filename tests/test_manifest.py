@@ -30,7 +30,8 @@ class ManifestTest(unittest.TestCase):
         plugin = json.loads((ROOT / ".claude-plugin/plugin.json").read_text())
         market = json.loads((ROOT / ".claude-plugin/marketplace.json").read_text())
         self.assertEqual(plugin["name"], market["plugins"][0]["name"])
-        self.assertRegex(plugin["version"], r"^\d+\.\d+\.\d+$")
+        # `-pre.N` matches `vendoring.parse_version` (team-console#436-P5): a pre-release ahead of the next tag.
+        self.assertRegex(plugin["version"], r"^\d+\.\d+\.\d+(-pre\.\d+)?$")
         # Two places name the version; a stale marketplace entry would advertise the wrong release.
         self.assertEqual(market["plugins"][0].get("version", plugin["version"]), plugin["version"])
 

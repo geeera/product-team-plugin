@@ -4,6 +4,57 @@ Products follow the `stable` channel (or a pinned tag, `team.plugin_ref` in `.pr
 first `slot-pm` of the day runs `vendor self-update` and opens a PR with the entries in between. Breaking changes (a renamed label, a changed script contract, a new required
 `project.yml` key) are marked **Breaking** with the migration step.
 
+## 0.12.0-pre.1
+
+A pre-release: tracked separately from `stable`, for products already running against the team console
+(geeera/team-console ADR 0006, architect note on team-console#436 and its 2026-11-14 refresh). It is not promoted
+to `0.12.0` until team-console's Phase 6 and the owner's own OK; do not vendor it into a product before that
+project's own console cutover — on `github` the tracker is still GitHub Issues and every script in this release
+assumes the console instead. `vendoring.parse_version` now accepts this `X.Y.Z-pre.N` shape (sorted below the
+release it precedes: `0.12.0-pre.1 < 0.12.0-pre.2 < 0.12.0`).
+
+- **Breaking: the backlog is the team console, not GitHub Issues.** `backlog`, `inbox`, `slot-context` and
+  `sprint-metrics` read and write the console's tracker API (`GET/POST/PATCH /api/v1/projects/:slug/...`) through
+  `scripts/ptlib/console.py`, never GitHub Issues or `gh`. A console job gets its settings from `TC_API_URL`,
+  `TC_JOB_TOKEN`, `TC_PROJECT`, and optionally `TC_RUNNER_SOCKET` (the runner's Unix socket proxy) and
+  `TC_CONSOLE_URL` (console links); a script run outside a console job fails closed, naming the missing variable,
+  never guessing one from `gh`. **Migration**: a product adopts this release only after its own cutover to the
+  console (team-console's `backlog init` output: no items on it until then); until then stay on `0.11.0`.
+- **Breaking: `backlog answer` is retired.** Owner decisions are rows only the owner's console identity writes
+  (ADR 0006); the team records its own reasoning with `backlog decide` and links the item instead. `backlog
+  answer N` now always exits 2, printing the item's console URL, so a skill that still calls it fails loudly
+  instead of silently doing nothing.
+- **Breaking: `backlog request-done` takes `--request-id`, not `--comment-id`.** Owner requests to the PM
+  (0.11.0, ADR 0005) are console rows now, not issue comments with a JSON marker; `backlog requests` lists each
+  with its `request_id`, and `backlog request-done N --request-id ID --result applied|declined [--text REASON]`
+  answers it. `team.console_app_slugs` and the comment-marker protocol from 0.11.0 no longer apply once a
+  project's requests come from the console.
+- **Breaking: `inbox update` is a no-op.** The console renders "Needs you" from its own rows (decision 12); the
+  subcommand stays only so a skill's run step that still calls it gets `{"updated": false, "reason": "..."}`
+  instead of failing. `inbox show` and `digest show`/`send` are unchanged in shape, sourced from `GET
+  …/projects/:slug/inbox`.
+- **Breaking: `backlog init` is read-only.** The console seeds the plugin's builtin labels at cutover; only the
+  owner adds a missing one there. `backlog init` now only reports `created: []`, `kept`, `missing` and exits 1
+  naming what is missing — it never writes a label itself (the pre-console behaviour).
+- **Breaking: a PR names its items by key, not just by number.** `pr security-check` and `pr gate` read every
+  item a PR names from the console — the head branch's key (`feature/tc-412-…`) as well as `Closes TC-412` /
+  `Fixes #412` in the title or body. A branch cut before this release (numeric-only) still resolves by the
+  `Closes #N` / `Fixes #N` text; name the key too once the item lives on the console.
+- A job never creates an item past `proposed`, never approves or moves one out of `proposed`, and an approved
+  item's title/body is frozen for a job (team-console#452/#462): `backlog create`, `backlog move approved` and an
+  edit after approval are refused with the reason and the console link, never silently dropped. A team decision
+  with a secret in its text is refused (`body-secret`); `backlog decide` refuses to record a new decision past an
+  open owner `/reject` of the last one unless it names that decision with `--handles-reversal`.
+- `backlog next`/`list` follow the console's own queue order (`(rank, number)`, `items.rank`, team-console#456)
+  instead of issue number; `backlog queue N first|up|down` (PM only) reorders it to honour an owner `priority`
+  request (ADR 0005).
+- `tests/contract/console.lock` pins the team-console commit the vendored fixtures
+  (`tests/contract/fixtures/tracker/*.json`) were copied from; a `fixtures` CI job checks out team-console at
+  that commit and fails the build if its `apps/api/fixtures/tracker` no longer matches the vendored copy.
+  `tests/contract/run-local.sh` runs the plugin's scripts against a real local console (`npx nx serve api`) with
+  every job role's local-job stand-in token, for anyone changing this contract to verify by hand; its output is
+  not part of CI (the console is a sibling checkout, not something this repository's own pipeline builds).
+
 ## 0.11.0
 
 - **Owner requests to the PM** (geeera/team-console ADR 0005). The team console lets the owner ask the PM to move

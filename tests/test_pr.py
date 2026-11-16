@@ -493,5 +493,54 @@ class GitIdentityTest(unittest.TestCase):
             self.assertEqual(pr.git_identity_lines(), [])
 
 
+STABLE_SHA = "a" * 40
+PRE_SHA = "b" * 40
+
+
+def ls_remote_tags(*versions_and_shas):
+    lines = [f"{sha}\trefs/tags/v{version}" for version, sha in versions_and_shas]
+    return ("\n".join(lines) + "\n").encode()
+
+
+class ReleaseVersionsTest(unittest.TestCase):
+    def test_a_pre_release_tag_is_not_a_release(self):
+        with mock.patch.object(pr, "git", return_value=ls_remote_tags(
+                ("0.11.0", STABLE_SHA), ("0.12.0-pre.1", PRE_SHA))):
+            self.assertEqual(pr.release_versions(), {STABLE_SHA: "0.11.0"})
+
+    def test_a_pinned_pre_release_version_still_parses(self):
+        # release_versions() keeps pre-release tags out of self-update's "released" list, but a product can
+        # still be pinned to one explicitly: parse_version itself must not reject the string.
+        self.assertEqual(pr.vendoring.parse_version("0.12.0-pre.1")[:3], (0, 12, 0))
+
+
+class VerifySelfUpdateTest(unittest.TestCase):
+    def check(self, git_responses, n=1):
+        def fake_git(*args, cwd="."):
+            for prefix, result in git_responses:
+                if args[:len(prefix)] == prefix:
+                    if isinstance(result, Exception):
+                        raise result
+                    return result
+            raise AssertionError(f"unexpected git call: {args}")
+
+        info = {"head_sha": STABLE_SHA, "base": "main"}
+        with mock.patch.object(pr, "git", side_effect=fake_git):
+            return pr.verify_self_update("o/r", n, info)
+
+    def test_a_pre_release_tag_is_not_offered_to_a_stable_product(self):
+        manifest = json.dumps({"commit": PRE_SHA, "version": "0.12.0-pre.1"}).encode()
+        problems = self.check([
+            (("fetch",), b""),
+            (("rev-parse",), (STABLE_SHA + "\n").encode()),
+            (("merge-base",), (STABLE_SHA + "\n").encode()),
+            (("diff-tree",), b""),
+            (("show", f"{STABLE_SHA}:{pr.vendoring.MANIFEST}"), manifest),
+            (("show", f"refs/pt/base-1:{pr.vendoring.MANIFEST}"), pr.gh.GhError("not installed")),
+            (("ls-remote",), ls_remote_tags(("0.11.0", STABLE_SHA), ("0.12.0-pre.1", PRE_SHA))),
+        ])
+        self.assertEqual(problems, [f"plugin commit {PRE_SHA[:12]} is not a tagged release"])
+
+
 if __name__ == "__main__":
     unittest.main()

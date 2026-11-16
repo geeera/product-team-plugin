@@ -72,20 +72,21 @@ class FakeConsole:
         self.seen = []
         self.lock = threading.Lock()
 
-    def on(self, method, target, *answers, who=ANY, body=ANY):
-        self.routes.insert(0, (route_key(method, target), who, body, list(answers)))
+    def on(self, method, target, *answers, who=ANY, body=ANY, if_match=ANY):
+        self.routes.insert(0, (route_key(method, target), who, body, if_match, list(answers)))
 
     def serve(self, handler):
         length = int(handler.headers.get("Content-Length") or 0)
         raw_body = handler.rfile.read(length) if length else b""
         body = json.loads(raw_body) if raw_body else None
         who = identity_of(handler.headers.get("Authorization"))
+        if_match = handler.headers.get("If-Match")
         key = route_key(handler.command, handler.path)
         with self.lock:
             self.seen.append({"method": handler.command, "path": handler.path, "body": body,
                               "headers": {k.lower(): v for k, v in handler.headers.items()}})
-            answers = next((a for k, w, b, a in self.routes
-                            if k == key and w in (ANY, who) and b in (ANY, body)), None)
+            answers = next((a for k, w, b, m, a in self.routes
+                            if k == key and w in (ANY, who) and b in (ANY, body) and m in (ANY, if_match)), None)
             answer = (answers.pop(0) if len(answers) > 1 else answers[0]) if answers else None
         if who is None:
             answer = problem(401, "unauthorized")
@@ -106,17 +107,31 @@ class FakeConsole:
         handler.wfile.write(raw)
 
     def load_fixtures(self):
-        """The vendored fixtures, each served only to its identity and its request body."""
+        """The vendored fixtures, each served only to its identity, its request body and its If-Match (two PATCH
+        fixtures on the same item differ only by the version they expect, #611 `items.changed`/`items.stale`)."""
         fixtures = [json.loads(p.read_text(encoding="utf-8")) for p in sorted(FIXTURES.glob("*.json"))]
         for fx in fixtures:
             self.on(fx["request"]["method"], fx["request"]["path"],
                     (fx["response"]["status"], fx["response"]["body"], {}),
-                    who=fixture_identity(fx), body=fx["request"].get("body"))
+                    who=fixture_identity(fx), body=fx["request"].get("body"),
+                    if_match=fx["request"].get("ifMatch", ANY))
         return fixtures
 
 
+# `items.other-project.json` is the one vendored fixture whose `as` never names the job's own project (unlike its
+# sibling `decisions.other-project.json`, which does) — an authoring gap in team-console's C3 fixtures, not this
+# plugin's to fix by hand-editing a vendored file (that would break the drift check). Its request and identity are
+# otherwise byte-identical to `items.list.json`'s, so it needs a project no fixture actually names to replay as its
+# own route instead of shadowing (or being shadowed by) that one; nothing in the plugin ever sends a job token
+# whose project differs from `TC_PROJECT`, so this sentinel is never reachable outside the fixture replay itself.
+OTHER_PROJECT = "project-the-fixture-never-names"
+
+
 def fixture_identity(fx):
-    return {"role": fx["as"]["role"], "items": fx["as"]["items"], "project": fx["as"].get("project", "tc")}
+    project = fx["as"].get("project")
+    if project is None and fx["response"]["body"].get("type", "").endswith("/project-not-found"):
+        project = OTHER_PROJECT
+    return {"role": fx["as"]["role"], "items": fx["as"]["items"], "project": project or "tc"}
 
 
 def as_job(token):
@@ -188,24 +203,29 @@ class ConsoleTestCase(unittest.TestCase):
 class FixtureTest(ConsoleTestCase):
     def test_the_client_replays_every_vendored_fixture(self):
         fixtures = self.fake.load_fixtures()
-        self.assertEqual(len(fixtures), 16)
+        self.assertEqual(len(fixtures), 30)
         for fx in fixtures:
             req, expected = fx["request"], fx["response"]
             with self.subTest(fixture=fx["route"], path=req["path"], status=expected["status"]):
                 relative = req["path"][len("/api/v1/"):]
+                etag = req.get("ifMatch")
                 with as_job(token_of(fx)):
                     if expected["status"] < 300:
-                        body, _ = console.request(req["method"], relative, req.get("body"))
+                        body, _ = console.request(req["method"], relative, req.get("body"), etag=etag)
                         self.assertEqual(body, expected["body"])
                         continue
                     with self.assertRaises(console.ConsoleError) as caught:
-                        console.request(req["method"], relative, req.get("body"))
+                        console.request(req["method"], relative, req.get("body"), etag=etag)
                 problem_body = expected["body"]
                 self.assertEqual(caught.exception.status, expected["status"])
                 self.assertEqual(caught.exception.type, problem_body["type"].rsplit("/", 1)[-1])
                 self.assertEqual(caught.exception.field, problem_body.get("field"))
                 self.assertEqual(caught.exception.reason, problem_body.get("reason"))
-                self.assertEqual(caught.exception.exit_code, console.EXIT_ERROR)
+                # Decoupled from console.py's own exit_code formula: driven by the fixture's raw problem
+                # type (not caught.exception.type, which that formula also reads) and the literal exit codes
+                # `pr`'s CLI actually relies on, so a regression in the formula itself would fail this.
+                is_not_cut_over = problem_body["type"].rsplit("/", 1)[-1] == "tracker-not-cut-over"
+                self.assertEqual(caught.exception.exit_code, 3 if is_not_cut_over else 1)
         self.assertEqual(len(self.fake.seen), len(fixtures))  # 4xx answers are never retried
 
     def test_the_named_calls_send_the_fixture_requests(self):

@@ -15,6 +15,13 @@ records and the owner's engineering baseline (`engineering-baseline` plugin: sha
 Design, strict types, explicit error handling, testing rules). **The project's recorded conventions beat the
 baseline**; a documented deviation is not a finding.
 
+**How much to read.** Run `PR review-context --role reviewer` first. `repo` (the default, and the answer whenever
+it is in doubt): review as below, reading the code around the change. `diff` (the console's team config asks for
+a diff-only review to save tokens, ADR 0009 `cost.reviewer_context`): read only `PR diff N`, `PR files N` and the
+item's acceptance criteria (`${CLAUDE_PLUGIN_ROOT}/scripts/backlog show N`); do not walk, grep or open the rest of
+the tree, judge what the diff shows, and say `diff-only review` in the verdict. This mode is yours alone: QA and
+security always read the whole change in context.
+
 ## Check
 1. **Placement and boundaries** — the code lives in the right layer/module; imports go the allowed direction;
    no deep imports past a public API; no feature importing another feature.

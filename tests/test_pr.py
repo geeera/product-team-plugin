@@ -61,10 +61,24 @@ def verdict(body, login, sha="head1"):
     return {"body": body, "commit_id": sha, "submitted_at": "2026-09-29T10:00:00Z", "user": {"login": login}}
 
 
+RESOLVED = json.loads((ROOT / "tests/contract/fixtures/team-config/resolved.job.json").read_text())["response"]["body"]
+ALWAYS = {"qa": "always", "reviewer": "always"}
+PROPORTIONAL_GATES = {"qa": "always", "reviewer": "code", "code_paths": ["apps/**", "libs/**"]}
+
+
+def team_view(**gates):
+    """The vendored `resolved.job` view with its `gates` overridden."""
+    view = json.loads(json.dumps(RESOLVED))
+    view["gates"].update(gates)
+    return view
+
+
 def run_gate(reviews, config="", files=("apps/web/page.tsx",), security=(), review_bot=None, same_account=False,
-             team_bot=None, ci_state="pass"):
-    """pr.gate with GitHub mocked: `config` is project.yml on the base branch, `files` the PR's changed paths."""
-    with mock.patch.object(pr, "view", return_value={"head_sha": "head1", "base": "dev"}), \
+             team_bot=None, ci_state="pass", gates=None):
+    """pr.gate with GitHub and the console mocked: `config` is project.yml on the base branch, `gates` the console's
+    resolved gates (always/always by default), `files` the PR's changed paths."""
+    with mock.patch.object(pr.teamconfig, "load", return_value=team_view(**(gates or ALWAYS))), \
+         mock.patch.object(pr, "view", return_value={"head_sha": "head1", "base": "dev"}), \
          mock.patch.object(pr, "changed_files", return_value=list(files)), \
          mock.patch.object(pr, "security_check", return_value=list(security)), \
          mock.patch.object(pr, "ci", return_value={"state": ci_state, "failing": [], "pending": []}), \
@@ -150,96 +164,117 @@ review:
   code_paths: ["apps/**", "libs/**"]
   max_rework_rounds: 1
 owner:
-  language: en
+  language: ru
 """
 BOTH = [verdict("QA: APPROVED", "x"), verdict("REVIEW: APPROVED", "x")]
 QA_ONLY = [verdict("QA: APPROVED", "x")]
 
 
 class RequiredVerdictsGateTest(unittest.TestCase):
-    """Which verdicts `pr gate` requires, from the review block of project.yml on the PR's base branch."""
+    """Which verdicts `pr gate` requires: the console's `gates` (ADR 0009 d.11), never project.yml's review block."""
 
-    def test_without_a_review_block_qa_and_review_are_required_on_every_pr(self):
+    def test_the_console_gates_decide_qa_and_review(self):
         for files in (["apps/web/page.tsx"], [".github/workflows/ci.yml"], ["docs/setup.md"]):
             with self.subTest(files=files):
                 result = run_gate(QA_ONLY, "", files)
                 self.assertEqual(result["required"], ["QA", "REVIEW"])
                 self.assertEqual(result["missing"], ["REVIEW: no verdict"])
-                self.assertFalse(result["policy"]["configured"])
-                self.assertIn("default", result["why"]["REVIEW"]["why"])
+                self.assertEqual((result["policy"]["source"], result["policy"]["revision"]),
+                                 ("team config (console, revision 0)", 0))
+                self.assertIn("team config (console, revision 0): reviewer: always", result["why"]["REVIEW"]["why"])
 
     def test_reviewer_code_pr_touching_only_ci_and_docs_needs_no_review(self):
         result = run_gate(QA_ONLY, PROPORTIONAL, ["docs/setup.md", "README.md", ".github/workflows/ci.yml"],
-                          security=["dependencies or CI: .github/workflows/ci.yml"])
+                          security=["dependencies or CI: .github/workflows/ci.yml"], gates=PROPORTIONAL_GATES)
         self.assertEqual(result["required"], ["QA", "SECURITY"])
         self.assertFalse(result["why"]["REVIEW"]["required"])
         self.assertIn("no changed path matches code_paths (apps/**, libs/**)", result["why"]["REVIEW"]["why"])
         self.assertEqual(result["missing"], ["SECURITY: no verdict"])
 
     def test_reviewer_code_docs_only_pr_passes_with_qa_alone(self):
-        result = run_gate(QA_ONLY, PROPORTIONAL, ["docs/setup.md"])
+        result = run_gate(QA_ONLY, PROPORTIONAL, ["docs/setup.md"], gates=PROPORTIONAL_GATES)
         self.assertTrue(result["passed"], result["missing"])
         self.assertEqual(result["required"], ["QA"])
 
     def test_reviewer_code_pr_touching_apps_needs_review(self):
-        result = run_gate(QA_ONLY, PROPORTIONAL, ["docs/setup.md", "apps/web/src/page.tsx"])
+        result = run_gate(QA_ONLY, PROPORTIONAL, ["docs/setup.md", "apps/web/src/page.tsx"], gates=PROPORTIONAL_GATES)
         self.assertEqual(result["required"], ["QA", "REVIEW"])
         self.assertEqual(result["missing"], ["REVIEW: no verdict"])
         self.assertIn("apps/web/src/page.tsx", result["why"]["REVIEW"]["why"])
-        self.assertTrue(run_gate(BOTH, PROPORTIONAL, ["libs/ui/button.ts"])["passed"])
+        self.assertTrue(run_gate(BOTH, PROPORTIONAL, ["libs/ui/button.ts"], gates=PROPORTIONAL_GATES)["passed"])
 
     def test_moving_code_out_of_a_code_path_still_needs_review(self):
         # changed_files lists a rename's old path too
-        result = run_gate(QA_ONLY, PROPORTIONAL, ["tools/old.ts", "apps/web/old.ts"])
+        result = run_gate(QA_ONLY, PROPORTIONAL, ["tools/old.ts", "apps/web/old.ts"], gates=PROPORTIONAL_GATES)
         self.assertIn("REVIEW", result["required"])
 
-    def test_reviewer_never_and_qa_code(self):
-        config = "review:\n  qa: code\n  reviewer: never\n  code_paths:\n    - apps/**\n"
-        docs = run_gate([], config, ["docs/a.md"])
+    def test_qa_and_reviewer_on_code(self):
+        gates = {"qa": "code", "reviewer": "code", "code_paths": ["apps/**"]}
+        docs = run_gate([], "", ["docs/a.md"], gates=gates)
         self.assertEqual(docs["required"], [])
         self.assertTrue(docs["passed"])
-        code = run_gate([], config, ["apps/a.ts"])
-        self.assertEqual(code["required"], ["QA"])
-        self.assertIn("never", code["why"]["REVIEW"]["why"])
+        code = run_gate([], "", ["apps/a.ts"], gates=gates)
+        self.assertEqual(code["required"], ["QA", "REVIEW"])
 
     def test_security_is_required_whatever_the_policy_says(self):
-        config = "review:\n  qa: never\n  reviewer: never\n"
-        result = run_gate([], config, ["apps/api/auth.ts"], security=["sensitive path: apps/api/auth.ts"])
+        gates = {"qa": "code", "reviewer": "code", "code_paths": ["apps/**"]}
+        result = run_gate([], "", ["server/auth.ts"], security=["sensitive path: server/auth.ts"], gates=gates)
         self.assertEqual(result["required"], ["SECURITY"])
         self.assertTrue(result["why"]["SECURITY"]["required"])
         self.assertIn("auth.ts", result["why"]["SECURITY"]["why"])
 
     def test_every_verdict_gets_a_reason(self):
-        result = run_gate(BOTH, PROPORTIONAL, ["apps/a.ts"])
+        result = run_gate(BOTH, PROPORTIONAL, ["apps/a.ts"], gates=PROPORTIONAL_GATES)
         self.assertEqual(set(result["why"]), {"QA", "REVIEW", "SECURITY"})
         self.assertIn("qa: always", result["why"]["QA"]["why"])
         self.assertFalse(result["why"]["SECURITY"]["required"])
         self.assertEqual(result["policy"]["max_rework_rounds"], 1)
 
-    def test_an_unreadable_review_block_fails_the_gate(self):
-        result = run_gate(BOTH, "review:\n  reviewer: sometimes\n", ["docs/a.md"])
-        self.assertFalse(result["passed"])
-        self.assertIn("review.reviewer", result["missing"][0])
+    def test_an_unreadable_review_block_on_the_base_is_only_drift(self):
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            result = run_gate(BOTH, "review:\n  reviewer: sometimes\n", ["docs/a.md"])
+        self.assertTrue(result["passed"], result["missing"])
+        self.assertEqual(result["team_config"]["drift"], ["review"])
+        self.assertIn("project.yml differs from the console's team config (revision 0) at review", stderr.getvalue())
 
     def test_ci_still_decides(self):
-        result = run_gate(QA_ONLY, PROPORTIONAL, ["docs/a.md"], ci_state="fail")
+        result = run_gate(QA_ONLY, PROPORTIONAL, ["docs/a.md"], ci_state="fail", gates=PROPORTIONAL_GATES)
         self.assertFalse(result["passed"])
         self.assertEqual(result["missing"], ["CI: fail"])
 
-    def test_the_policy_is_read_from_the_base_branch_not_the_pr(self):
-        # The PR adds a relaxed review block; dev has none, so REVIEW stays required.
-        with mock.patch.object(pr.gh, "raw", return_value="") as raw, \
-             mock.patch.object(pr, "view", return_value={"head_sha": "head1", "base": "dev"}), \
-             mock.patch.object(pr, "changed_files", return_value=[".product-team/project.yml", "docs/a.md"]), \
-             mock.patch.object(pr, "security_check", return_value=["agent tooling or gate config"]), \
-             mock.patch.object(pr, "ci", return_value={"state": "pass", "failing": [], "pending": []}), \
-             mock.patch.object(pr.gh, "api_list", return_value=QA_ONLY), \
-             mock.patch.object(pr.gh, "review_login", return_value=None), \
-             mock.patch.object(pr.gh, "app_mode", return_value=False), \
-             mock.patch.object(pr.gh, "acts_as_owner", return_value=False):
+    def test_a_relaxed_review_block_in_project_yml_never_relaxes_the_gate(self):
+        # team-console#683: project.yml is documentation on a console-tracker project; any merged PR can edit it.
+        relaxed = "review:\n  qa: never\n  reviewer: never\n"
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            result = run_gate([], relaxed, ["docs/a.md"])
+        self.assertEqual(result["required"], ["QA", "REVIEW"])
+        self.assertFalse(result["passed"])
+        self.assertEqual(result["team_config"]["drift"], ["review.code_paths", "review.qa", "review.reviewer"])
+        self.assertIn("review.qa, review.reviewer", stderr.getvalue())
+
+    def test_the_gate_refuses_to_judge_outside_a_console_job(self):
+        # No TC_* variables (tests/_isolation.py removes them): a local or hub gate on a console-tracker project.
+        with mock.patch.object(pr, "view") as viewed, mock.patch.object(pr, "base_project_text") as base:
             result = pr.gate("o/r", 5)
-        self.assertTrue(raw.call_args[0][0].endswith("?ref=refs/heads/dev"))
-        self.assertEqual(result["required"], ["QA", "REVIEW", "SECURITY"])
+        self.assertFalse(result["passed"])
+        self.assertEqual(result["required"], [])
+        self.assertEqual(len(result["missing"]), 1)
+        self.assertIn("not inside a console job", result["missing"][0])
+        self.assertIn("refuses to judge rather than use project.yml's review block", result["missing"][0])
+        viewed.assert_not_called()
+        base.assert_not_called()
+
+    def test_merge_refuses_outside_a_console_job(self):
+        with mock.patch.object(pr.gh, "repo", return_value="o/r"), \
+                mock.patch.object(pr, "view", return_value={"head_sha": "head1", "base": "dev", "head": "feature/x"}), \
+                mock.patch.object(pr.gh, "api") as api, \
+                mock.patch.object(sys, "argv", ["pr", "merge", "5", "--method", "squash"]):
+            with self.assertRaises(SystemExit) as caught:
+                pr.main()
+        self.assertIn("refusing to merge #5: team config: not inside a console job", str(caught.exception.code))
+        api.assert_not_called()
 
 
 SECRET = "ghs_S3CRETtoken"

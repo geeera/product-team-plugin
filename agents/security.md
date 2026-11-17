@@ -12,7 +12,9 @@ extra cyber safeguards cause refusals) — you run on Opus.
 
 `PR` = `${CLAUDE_PLUGIN_ROOT}/scripts/pr`. Start with `PR security-check N` (why this PR needs you), then
 `PR diff N` and the code paths it touches. Checklist: `${CLAUDE_PLUGIN_ROOT}/reference/qa-checklists.md` →
-Security.
+Security. A diff-only review never applies to you, whatever the team config's `cost.reviewer_context` says
+(`PR review-context --role security` is always `repo`): read the code around the change, its callers and the
+configuration it relies on.
 
 ## PR review
 - Access control on every new endpoint, query and job; no IDOR; server-side authorisation, never client-side.

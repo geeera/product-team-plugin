@@ -56,6 +56,13 @@ for role in "${ROLES[@]}"; do
   run_as "$role" "" python3 "$SCRIPTS/backlog" list
 done
 
+echo "=== reads: every job role reads its resolved team config (GET …/team-config/resolved, ADR 0009 d.9) ==="
+for role in "${ROLES[@]}"; do
+  run_as "$role" "" python3 "$SCRIPTS/slot-context"
+done
+run_as reviewer "" python3 "$SCRIPTS/pr" review-context --role reviewer
+run_as security "" python3 "$SCRIPTS/pr" review-context --role security
+
 echo "=== reads: every job role reads the inbox (GET …/inbox admits a job, #444 §5.6) ==="
 for role in "${ROLES[@]}"; do
   run_as "$role" "" python3 "$SCRIPTS/inbox" show

@@ -25,6 +25,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from ptlib import console  # noqa: E402
 
 FIXTURES = ROOT / "tests" / "contract" / "fixtures" / "tracker"
+TEAM_CONFIG = ROOT / "tests" / "contract" / "fixtures" / "team-config"
 P = "/api/v1/projects/tc"
 
 
@@ -66,7 +67,18 @@ def sprints(*rows):
     return 200, {"sprints": list(rows), "backlogOpenCount": 0}, {}
 
 
+def resolved_view(**changes):
+    """The vendored `resolved.job` view (team-console ADR 0009), with top-level members replaced."""
+    view = json.loads((TEAM_CONFIG / "resolved.job.json").read_text(encoding="utf-8"))["response"]["body"]
+    view.update(copy.deepcopy(changes))
+    return view
+
+
 class ScriptTestCase(ConsoleTestCase):
+    def serve_team_config(self, *answers):
+        """`GET …/team-config/resolved` answers (the vendored view by default)."""
+        self.fake.on("GET", f"{P}/team-config/resolved", *(answers or [(200, resolved_view(), {})]))
+
     def run_cli(self, module, *argv):
         """(exit code, parsed stdout or None, stderr)."""
         stdout, stderr = io.StringIO(), io.StringIO()
@@ -198,6 +210,7 @@ class BacklogReadTest(ScriptTestCase):
         self.assertTrue(all("state=" in p for p in self.paths() if "/requests" in p))
 
     def test_next_dispatches_in_the_console_queue_order(self):
+        self.serve_team_config()
         self.fake.on("GET", f"{P}/sprints", sprints(sprint(4, "2026-11-13", state="closed"),
                                                     sprint(5, "2026-11-27", "Checkout")))
         self.fake.on("GET", f"{P}/items?state=open", page("items", [
@@ -237,11 +250,13 @@ class BacklogReadTest(ScriptTestCase):
 
 class SlotContextTest(ScriptTestCase):
     def test_the_current_sprint_comes_from_the_open_sprints(self):
+        self.serve_team_config()
         self.fake.on("GET", f"{P}/sprints?state=open", sprints(sprint(5, "2026-11-19", "Checkout")))
         code, out, _ = self.run_cli(slot_context, "--now", "2026-11-18T10:00:00+02:00")
         self.assertEqual((code, out["sprint"], out["demo_date"], out["mode"]), (0, "Checkout", "2026-11-19", "freeze"))
 
     def test_an_unreadable_console_points_at_offline(self):
+        self.serve_team_config()
         self.fake.on("GET", f"{P}/sprints?state=open", problem(403, "owner-only"))
         code, out, err = self.run_cli(slot_context)
         self.assertEqual((code, out), (1, None))

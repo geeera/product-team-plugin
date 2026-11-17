@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Print the current slot context as JSON: Kyiv local time, mode (normal | burn | freeze), cut day, caps.
 
-  slot-context                 reads the current sprint from the team console (TC_* job environment)
-  slot-context --offline       calendar only (no sprint, so never freeze)
+  slot-context                 reads the current sprint and the team config from the team console (TC_* job
+                               environment); `team_config` names the revision it used
+  slot-context --offline       calendar only (no sprint, so never freeze), no console call
   slot-context --now ISO       evaluate at a given instant (testing / planning)
 
-Freeze length and cap overrides come from .product-team/project.yml when present (sprint.freeze_days only;
-caps overrides are applied by the calling skill).
+With the console, freeze days and caps come from its team config (`…/team-config/resolved`, ADR 0009); a view it
+cannot read or check is a refusal (exit 1), never a fallback to project.yml. --offline reads sprint.freeze_days
+from .product-team/project.yml as before (caps overrides are applied by the calling skill).
 """
 from __future__ import annotations
 
@@ -19,7 +21,7 @@ sys.dont_write_bytecode = True  # the vendored copy lives in the product repo: n
 from datetime import date, datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from ptlib import calendar, console, project  # noqa: E402
+from ptlib import calendar, console, project, teamconfig  # noqa: E402
 
 
 def main() -> None:
@@ -31,8 +33,18 @@ def main() -> None:
     if now.tzinfo is None:
         now = now.replace(tzinfo=calendar.KYIV)
 
-    sprint_title, demo = None, None
+    sprint_title, demo, view, drift = None, None, None, []
     if not args.offline:
+        try:
+            view = teamconfig.load()
+        except (console.ConsoleError, teamconfig.TeamConfigInvalid) as exc:
+            if isinstance(exc, console.ConsoleError) and exc.type == console.NOT_CUT_OVER:
+                sys.exit(console.report(exc))
+            print(teamconfig.refusal(exc, "slot-context"), file=sys.stderr)
+            sys.exit(console.EXIT_ERROR)
+        drift = teamconfig.drift(view, project.imported_settings_from_text(project.read_text()))
+        if drift:
+            print(teamconfig.drift_warning(view, drift), file=sys.stderr)
         try:
             milestones = [console.as_milestone(s) for s in console.sprints("open")]
         except console.ConsoleError as exc:
@@ -44,8 +56,13 @@ def main() -> None:
         if sprint:
             sprint_title, demo = sprint["title"], date.fromisoformat(sprint["due_on"][:10])
 
-    ctx = calendar.compute(now, sprint_title, demo, project.freeze_days())
-    print(json.dumps(ctx.to_dict(), indent=2))
+    if view is None:
+        result = calendar.compute(now, sprint_title, demo, project.freeze_days()).to_dict()
+    else:
+        result = calendar.compute(now, sprint_title, demo, view["sprint"]["freeze_days"],
+                                  caps_override=view["caps"]).to_dict()
+        result["team_config"] = teamconfig.summary(view, drift)
+    print(json.dumps(result, indent=2))
 
 
 if __name__ == "__main__":

@@ -166,11 +166,13 @@ def code_changes(paths: Iterable[str], code_paths: Iterable[str]) -> List[str]:
 
 
 def required_verdicts(policy: dict, paths: List[str], security: List[str]) -> Tuple[List[str], Dict[str, dict]]:
-    """Which verdicts a PR needs under the base branch's `review:` policy, and why each is or is not required.
+    """Which verdicts a PR needs under `policy` (the console's `gates`, or a `review:` block), and why each is or is
+    not required.
 
     SECURITY is never configurable: `security` is what `security_reasons` found for this PR.
     """
-    source = "review" if policy.get("configured") else "default (no review block in project.yml on the base branch)"
+    source = policy.get("source") or (
+        "review" if policy.get("configured") else "default (no review block in project.yml on the base branch)")
     code = code_changes(paths, policy.get("code_paths") or ())
     shown = ", ".join(code[:3]) + (f" (+{len(code) - 3} more)" if len(code) > 3 else "")
     if len(paths) >= PR_FILES_LIMIT:  # GitHub stops listing there: the unlisted rest may be code

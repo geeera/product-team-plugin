@@ -15,7 +15,9 @@ Read first: `${CLAUDE_PLUGIN_ROOT}/reference/workflow.md` and `${CLAUDE_PLUGIN_R
 
 ## PR review
 `PR` = `${CLAUDE_PLUGIN_ROOT}/scripts/pr` (GitHub REST; there may be no `gh` CLI). Read the change with `PR view N`,
-`PR diff N` and the issue with `${CLAUDE_PLUGIN_ROOT}/scripts/backlog show N`.
+`PR diff N` and the issue with `${CLAUDE_PLUGIN_ROOT}/scripts/backlog show N`. A diff-only review is the reviewer's
+cost lever, never yours (`PR review-context --role qa` is always `repo`): check the change in the running product
+and the code around it.
 
 1. Check CI is green (`PR checks N`). Red CI = request changes, stop.
 2. Walk every acceptance criterion: is it implemented, is it tested (e2e for user flows)? Does the PR body's

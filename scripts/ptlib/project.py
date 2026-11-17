@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+from typing import Optional
 
 PROJECT_FILE = ".product-team/project.yml"
 # A user login, or a GitHub App's bot login (`<app-slug>[bot]`).
@@ -257,3 +258,69 @@ def review_policy(path: str = PROJECT_FILE) -> dict:
             return review_policy_from_text(f.read())
     except FileNotFoundError:
         return default_review_policy()
+
+
+def read_text(path: str = PROJECT_FILE) -> str:
+    """The working tree's project.yml ("" when there is none)."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            return f.read()
+    except FileNotFoundError:
+        return ""
+
+
+def _top_block(lines: list, key: str) -> Optional[tuple]:
+    """(inline value, indented lines) of the top-level `key:`; None when absent."""
+    for i, line in enumerate(lines):
+        m = re.match(r"^%s:[ \t]*(.*)$" % re.escape(key), line)
+        if not m:
+            continue
+        block = []
+        for inner in lines[i + 1:]:
+            if inner.strip() and not inner[0].isspace() and not inner.startswith("#"):
+                break
+            block.append(inner)
+        return _split_outside_quotes(m.group(1), key)[0].strip(), block
+    return None
+
+
+def imported_settings_from_text(text: str) -> dict:
+    """The keys a console import reads (ADR 0009 "Migration" 2) as `project.yml` sets them, flat (`review.qa`,
+    `caps.normal.dev_tasks`, `sprint.freeze_days`, `owner.language`). A block it cannot read is one key with the
+    value None (`review`, `caps`), so it shows as drift. For the drift warning only: the plugin never acts on it."""
+    lines = (text or "").splitlines()
+    settings: dict = {}
+    if _top_block(lines, "review") is not None:
+        try:
+            policy = review_policy_from_text(text)
+            settings.update({f"review.{k}": policy[k] for k in _REVIEW_KEYS})
+        except ValueError:
+            settings["review"] = None
+    sprint = _top_block(lines, "sprint")
+    for line in sprint[1] if sprint else ():
+        m = re.match(r"^[ \t]+(length_days|freeze_days):[ \t]*(\d+)[ \t]*(#.*)?$", line)
+        if m:
+            settings[f"sprint.{m.group(1)}"] = int(m.group(2))
+    caps = _top_block(lines, "caps")
+    if caps is not None:
+        inline, block = caps
+        if inline not in ("", "{}"):
+            settings["caps"] = None  # a flow mapping is not read here, so it cannot be shown to agree
+        mode = None
+        for line in block:
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            head = re.match(r"^[ \t]{1,4}(\w+):[ \t]*(#.*)?$", line)
+            value = re.match(r"^[ \t]{3,}(\w+):[ \t]*(\d+)[ \t]*(#.*)?$", line)
+            if value and mode:
+                settings[f"caps.{mode}.{value.group(1)}"] = int(value.group(2))
+            elif head:
+                mode = head.group(1)
+            else:
+                settings["caps"] = None
+    owner = _top_block(lines, "owner")
+    for line in owner[1] if owner else ():
+        m = re.match(r"^[ \t]+language:[ \t]*['\"]?(\w+)['\"]?[ \t]*(#.*)?$", line)
+        if m:
+            settings["owner.language"] = m.group(1)
+    return settings

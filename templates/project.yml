@@ -26,6 +26,9 @@ design:
   tokens: []             # token source files
   storybook_url: ""
 
+# On a project whose tracker is the team console (product-team 0.12+), `sprint`, `caps`, `review` and
+# `owner.language` are import-only: the owner imports them once in the console (Settings › Team), after which the
+# console's team config applies and these copies are documentation. A job warns when they differ ("drift").
 sprint:
   length_days: 14
   freeze_days: 2
@@ -33,12 +36,14 @@ sprint:
 # Optional overrides of reference/schedule-and-models.md caps, per mode.
 caps: {}
 
-# Which independent verdicts a PR needs (reference/workflow.md → Review gate). `pr gate` reads this block from the
-# PR's base branch; SECURITY is always decided by `pr security-check`. Without this block QA and REVIEW are required
-# on every PR.
+# Which independent verdicts a PR needs (reference/workflow.md → Review gate). On GitHub Issues (0.11) `pr gate`
+# reads this block from the PR's base branch; on the console it reads the team config and never this block. SECURITY
+# is always decided by `pr security-check`. Without this block QA and REVIEW are required on every PR.
 review:
-  qa: always                 # always | code | never — QA on every PR
-  reviewer: code             # always | code | never — `code`: only when the PR changes a path in code_paths
+  qa: always                 # always | code — QA on every PR (`never` is deprecated: the console drops it and an
+                             # import reads it as `code`)
+  reviewer: code             # always | code — `code`: only when the PR changes a path in code_paths (`never`:
+                             # deprecated, as for qa)
   code_paths: ["apps/**", "libs/**", "packages/**", "src/**"]   # kickoff/adopt set the project's source roots
   max_rework_rounds: 1       # guidance for the orchestrator, not enforced by the gate: after this many rework
                              # rounds only blockers go back; the rest become follow-up issues

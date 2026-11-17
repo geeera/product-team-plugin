@@ -211,6 +211,7 @@ class SecurityCheckTest(ScriptTestCase):
         self.assertEqual(self.check()[1], {"required": False, "reasons": []})
 
     def gate(self, reviews):
+        self.serve_team_config()
         with mock.patch.object(pr.gh, "api", return_value=PULL), \
                 mock.patch.object(pr, "view", return_value={"head_sha": "head1", "base": "dev"}), \
                 mock.patch.object(pr, "changed_files", return_value=["docs/a.md"]), \

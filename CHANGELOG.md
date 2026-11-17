@@ -4,6 +4,45 @@ Products follow the `stable` channel (or a pinned tag, `team.plugin_ref` in `.pr
 first `slot-pm` of the day runs `vendor self-update` and opens a PR with the entries in between. Breaking changes (a renamed label, a changed script contract, a new required
 `project.yml` key) are marked **Breaking** with the migration step.
 
+## 0.12.0
+
+Everything in `0.12.0-pre.1` below, plus the team console's team configuration (geeera/team-console ADR 0009,
+team-console#686 and #683). Like the pre-release, it is for products whose tracker is already the team console;
+a project still on GitHub Issues stays on `0.11.0`. Promoting it to `stable` (tag and channel move) is the owner's
+release step, not part of this entry.
+
+- **Breaking: inside a console job the team config is the console's.** `backlog next`, `pr gate` and
+  `slot-context` read `GET …/team-config/resolved` once per run (team-console ADR 0009 d.12): caps and freeze days
+  come from its `caps` and `sprint`, the gate policy from its `gates`, and a development tier whose developer role
+  the owner switched off folds to `dev` (`tier_notes` says so); an `agent:<name>` item of a switched-off role is
+  skipped with the reason. `backlog next` and `slot-context` report the revision they used under `team_config`
+  (`source`, `revision`, `disabled_roles`, `drift`), `pr gate` also under `policy.source` / `policy.revision`.
+  `slot-context --offline` makes no console call and reads `project.yml` as before.
+- **Breaking: these reads fail closed.** A resolved view the console does not answer (any 4xx/5xx, a timeout), or
+  one the plugin's own check refuses (no or another `schema`, no `revision`, a key outside `team-config/v1`, a
+  value outside its allow-list or bound, a `code_paths` glob the gate cannot match), stops `backlog next` and
+  `slot-context` with exit 1 and makes `pr gate` (and so `pr merge`) refuse to judge, each with one reason line
+  that names the status and problem type or the refused path, never the console's text. There is no fallback to
+  `project.yml` (threat model T9/T10).
+- **Breaking: `pr gate` outside a console job refuses to judge** (team-console#683). On a console-tracker project
+  the gate policy is the owner's, and a local or hub run has no owner-scoped way to read it, so `pr gate` / `pr
+  merge` without `TC_API_URL`, `TC_JOB_TOKEN` and `TC_PROJECT` answer `passed: false` with that reason instead of
+  reading `project.yml`'s `review` block, which any merged PR can edit. `pr merge --ci-only` is unchanged.
+  **Migration**: merge feature PRs from a console job (the orchestrator's), not from a local session; a project
+  still on GitHub Issues runs `0.11.0`, whose gate reads `project.yml` as before.
+- **`project.yml`'s `review`, `caps`, `sprint` and `owner.language` are import-only on a console-tracker
+  project** (ADR 0009 d.11): the owner imports them once in Settings › Team. When they differ from the console,
+  the command warns once on stderr and lists the keys under `team_config.drift`; it never acts on them.
+  `templates/project.yml` says so and deprecates `review.qa|reviewer: never` (the console drops it; its import
+  reads it as `code`).
+- **`pr review-context --role reviewer|qa|security`** answers how much a reviewing agent reads: `diff` (`pr diff`,
+  `pr files` and the item's criteria only) for the reviewer when the team config sets
+  `cost.reviewer_context: diff` under `api_key`, `repo` otherwise and whenever in doubt. QA and security are
+  always `repo` (threat model T11); `agents/reviewer.md`, `qa.md` and `security.md` say so.
+- `tests/contract/console.lock` moves to team-console `1b71c84` and vendors `apps/api/fixtures/team-config/*.json`
+  next to the tracker fixtures; the `fixtures` CI job diffs both directories. `tests/test_teamconfig.py` replays
+  them through the plugin's check.
+
 ## 0.12.0-pre.1
 
 A pre-release: tracked separately from `stable`, for products already running against the team console

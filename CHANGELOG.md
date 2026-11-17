@@ -4,11 +4,11 @@ Products follow the `stable` channel (or a pinned tag, `team.plugin_ref` in `.pr
 first `slot-pm` of the day runs `vendor self-update` and opens a PR with the entries in between. Breaking changes (a renamed label, a changed script contract, a new required
 `project.yml` key) are marked **Breaking** with the migration step.
 
-## 0.12.0
+## 0.12.0-pre.2
 
-Everything in `0.12.0-pre.1` below, plus the team console's team configuration (geeera/team-console ADR 0009,
-team-console#686 and #683). Promoting it to `stable` (tag and channel move) is the owner's release step, not part
-of this entry.
+A pre-release, like `0.12.0-pre.1` below, with everything in it plus the team console's team configuration
+(geeera/team-console ADR 0009, team-console#686 and #683). The same rules hold: it is not promoted to `0.12.0`
+until team-console's Phase 6 and the owner's own OK, and a product moves to it only with its own console cutover.
 
 - **Breaking: inside a console job the team config is the console's.** `backlog next`, `pr gate` and
   `slot-context` read `GET …/team-config/resolved` once per run (team-console ADR 0009 d.12): caps and freeze days

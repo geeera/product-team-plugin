@@ -42,7 +42,9 @@ refused with the item's console page, where the owner does it.
   backlog request-done N --request-id ID --result applied|declined [--text REASON]
                  answer a pending request (pm); declined needs --text
   backlog next [--now ISO]                       what a development run takes now: dispatch list in the console's
-                                                 queue order, skipped issues with reasons, missing architect notes
+                                                 queue order, skipped issues with reasons, missing architect notes.
+                                                 Caps, freeze days and disabled roles come from the console's team
+                                                 config (`…/team-config/resolved`); unreadable, it refuses (exit 1)
   backlog sprint current|list
   backlog sprint create TITLE DUE_DATE           DUE_DATE = demo day, YYYY-MM-DD; the console numbers the sprint
 """
@@ -60,7 +62,7 @@ from datetime import date, datetime, timedelta, timezone
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from typing import Optional  # noqa: E402
 
-from ptlib import brief, console, gh, owner, ownerrequests, picker, project, review  # noqa: E402
+from ptlib import brief, console, gh, owner, ownerrequests, picker, project, review, teamconfig  # noqa: E402
 from ptlib.console import instant  # noqa: E402
 from ptlib.calendar import KYIV, compute, pick_current_sprint  # noqa: E402
 from ptlib.labels import LABELS, STATUSES, KINDS, SEVERITIES  # noqa: E402
@@ -253,21 +255,44 @@ def cmd_requests(args) -> None:
     out(result)
 
 
+def team_config(what: str) -> tuple:
+    """(the console's resolved team config, its drift from the working tree's project.yml) — or exit with the
+    reason: inside a job an unreadable or invalid view fails closed, never falling back to project.yml (ADR 0009 T10).
+    The drift is warned about once, on stderr."""
+    try:
+        view = teamconfig.load()
+    except console.ConsoleError as exc:
+        if exc.type == console.NOT_CUT_OVER:
+            sys.exit(console.report(exc))
+        print(teamconfig.refusal(exc, what), file=sys.stderr)
+        sys.exit(console.EXIT_ERROR)
+    except teamconfig.TeamConfigInvalid as exc:
+        print(teamconfig.refusal(exc, what), file=sys.stderr)
+        sys.exit(console.EXIT_ERROR)
+    drift = teamconfig.drift(view, project.imported_settings_from_text(project.read_text()))
+    if drift:
+        print(teamconfig.drift_warning(view, drift), file=sys.stderr)
+    return view, drift
+
+
 def cmd_next(args) -> None:
     now = datetime.fromisoformat(args.now) if args.now else datetime.now(KYIV)
     if now.tzinfo is None:
         now = now.replace(tzinfo=KYIV)
+    view, drift = team_config("backlog next")
     sprints = console.sprints()
     sprint = pick_current_sprint([console.as_milestone(s) for s in sprints], now.astimezone(KYIV).date())
     demo = date.fromisoformat(sprint["due_on"][:10]) if sprint else None
-    ctx = compute(now, sprint["title"] if sprint else None, demo, project.freeze_days()).to_dict()
+    ctx = compute(now, sprint["title"] if sprint else None, demo, view["sprint"]["freeze_days"],
+                  caps_override=view["caps"]).to_dict()
     # In the console's queue order (each issue carries `queue`): the picker dispatches in it, not by number.
     issues = console.issues(sprint_titles(sprints), state="open")
     agents_dir = os.path.join(os.getcwd(), ".claude", "agents")
     known = ({f[:-3] for f in os.listdir(agents_dir) if f.endswith(".md")} | {"fullstack-dev"}
              if os.path.isdir(agents_dir) else None)
-    plan = picker.pick(issues, ctx["sprint"], ctx, known)
+    plan = picker.pick(issues, ctx["sprint"], ctx, known, teamconfig.disabled_roles(view))
     plan["context"] = ctx
+    plan["team_config"] = teamconfig.summary(view, drift)
     out(plan)
 
 

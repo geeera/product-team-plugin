@@ -21,9 +21,17 @@
                        a bare #412 names this project's item 412, never another project's ST-412).
                        A dev job links only an item it holds
   pr gate N            CI plus the independent verdicts it needs, each APPROVED on the current head commit: QA and
-                       REVIEW as the `review:` block of project.yml on the PR's base branch requires them (both on
-                       every PR without the block), SECURITY whenever security-check says so. `why` explains each
-                       verdict; `policy` shows the rule, max_rework_rounds included
+                       REVIEW as the console's team config requires them (`gates` of `…/team-config/resolved`,
+                       read in the job), SECURITY whenever security-check says so. `why` explains each verdict;
+                       `policy` shows the rule and its revision, max_rework_rounds included. Fails closed: a view
+                       it cannot read or check is a refusal, never project.yml's review block; a drift between
+                       project.yml and the console is a warning. Outside a console job: with `tracker: console` in
+                       project.yml on the base branch it refuses to judge; without it (or `tracker: github`) it is
+                       the 0.11 gate on the base branch's `review:` block
+  pr review-context --role reviewer|qa|security
+                       how much of the repository a reviewing agent reads: `diff` (pr diff, pr files and the item's
+                       criteria only) when the console's team config sets cost.reviewer_context: diff under api_key,
+                       for the reviewer only; `repo` for QA and security always, and whenever in doubt
   pr merge N --method squash|merge [--delete-branch] [--ci-only]
                        refuses unless the gate passes. `squash` for feature/fix/hotfix PRs, `merge` for the
                        stage cut, releases and back-merges (long-lived branches must keep shared history).
@@ -63,7 +71,7 @@ import tempfile  # noqa: E402
 from pathlib import Path  # noqa: E402
 from typing import Optional  # noqa: E402
 
-from ptlib import checks, console, gh, project, review, vendoring  # noqa: E402
+from ptlib import checks, console, gh, project, review, teamconfig, vendoring  # noqa: E402
 
 
 def out(data) -> None:
@@ -123,8 +131,8 @@ def changed_files(repo: str, n: int) -> list:
 
 
 def _cause(exc: console.ConsoleError) -> str:
-    # The type and status only: the detail is the console's text, and a reason must name the cause.
-    return " ".join(p for p in (str(exc.status) if exc.status else "", exc.type) if p)
+    # The status and an allow-listed type only: the detail is the console's text, and a reason must name the cause.
+    return teamconfig.cause(exc)
 
 
 def linked_labels(repo: str, n: int) -> tuple:
@@ -205,23 +213,52 @@ def base_project_text(repo: str, base: str) -> str:
     return project.text_on_branch(repo, base)
 
 
+def refused(reason: str) -> dict:
+    return {"passed": False, "missing": [reason], "required": [], "verdicts": {}, "ci": {}, "security_reasons": []}
+
+
 def gate(repo: str, n: int) -> dict:
+    """Inside a console job the policy is the console's `gates`, read first and failing closed (ADR 0009 T10).
+    Outside a job it depends on `tracker:` in project.yml on the PR's base branch: `console` refuses to judge
+    (team-console#683), absent or `github` is the 0.11 gate on the base branch's `review:` block."""
+    team = None
+    if teamconfig.in_job():
+        try:
+            team = teamconfig.load()
+            policy = teamconfig.review_policy(team)
+        except (console.ConsoleError, teamconfig.TeamConfigInvalid) as exc:
+            return refused(teamconfig.refusal(exc, "pr gate"))
     info = view(repo, n)
+    try:
+        # The base branch, never the PR head or the working tree: a PR cannot switch its own gate's source.
+        config = base_project_text(repo, info["base"])
+        if team is None:
+            if project.tracker_from_text(config) == "console":
+                return refused(teamconfig.OUTSIDE_JOB.format(what="pr gate"))
+            policy = project.review_policy_from_text(config)
+    except ValueError as exc:
+        return refused(str(exc))
     paths = changed_files(repo, n)
     reasons = security_check(repo, n, paths)
     reviews = gh.api_list(f"repos/{repo}/pulls/{n}/reviews?per_page=100")
     team_login = gh.token_login() if gh.app_mode() else None
     try:
-        config = base_project_text(repo, info["base"])
-        policy = project.review_policy_from_text(config)
         logins, warning = review.allowed_reviewers(project.reviewer_logins_from_text(config), gh.review_login(),
                                                    team_login)
         roles, why = review.required_verdicts(policy, paths, reasons)
     except ValueError as exc:
-        return {"passed": False, "missing": [str(exc)], "required": [], "verdicts": {}, "ci": {}, "security_reasons": []}
+        return refused(str(exc))
     result = review.gate(reviews, info["head_sha"], bool(reasons), logins, roles)
     result["why"] = why
-    result["policy"] = {k: policy[k] for k in ("configured", "qa", "reviewer", "code_paths", "max_rework_rounds")}
+    if team is None:
+        result["policy"] = {k: policy[k] for k in ("configured", "qa", "reviewer", "code_paths", "max_rework_rounds")}
+    else:
+        drift = teamconfig.drift(team, project.imported_settings_from_text(config))
+        if drift:
+            print(teamconfig.drift_warning(team, drift), file=sys.stderr)
+        result["policy"] = {k: policy[k] for k in ("configured", "source", "revision", "qa", "reviewer",
+                                                   "code_paths", "max_rework_rounds")}
+        result["team_config"] = teamconfig.summary(team, drift)
     result["ci"] = ci(repo, info["head_sha"])
     result["security_reasons"] = reasons[:10]
     result["reviewers"] = logins
@@ -233,6 +270,21 @@ def gate(repo: str, n: int) -> dict:
         result["missing"].insert(0, f"CI: {result['ci']['state']}")
         result["passed"] = False
     return result
+
+
+def review_context(role: str) -> dict:
+    """`diff` or `repo` for a reviewing agent, with why. Every doubt reads the whole repository: more context can
+    only make a review stricter, so this one read fails towards `repo`, never towards diff-only."""
+    if role != "reviewer" or not teamconfig.in_job():
+        context, why = teamconfig.review_context(None, role)
+        if role == "reviewer":
+            why = "not inside a console job: full context"
+        return {"role": role, "context": context, "why": why}
+    try:
+        context, why = teamconfig.review_context(teamconfig.load(), role)
+    except (console.ConsoleError, teamconfig.TeamConfigInvalid) as exc:
+        context, why = "repo", f"{teamconfig.refusal(exc, 'review-context')}: full context"
+    return {"role": role, "context": context, "why": why}
 
 
 def git(*args: str, cwd: str = ".") -> bytes:
@@ -512,6 +564,7 @@ def main() -> None:
     ls = sub.add_parser("list"); ls.add_argument("--base"); ls.add_argument("--state", default="open", choices=["open", "closed", "all"])
     sub.add_parser("push").add_argument("--branch")
     sub.add_parser("git-identity")
+    sub.add_parser("review-context").add_argument("--role", required=True, choices=["reviewer", "qa", "security"])
     sub.add_parser("commit", add_help=False)  # parsed below: everything after `commit` belongs to git
     if sys.argv[1:2] == ["commit"]:
         if sys.argv[2:3] in (["-h"], ["--help"]):
@@ -524,6 +577,9 @@ def main() -> None:
         except gh.GhError as exc:
             sys.exit(f"not committed: {exc}")
     args = p.parse_args()
+    if args.cmd == "review-context":  # needs no repository: it reads only the console's team config
+        out(review_context(args.role))
+        return
 
     try:
         repo = gh.repo()

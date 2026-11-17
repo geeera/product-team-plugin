@@ -4,9 +4,10 @@ Pure function over the backlog so the choice is deterministic and testable; `bac
 """
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import AbstractSet, Dict, List, Optional
 
 from . import tiers
+from .teamconfig import AGENT_ROLES
 
 # Roles that review, plan or design; development never goes to them even when an issue asks for it.
 NON_DEVELOPERS = {"pm", "architect", "ux-designer", "ui-designer", "reviewer", "qa", "qa-runner", "security",
@@ -33,14 +34,18 @@ def is_urgent(issue: dict) -> bool:
     return issue.get("kind") == "bug" and _severity(issue) in SEV_RANK
 
 
-def agent_for(issue: dict, known_agents: Optional[set] = None) -> tuple:
-    """(agent, problem): the developer an issue goes to, or why it cannot be routed."""
+def agent_for(issue: dict, known_agents: Optional[set] = None, disabled_roles: AbstractSet[str] = frozenset()) -> tuple:
+    """(agent, problem): the developer an issue goes to, or why it cannot be routed. `disabled_roles`: the job roles
+    the console's team config switched off (empty outside a job)."""
     requested = sorted(l[len("agent:"):] for l in _labels(issue) if l.startswith("agent:"))
     if not requested:
         return "fullstack-dev", ""
     if len(requested) > 1:
         return None, f"several agent labels: {', '.join(requested)}"
     name = requested[0]
+    role = AGENT_ROLES.get(name, name)
+    if role in disabled_roles:
+        return None, f"agent:{name} — the {role} role is switched off in the console's team config"
     if name in ("fullstack-dev", "fullstack-dev-light", "fullstack-dev-heavy"):
         return None, f"agent:{name} — size the issue with a tier:* label instead"
     if name in NON_DEVELOPERS:
@@ -50,8 +55,10 @@ def agent_for(issue: dict, known_agents: Optional[set] = None) -> tuple:
     return name, ""
 
 
-def pick(issues: List[dict], sprint: Optional[str], ctx: dict, known_agents: Optional[set] = None) -> Dict[str, list]:
-    """ctx: slot-context output (`mode`, `is_burn`, `caps`). known_agents: project agent names, when known."""
+def pick(issues: List[dict], sprint: Optional[str], ctx: dict, known_agents: Optional[set] = None,
+         disabled_roles: AbstractSet[str] = frozenset()) -> Dict[str, list]:
+    """ctx: slot-context output (`mode`, `is_burn`, `caps`). known_agents: project agent names, when known.
+    disabled_roles: the job roles the console's team config switched off (skipped, and their tiers folded)."""
     caps = ctx["caps"]
     freeze = ctx["mode"] == "freeze"
     urgent, rework, planned, skipped, needs_note = [], [], [], [], []
@@ -64,7 +71,7 @@ def pick(issues: List[dict], sprint: Optional[str], ctx: dict, known_agents: Opt
         if issue.get("kind") == "question":
             continue  # answered by the owner, never built
         blocker = next((why for label, why in SKIP_ALWAYS.items() if label in labels), None)
-        blocker = blocker or agent_for(issue, known_agents)[1]
+        blocker = blocker or agent_for(issue, known_agents, disabled_roles)[1]
         if blocker:
             skipped.append({"number": issue["number"], "reason": blocker})
             continue
@@ -107,14 +114,14 @@ def pick(issues: List[dict], sprint: Optional[str], ctx: dict, known_agents: Opt
     dispatch = []
     for issue in urgent:
         reason = "urgent rework (outside the cap)" if issue.get("status") == "in-progress" else "urgent (outside the cap)"
-        dispatch.append(_entry(issue, ctx, freeze, reason))
+        dispatch.append(_entry(issue, ctx, freeze, reason, disabled_roles))
     for reason, group in (("QA asked for changes", rework), ("planned", planned)):
         for issue in group:
             if budget <= 0:
                 skipped.append({"number": issue["number"], "reason": "over the cap for this run"})
                 continue
             budget -= 1
-            dispatch.append(_entry(issue, ctx, freeze, reason))
+            dispatch.append(_entry(issue, ctx, freeze, reason, disabled_roles))
 
     return {"dispatch": dispatch, "skipped": skipped, "needs_architect_note": needs_note,
             "parallel": caps["parallel_devs"]}
@@ -130,10 +137,12 @@ def is_hotfix(issue: dict) -> bool:
     return "in-production" in _labels(issue) and issue.get("kind") == "bug" and _severity(issue) in SEV_RANK
 
 
-def _entry(issue: dict, ctx: dict, freeze: bool, reason: str) -> dict:
+def _entry(issue: dict, ctx: dict, freeze: bool, reason: str, disabled_roles: AbstractSet[str]) -> dict:
     hotfix = is_hotfix(issue)
     specialist = agent_for(issue)[0]
     tier, tier_notes = tiers.effective(_labels(issue), burn=bool(ctx.get("is_burn")), hotfix=hotfix)
+    tier, folded = tiers.fold(tier, disabled_roles)
+    tier_notes += folded
     if issue.get("status") == "in-progress":
         # Rework continues on the open PR: its branch and base come from the PR, not from today's mode.
         base, prefix = None, None

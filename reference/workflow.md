@@ -48,15 +48,23 @@ Reviews cost a slot and a rework round each; they are sized to the change. `.pro
 
 ```yaml
 review:
-  qa: always                 # always | code | never
-  reviewer: code             # always | code | never; code = only when the PR changes a path in code_paths
+  qa: always                 # always | code (never: deprecated)
+  reviewer: code             # always | code (never: deprecated); code = only when the PR changes a path in code_paths
   code_paths: ["apps/**", "libs/**"]
   max_rework_rounds: 1
 ```
 
-- `pr gate` reads the block from the PR's **base** branch (a PR cannot relax its own gate; a change to
-  `project.yml` itself needs SECURITY). Without the block, QA and REVIEW are required on every PR (the behaviour
-  before 0.10.2). SECURITY is never configurable: `pr security-check` decides it. It reads the labels of
+- **Inside a console job (0.12)** the policy is the owner's team config, not this block: `pr gate` reads `gates`
+  from `…/team-config/resolved` (same keys; `never` does not exist there) and reports the revision under `policy`.
+  It fails closed: a view it cannot read or check is a refusal with the reason, never a fallback to `project.yml`.
+  A difference between the two is reported as `team_config.drift` and a warning, never acted on. The reviewer
+  reads only the diff when `PR review-context --role reviewer` says `diff`; QA and security never do.
+- **Outside a job** `tracker:` in `project.yml` on the PR's **base** branch decides. `console` (set by the
+  project's cutover PR): `pr gate` / `pr merge` refuse to judge with the reason, because the gate policy lives in
+  the console and `project.yml`'s `review`, `caps`, `sprint` and `owner.language` are import-only there (any merged
+  PR can edit them). `github` or no key: `pr gate` reads this block from the base branch as before (a PR cannot
+  relax its own gate; a change to `project.yml` itself needs SECURITY). Without the block, QA and REVIEW are
+  required on every PR (the behaviour before 0.10.2). SECURITY is never configurable: `pr security-check` decides it. It reads the labels of
   every item the console links the PR to (`pr link-pr`, `GET …/prs/N/items`), never what the PR's title, body
   or branch name; links it cannot read in full (no `TC_*` job environment, a refusal, a page it cannot follow),
   a console project whose repository is not the PR's, and a PR linked to no item each make SECURITY required

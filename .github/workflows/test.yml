@@ -36,8 +36,8 @@ jobs:
         run: for s in backlog runlog slot-context demo-page inbox sprint-metrics pr vendor workflows digest brief; do python scripts/$s --help > /dev/null; done
 
   fixtures:
-    # team-console#436-P5: the vendored tracker fixtures (tests/contract/fixtures/tracker) are the console client's
-    # contract. They must stay byte-identical to apps/api/fixtures/tracker at the pinned team-console commit — a
+    # team-console#436-P5: the vendored tracker and team-config fixtures (tests/contract/fixtures/*) are the console
+    # client's contract. They must stay byte-identical to apps/api/fixtures/* at the pinned team-console commit — a
     # route change there bumps tests/contract/console.lock and re-vendors the fixtures in the same PR (team-console
     # CLAUDE.md carries the matching rule on its side).
     runs-on: ubuntu-24.04
@@ -55,3 +55,5 @@ jobs:
           path: team-console
           persist-credentials: false
       - run: diff -rq tests/contract/fixtures/tracker team-console/apps/api/fixtures/tracker
+      # team-console#686: the resolved team-config view the plugin checks (ADR 0009 d.10).
+      - run: diff -rq tests/contract/fixtures/team-config team-console/apps/api/fixtures/team-config

@@ -2,11 +2,20 @@
 therefore the pinned model — that builds it, with the guard rails applied in code."""
 from __future__ import annotations
 
-from typing import Iterable, Tuple
+from typing import AbstractSet, Iterable, Tuple
 
 ORDER = ("light", "standard", "heavy")
 AGENTS = {"light": "fullstack-dev-light", "standard": "fullstack-dev", "heavy": "fullstack-dev-heavy"}
 MODELS = {"light": "claude-sonnet-5", "standard": "claude-opus-5-5", "heavy": "claude-fable-5-1"}
+# The console's job role for each tier (team-console ADR 0009); `dev` is never switched off.
+ROLES = {"light": "dev-light", "standard": "dev", "heavy": "dev-heavy"}
+
+
+def fold(tier: str, disabled_roles: AbstractSet[str]) -> Tuple[str, list]:
+    """(tier, reasons): a tier whose developer role the console's team config switched off folds to `standard`."""
+    if tier != "standard" and ROLES[tier] in disabled_roles:
+        return "standard", [f"the {ROLES[tier]} role is switched off in the console's team config: folded to dev"]
+    return tier, []
 
 
 def declared(labels: Iterable[str]) -> str:

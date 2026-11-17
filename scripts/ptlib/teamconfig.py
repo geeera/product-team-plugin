@@ -181,22 +181,31 @@ def load() -> Dict[str, Any]:
     return check(dto)
 
 
-OUTSIDE_JOB = ("not inside a console job (TC_API_URL, TC_JOB_TOKEN and TC_PROJECT are unset): on a console-tracker "
-               "project the gate policy is the owner's team config in the console (ADR 0009 d.11), which this run "
-               "has no owner-scoped way to read, so {what} refuses to judge rather than use project.yml's review "
-               "block. Run it inside a console job; a project still on GitHub Issues runs product-team 0.11")
+OUTSIDE_JOB = ("team config: not inside a console job (TC_API_URL, TC_JOB_TOKEN and TC_PROJECT are unset) on a "
+               "console-tracker project (`tracker: console` in project.yml on the base branch): the gate policy is "
+               "the owner's team config in the console (ADR 0009 d.11), which this run has no owner-scoped way to "
+               "read, so {what} refuses to judge rather than use project.yml's review block. Run it inside a "
+               "console job")
+_PROBLEM_TYPE = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
+# The variables `console.config` names in its own refusals; a console answer's `field` is never shown.
+_OWN_FIELDS = frozenset(JOB_ENV + ("TC_RUNNER_SOCKET", "TC_CONSOLE_URL"))
+
+
+def cause(exc: "console.ConsoleError") -> str:
+    """`<status> <type>` of a refused call, the type allow-listed: a console problem body is data, and a type that is
+    not a plain slug (a newline, a forged line) is shown as `problem`, never quoted."""
+    kind = exc.type if _PROBLEM_TYPE.match(exc.type or "") else "problem"
+    return " ".join(p for p in (str(exc.status) if exc.status else "", kind) if p)
 
 
 def refusal(exc: Exception, what: str) -> str:
-    """The reason line for a run that cannot act on the team config. Never the console's own text: its status and
-    problem type, or the path the plugin's check refused."""
+    """The reason line for a run that cannot act on the team config, always one line. Never the console's own text:
+    the status and an allow-listed problem type, the variable the plugin itself found missing, or the path its check
+    refused (printable ASCII, see `_path`)."""
     if isinstance(exc, console.ConsoleError):
-        if exc.type == "config-missing" and not in_job():
-            return f"team config: {OUTSIDE_JOB.format(what=what)}"
-        cause = " ".join(p for p in (str(exc.status) if exc.status else "", exc.type) if p)
-        return (f"team config: the console's resolved view could not be read ({cause}"
-                f"{f', {exc.field}' if exc.type.startswith('config-') and exc.field else ''}): {what} fails closed "
-                "and never falls back to project.yml")
+        own = exc.status is None and exc.type.startswith("config-") and exc.field in _OWN_FIELDS
+        return (f"team config: the console's resolved view could not be read ({cause(exc)}"
+                f"{f', {exc.field}' if own else ''}): {what} fails closed and never falls back to project.yml")
     return (f"team config: the console's resolved view is not one this plugin can act on ({exc}): {what} fails "
             "closed and never falls back to project.yml")
 

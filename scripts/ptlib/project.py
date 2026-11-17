@@ -93,6 +93,25 @@ def _list_from_text(text: str, key: str, item: "re.Pattern[str]", hint: str) -> 
     return values
 
 
+TRACKERS = ("github", "console")
+
+
+def tracker_from_text(text: str) -> str:
+    """`tracker:` of a project.yml given as text: `console` once the project's backlog lives in the team console,
+    `github` (the default when absent) before. The gate reads it from the PR's base branch (team-console#683).
+    ValueError for any other value or a second key: guessing `github` would drop the console's gate."""
+    found = re.findall(r"^tracker:[ \t]*(.*)$", text or "", re.MULTILINE)
+    if not found:
+        return "github"
+    if len(found) > 1:
+        raise ValueError("project.yml has more than one top-level `tracker:` key; keep one")
+    value, _ = _split_outside_quotes(found[0], "tracker")
+    value = value.strip().strip("'\"")
+    if value not in TRACKERS:
+        raise ValueError(f"project.yml: tracker must be one of {', '.join(TRACKERS)}, not {value[:40]!r}")
+    return value
+
+
 def run_log_issue(path: str = PROJECT_FILE) -> int:
     """`team.run_log_issue` — the number of the run-log issue, 0 when not pinned."""
     try:

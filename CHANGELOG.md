@@ -7,9 +7,8 @@ first `slot-pm` of the day runs `vendor self-update` and opens a PR with the ent
 ## 0.12.0
 
 Everything in `0.12.0-pre.1` below, plus the team console's team configuration (geeera/team-console ADR 0009,
-team-console#686 and #683). Like the pre-release, it is for products whose tracker is already the team console;
-a project still on GitHub Issues stays on `0.11.0`. Promoting it to `stable` (tag and channel move) is the owner's
-release step, not part of this entry.
+team-console#686 and #683). Promoting it to `stable` (tag and channel move) is the owner's release step, not part
+of this entry.
 
 - **Breaking: inside a console job the team config is the console's.** `backlog next`, `pr gate` and
   `slot-context` read `GET …/team-config/resolved` once per run (team-console ADR 0009 d.12): caps and freeze days
@@ -24,12 +23,21 @@ release step, not part of this entry.
   `slot-context` with exit 1 and makes `pr gate` (and so `pr merge`) refuse to judge, each with one reason line
   that names the status and problem type or the refused path, never the console's text. There is no fallback to
   `project.yml` (threat model T9/T10).
-- **Breaking: `pr gate` outside a console job refuses to judge** (team-console#683). On a console-tracker project
-  the gate policy is the owner's, and a local or hub run has no owner-scoped way to read it, so `pr gate` / `pr
-  merge` without `TC_API_URL`, `TC_JOB_TOKEN` and `TC_PROJECT` answer `passed: false` with that reason instead of
-  reading `project.yml`'s `review` block, which any merged PR can edit. `pr merge --ci-only` is unchanged.
-  **Migration**: merge feature PRs from a console job (the orchestrator's), not from a local session; a project
-  still on GitHub Issues runs `0.11.0`, whose gate reads `project.yml` as before.
+- **New `project.yml` key `tracker: github | console`**, read by `pr gate` from the PR's **base** branch (like
+  `team.reviewer_logins`), never from the PR head or the working tree. Absent or `github`: outside a job `pr gate`
+  / `pr merge` are the 0.11 gate on the base branch's `review:` block. Any other value, or a second key, is a
+  refusal. Inside a job the console's view applies whatever the key says.
+- **Breaking for console-tracker projects: `pr gate` outside a console job refuses to judge** (team-console#683).
+  With `tracker: console` on the base branch the gate policy is the owner's, and a local or hub run has no
+  owner-scoped way to read it, so `pr gate` / `pr merge` without `TC_API_URL`, `TC_JOB_TOKEN` and `TC_PROJECT`
+  answer `passed: false` with that reason instead of reading `project.yml`'s `review` block, which any merged PR
+  can edit. `pr merge --ci-only` is unchanged. **Migration**: a project's cutover PR adds `tracker: console` to
+  `.product-team/project.yml`; from then on feature PRs merge from a console job (the orchestrator's). Removing the
+  key later is itself a PR judged by the console's gate inside a job (a change to `project.yml` needs SECURITY).
+- Refusal lines quote no console text: a problem `type` outside `[a-z0-9-]` is shown as `problem`, a `field` only
+  when the plugin itself names a missing `TC_*` variable, and every problem string the client keeps (`title`,
+  `detail`, `field`, `reason`, `kind`) has its control characters and line separators replaced by spaces, so a
+  console answer can never add a line to what an agent reads (threat model T9).
 - **`project.yml`'s `review`, `caps`, `sprint` and `owner.language` are import-only on a console-tracker
   project** (ADR 0009 d.11): the owner imports them once in Settings › Team. When they differ from the console,
   the command warns once on stderr and lists the keys under `team_config.drift`; it never acts on them.

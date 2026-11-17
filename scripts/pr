@@ -23,10 +23,11 @@
   pr gate N            CI plus the independent verdicts it needs, each APPROVED on the current head commit: QA and
                        REVIEW as the console's team config requires them (`gates` of `…/team-config/resolved`,
                        read in the job), SECURITY whenever security-check says so. `why` explains each verdict;
-                       `policy` shows the rule and its revision, max_rework_rounds included. Fails closed: outside a
-                       console job, or with a view it cannot read or check, it refuses to judge (never reads
-                       project.yml's review block, which is import-only on a console-tracker project); a drift
-                       between project.yml and the console is a warning
+                       `policy` shows the rule and its revision, max_rework_rounds included. Fails closed: a view
+                       it cannot read or check is a refusal, never project.yml's review block; a drift between
+                       project.yml and the console is a warning. Outside a console job: with `tracker: console` in
+                       project.yml on the base branch it refuses to judge; without it (or `tracker: github`) it is
+                       the 0.11 gate on the base branch's `review:` block
   pr review-context --role reviewer|qa|security
                        how much of the repository a reviewing agent reads: `diff` (pr diff, pr files and the item's
                        criteria only) when the console's team config sets cost.reviewer_context: diff under api_key,
@@ -130,8 +131,8 @@ def changed_files(repo: str, n: int) -> list:
 
 
 def _cause(exc: console.ConsoleError) -> str:
-    # The type and status only: the detail is the console's text, and a reason must name the cause.
-    return " ".join(p for p in (str(exc.status) if exc.status else "", exc.type) if p)
+    # The status and an allow-listed type only: the detail is the console's text, and a reason must name the cause.
+    return teamconfig.cause(exc)
 
 
 def linked_labels(repo: str, n: int) -> tuple:
@@ -217,32 +218,47 @@ def refused(reason: str) -> dict:
 
 
 def gate(repo: str, n: int) -> dict:
-    # The policy first: without the console's view there is nothing to judge by (team-console#683, ADR 0009 T10).
-    try:
-        team = teamconfig.load()
-        policy = teamconfig.review_policy(team)
-    except (console.ConsoleError, teamconfig.TeamConfigInvalid) as exc:
-        return refused(teamconfig.refusal(exc, "pr gate"))
+    """Inside a console job the policy is the console's `gates`, read first and failing closed (ADR 0009 T10).
+    Outside a job it depends on `tracker:` in project.yml on the PR's base branch: `console` refuses to judge
+    (team-console#683), absent or `github` is the 0.11 gate on the base branch's `review:` block."""
+    team = None
+    if teamconfig.in_job():
+        try:
+            team = teamconfig.load()
+            policy = teamconfig.review_policy(team)
+        except (console.ConsoleError, teamconfig.TeamConfigInvalid) as exc:
+            return refused(teamconfig.refusal(exc, "pr gate"))
     info = view(repo, n)
+    try:
+        # The base branch, never the PR head or the working tree: a PR cannot switch its own gate's source.
+        config = base_project_text(repo, info["base"])
+        if team is None:
+            if project.tracker_from_text(config) == "console":
+                return refused(teamconfig.OUTSIDE_JOB.format(what="pr gate"))
+            policy = project.review_policy_from_text(config)
+    except ValueError as exc:
+        return refused(str(exc))
     paths = changed_files(repo, n)
     reasons = security_check(repo, n, paths)
     reviews = gh.api_list(f"repos/{repo}/pulls/{n}/reviews?per_page=100")
     team_login = gh.token_login() if gh.app_mode() else None
     try:
-        config = base_project_text(repo, info["base"])
         logins, warning = review.allowed_reviewers(project.reviewer_logins_from_text(config), gh.review_login(),
                                                    team_login)
         roles, why = review.required_verdicts(policy, paths, reasons)
     except ValueError as exc:
         return refused(str(exc))
-    drift = teamconfig.drift(team, project.imported_settings_from_text(config))
-    if drift:
-        print(teamconfig.drift_warning(team, drift), file=sys.stderr)
     result = review.gate(reviews, info["head_sha"], bool(reasons), logins, roles)
     result["why"] = why
-    result["policy"] = {k: policy[k] for k in ("configured", "source", "revision", "qa", "reviewer", "code_paths",
-                                               "max_rework_rounds")}
-    result["team_config"] = teamconfig.summary(team, drift)
+    if team is None:
+        result["policy"] = {k: policy[k] for k in ("configured", "qa", "reviewer", "code_paths", "max_rework_rounds")}
+    else:
+        drift = teamconfig.drift(team, project.imported_settings_from_text(config))
+        if drift:
+            print(teamconfig.drift_warning(team, drift), file=sys.stderr)
+        result["policy"] = {k: policy[k] for k in ("configured", "source", "revision", "qa", "reviewer",
+                                                   "code_paths", "max_rework_rounds")}
+        result["team_config"] = teamconfig.summary(team, drift)
     result["ci"] = ci(repo, info["head_sha"])
     result["security_reasons"] = reasons[:10]
     result["reviewers"] = logins

@@ -37,6 +37,7 @@ _TOKEN = re.compile(r"^[\x21-\x7e]+$")  # header-safe: a CR/LF or space would sp
 _PROJECT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
 _RETRY_AFTER = re.compile(r"^\d{1,6}$")
 _IDEMPOTENCY_KEY = re.compile(r"^[A-Za-z0-9_-]{8,128}$")  # what the console accepts (tracker/idempotency.ts)
+_CONTROL = re.compile(r"[\x00-\x1f\x7f\u0085\u2028\u2029]")  # C0, DEL and the Unicode line separators
 _ETAG = re.compile(r'(W/)?"[\x21\x23-\x7e]{0,200}"')  # RFC 9110 entity-tag; the console sends `"<version>"`
 
 
@@ -192,7 +193,10 @@ def _problem(status: int, payload: bytes, headers: Dict[str, str], token: str) -
 
     def text(name: str, limit: int = 100) -> Optional[str]:
         value = body.get(name)
-        return transport.clip(_redact(value, token), limit) if isinstance(value, str) and value else None
+        if not isinstance(value, str) or not value:
+            return None
+        # One line, always: a console answer must not add lines to what an agent reads as tool output.
+        return transport.clip(_CONTROL.sub(" ", _redact(value, token)), limit)
 
     kind = (text("type", 200) or "about:blank").rstrip("/").rsplit("/", 1)[-1]
     detail = text("detail", DETAIL_LIMIT) or text("title") or f"HTTP {status}"

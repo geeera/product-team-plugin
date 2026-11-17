@@ -3,6 +3,11 @@
 name: my-product
 repo: owner/my-product
 mode: new                # new | adopted
+# Where the backlog lives: github (GitHub Issues) | console (the team console). The cutover PR sets `console`.
+# Security-relevant: `pr gate` reads it from the PR's base branch, so a PR cannot change its own gate. Outside a
+# console job, `console` makes `pr gate` / `pr merge` refuse to judge (the gate policy is the owner's, in the
+# console); `github` or no key keeps the gate on the `review:` block below.
+tracker: github
 stack: "TODO: summary — see decision record"
 decisions_dir: docs/decisions
 

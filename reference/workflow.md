@@ -54,16 +54,17 @@ review:
   max_rework_rounds: 1
 ```
 
-- **On the team console (0.12)** the policy is the owner's team config, not this block: `pr gate` reads `gates`
-  from `…/team-config/resolved` inside a console job (same keys; `never` does not exist there) and reports the
-  revision under `policy`. It fails closed: a view it cannot read or check, or a run outside a console job (a local
-  or hub `pr gate` / `pr merge`), is a refusal with the reason, never a fallback to `project.yml`, whose `review`,
-  `caps`, `sprint` and `owner.language` are import-only there (any merged PR can edit them). A difference between
-  the two is reported as `team_config.drift` and a warning, never acted on. The reviewer reads only the diff when
-  `PR review-context --role reviewer` says `diff`; QA and security never do.
-- On GitHub Issues (0.11) `pr gate` reads the block from the PR's **base** branch (a PR cannot relax its own gate;
-  a change to `project.yml` itself needs SECURITY). Without the block, QA and REVIEW are required on every PR (the
-  behaviour before 0.10.2). SECURITY is never configurable: `pr security-check` decides it. It reads the labels of
+- **Inside a console job (0.12)** the policy is the owner's team config, not this block: `pr gate` reads `gates`
+  from `…/team-config/resolved` (same keys; `never` does not exist there) and reports the revision under `policy`.
+  It fails closed: a view it cannot read or check is a refusal with the reason, never a fallback to `project.yml`.
+  A difference between the two is reported as `team_config.drift` and a warning, never acted on. The reviewer
+  reads only the diff when `PR review-context --role reviewer` says `diff`; QA and security never do.
+- **Outside a job** `tracker:` in `project.yml` on the PR's **base** branch decides. `console` (set by the
+  project's cutover PR): `pr gate` / `pr merge` refuse to judge with the reason, because the gate policy lives in
+  the console and `project.yml`'s `review`, `caps`, `sprint` and `owner.language` are import-only there (any merged
+  PR can edit them). `github` or no key: `pr gate` reads this block from the base branch as before (a PR cannot
+  relax its own gate; a change to `project.yml` itself needs SECURITY). Without the block, QA and REVIEW are
+  required on every PR (the behaviour before 0.10.2). SECURITY is never configurable: `pr security-check` decides it. It reads the labels of
   every item the console links the PR to (`pr link-pr`, `GET …/prs/N/items`), never what the PR's title, body
   or branch name; links it cannot read in full (no `TC_*` job environment, a refusal, a page it cannot follow),
   a console project whose repository is not the PR's, and a PR linked to no item each make SECURITY required

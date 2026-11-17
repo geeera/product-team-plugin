@@ -6,6 +6,11 @@ first `slot-pm` of the day runs `vendor self-update` and opens a PR with the ent
 
 ## Unreleased
 
+- **Chore: bump `tests/contract/console.lock` to team-console `122e37a9` (PR #765).** Re-vendored
+  `tests/contract/fixtures/team-config/get.recommended.json`, `put.changed.json` and `reset.economy.json`, which
+  gained three members (`updatedByName`, `canManage`, `subscriptionBlocked`) on the GET/PUT/reset envelope. The
+  plugin's team-config check (`scripts/ptlib/teamconfig.py`) only reads the nested `resolved` view, which these
+  fixtures carry unchanged, so no plugin code changed.
 - **Fix: `slot-context --offline` refuses inside a console job** instead of reading `sprint.freeze_days` from
   `.product-team/project.yml`, which the PR's own branch could otherwise set (team-console#742, threat model T10).
   Exit 1, one reason line, the same style as the other team-config refusals; no skill or agent passes `--offline`

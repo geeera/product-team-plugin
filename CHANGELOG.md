@@ -6,6 +6,10 @@ first `slot-pm` of the day runs `vendor self-update` and opens a PR with the ent
 
 ## Unreleased
 
+- **Chore: bump `tests/contract/console.lock` to team-console `a62056a2` (PR #777).** Re-vendored the team-config
+  fixtures `get.recommended.json`, `put.changed.json`, `reset.economy.json`, `revisions.list.json` and
+  `revisions.get.json`, which gained `reason` and `createdByName` additively. The plugin still reads only the nested
+  `resolved` view (`scripts/ptlib/teamconfig.py`), so no plugin code changed.
 - **Chore: bump `tests/contract/console.lock` to team-console `122e37a9` (PR #765).** Re-vendored
   `tests/contract/fixtures/team-config/get.recommended.json`, `put.changed.json` and `reset.economy.json`, which
   gained three members (`updatedByName`, `canManage`, `subscriptionBlocked`) on the GET/PUT/reset envelope. The

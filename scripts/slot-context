@@ -8,7 +8,9 @@
 
 With the console, freeze days and caps come from its team config (`…/team-config/resolved`, ADR 0009); a view it
 cannot read or check is a refusal (exit 1), never a fallback to project.yml. --offline reads sprint.freeze_days
-from .product-team/project.yml as before (caps overrides are applied by the calling skill).
+from .product-team/project.yml as before (caps overrides are applied by the calling skill), but never inside a
+console job (TC_API_URL, TC_JOB_TOKEN, TC_PROJECT): that would let the PR's own branch set freeze_days through the
+project.yml fallback T10 rules out (team-console#742), so --offline there is a refusal too (exit 1).
 """
 from __future__ import annotations
 
@@ -32,6 +34,10 @@ def main() -> None:
     now = datetime.fromisoformat(args.now) if args.now else datetime.now(timezone.utc)
     if now.tzinfo is None:
         now = now.replace(tzinfo=calendar.KYIV)
+
+    if args.offline and teamconfig.in_job():
+        print(teamconfig.OFFLINE_IN_JOB.format(what="slot-context"), file=sys.stderr)
+        sys.exit(console.EXIT_ERROR)
 
     sprint_title, demo, view, drift = None, None, None, []
     if not args.offline:

@@ -186,6 +186,10 @@ OUTSIDE_JOB = ("team config: not inside a console job (TC_API_URL, TC_JOB_TOKEN 
                "the owner's team config in the console (ADR 0009 d.11), which this run has no owner-scoped way to "
                "read, so {what} refuses to judge rather than use project.yml's review block. Run it inside a "
                "console job")
+OFFLINE_IN_JOB = ("team config: --offline was passed inside a console job (TC_API_URL, TC_JOB_TOKEN and TC_PROJECT "
+                  "are set): {what} refuses to fall back to project.yml's sprint.freeze_days, which the PR's own "
+                  "branch controls (ADR 0009 d.11, threat model T10); drop --offline so it reads the console's "
+                  "team config instead")
 _PROBLEM_TYPE = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
 # The variables `console.config` names in its own refusals; a console answer's `field` is never shown.
 _OWN_FIELDS = frozenset(JOB_ENV + ("TC_RUNNER_SOCKET", "TC_CONSOLE_URL"))

@@ -11,10 +11,11 @@
   pr reviews N         review bodies, oldest first
   pr update-branch N   merge the base into the PR branch on GitHub (no force-push); fails on conflicts
   pr files N           changed paths
-  pr security-check N  does this PR need a security review? reasons from the paths and the labels of the items the
+  pr security-check N  does this PR need a security review? reasons from the paths (the built-in rules plus the
+                       `security_paths` globs of project.yml on the PR's base branch) and the labels of the items the
                        team console links it to (`pr link-pr`), never what the PR's text names; links it cannot
-                       read, a console project of another repository and a PR linked to no item each make the
-                       review required (fails closed)
+                       read, a console project of another repository, a PR linked to no item and a base-branch
+                       `security_paths` it cannot read each make the review required (fails closed)
   pr link-pr N [--item KEY]
                        record PR N on its item in the team console (`pr-links`); the item is the head branch's
                        (`feature/tc-412-…`) unless --item names it, which the PR must name too (`Closes KEY`;
@@ -160,9 +161,31 @@ def linked_labels(repo: str, n: int) -> tuple:
     return labels, []
 
 
-def security_check(repo: str, n: int, paths: Optional[list] = None) -> list:
+def project_security_paths(repo: str, n: int, config: Optional[str] = None) -> tuple:
+    """(the `security_paths` globs of project.yml on the PR's base branch, reasons the gate could not tell).
+
+    The base branch, never the head: a PR must not drop its own requirement by editing the list. A base it cannot
+    read or a list it cannot parse makes SECURITY required (fails closed): falling back to the built-in rules alone
+    would skip the review on exactly the paths the project marked."""
+    base = None
+    try:
+        if config is None:
+            base = view(repo, n)["base"]
+            config = base_project_text(repo, base)
+        return project.security_paths_from_text(config), []
+    except gh.GhError as exc:
+        return [], [f"security_paths could not be read from project.yml on the base branch {base or '?'} "
+                    f"({str(exc)[:200]}): review required"]
+    except ValueError as exc:
+        return [], [f"project.yml on the base branch: {str(exc)[:200]}: review required"]
+
+
+def security_check(repo: str, n: int, paths: Optional[list] = None, config: Optional[str] = None) -> list:
+    """`config`: project.yml as the PR's base branch has it, when the caller has already read it."""
     labels, unread = linked_labels(repo, n)
-    return review.security_reasons(changed_files(repo, n) if paths is None else paths, labels) + unread
+    globs, unknown = project_security_paths(repo, n, config)
+    changed = changed_files(repo, n) if paths is None else paths
+    return review.security_reasons(changed, labels, globs) + unread + unknown
 
 
 def item_key(ref: str) -> str:
@@ -253,7 +276,7 @@ def gate(repo: str, n: int) -> dict:
     except ValueError as exc:
         return refused(str(exc))
     paths = changed_files(repo, n)
-    reasons = security_check(repo, n, paths)
+    reasons = security_check(repo, n, paths, config)
     reviews = gh.api_list(f"repos/{repo}/pulls/{n}/reviews?per_page=100")
     team_login = gh.token_login() if gh.app_mode() else None
     try:

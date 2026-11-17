@@ -16,8 +16,8 @@ feature/<issue>-<slug> ──PR──▶ dev ──cut 2 days before demo──�
   CI green plus the verdicts the PR needs (see [Review gate](#review-gate-proportional-reviews)): `QA: APPROVED`
   from `qa` and `REVIEW: APPROVED` from `reviewer` as `review:` in `project.yml` requires them, and
   `SECURITY: APPROVED` from `security` whenever `scripts/pr security-check` finds auth, data, payment, upload,
-  secret, dependency or CI changes, or an item the PR names is labelled `security` (or cannot be read: it fails
-  closed).
+  secret, dependency or CI changes, a path in the project's `security_paths`, or an item the PR names is labelled
+  `security` (or cannot be read: it fails closed).
   Every verdict must be on the current head commit. The orchestrator merges (squash) and moves the issue
   `status:qa` → `status:done`; the developer who wrote it never does. Branch operations (stage cut, release,
   back-merges) and the self-update PR merge with `--ci-only`.
@@ -75,6 +75,13 @@ review:
   character classes (`[ab]`) and negation (`!x`) are refused, not guessed. A renamed file counts by its old path
   too. `code` without `code_paths` uses broad defaults (common source roots; source, script, infrastructure,
   markup, style and build-config files anywhere).
+- `security_paths` (top-level in `project.yml`, optional) adds paths that make SECURITY required on top of the
+  built-in rules, for what only this project knows is sensitive (a workflow template every customer runs, a
+  renderer of it). Globs as for `code_paths`, inline `["a/**", b.ts]` or `- a/**` lines; the reason is
+  `project security path (<glob>): <path>`. It only adds, never removes a built-in rule, and `pr security-check`
+  reads it from the PR's **base** branch (inside a console job too), never the head: a PR cannot drop its own
+  requirement, and editing `project.yml` needs SECURITY anyway. A base it cannot read, or a list it cannot parse
+  (unsupported glob, empty block list, a second key), makes SECURITY required with the reason (fails closed).
 - `max_rework_rounds` is **guidance for the orchestrator** (`slot-qa`, `slot-dev`), **not enforced by the gate**:
   `pr gate` only reports it under `policy`; it never passes or fails a PR because of it.
 - `pr gate` explains itself: `why` says for each of QA, REVIEW and SECURITY whether it is required and why;

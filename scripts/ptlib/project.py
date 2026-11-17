@@ -175,7 +175,7 @@ def _split_outside_quotes(raw: str, what: str) -> tuple:
         elif ch == ",":
             commas.append(i)
     if quote:
-        raise ValueError(f"review.{what} has an unclosed quote: {raw.strip()!r}")
+        raise ValueError(f"{what} has an unclosed quote: {raw.strip()!r}")
     return raw.rstrip(), commas
 
 
@@ -183,7 +183,7 @@ def _unquote(item: str, what: str) -> str:
     item = item.strip()
     if item[:1] in ("'", '"'):
         if len(item) < 2 or item[-1] != item[0]:
-            raise ValueError(f"review.{what}: cannot read {item!r}")
+            raise ValueError(f"{what}: cannot read {item!r}")
         return item[1:-1]
     return item
 
@@ -193,18 +193,18 @@ def _scalar(raw: str, what: str) -> str:
     return _unquote(value, what) if value.strip() else ""
 
 
-def _glob_list(inline: str, following: list) -> list:
-    """An inline `["a", b]` list, or `- a` lines under an empty `key:`."""
-    value, _ = _split_outside_quotes(inline, "code_paths")
+def _glob_list(inline: str, following: list, what: str = "review.code_paths") -> list:
+    """An inline `["a", b]` list, or `- a` lines under an empty `key:`. `what` names the key in errors."""
+    value, _ = _split_outside_quotes(inline, what)
     value = value.strip()
     if value:
         if not (value.startswith("[") and value.endswith("]")):
-            raise ValueError(f"review.code_paths must be a list like [\"apps/**\", \"libs/**\"], got {value!r}")
+            raise ValueError(f"{what} must be a list like [\"apps/**\", \"libs/**\"], got {value!r}")
         body = value[1:-1]
-        _, commas = _split_outside_quotes(body, "code_paths")
+        _, commas = _split_outside_quotes(body, what)
         bounds = [-1] + commas + [len(body)]
         items = [body[a + 1:b] for a, b in zip(bounds, bounds[1:])]
-        return [x for x in (_unquote(i, "code_paths") for i in items if i.strip()) if x]
+        return [x for x in (_unquote(i, what) for i in items if i.strip()) if x]
     items = []
     for line in following:
         if not line.strip() or line.lstrip().startswith("#"):
@@ -212,7 +212,7 @@ def _glob_list(inline: str, following: list) -> list:
         m = re.match(r"^[ \t]+-[ \t]*(.*)$", line)
         if not m:
             break
-        items.append(_scalar(m.group(1), "code_paths"))
+        items.append(_scalar(m.group(1), what))
     return [x for x in items if x]
 
 
@@ -250,7 +250,7 @@ def review_policy_from_text(text: str) -> dict:
             raise ValueError(f"review.{key} is set twice")
         seen.add(key)
         if key in ("qa", "reviewer"):
-            mode = _scalar(value, key)
+            mode = _scalar(value, f"review.{key}")
             if mode not in REVIEW_MODES:
                 raise ValueError(f"review.{key} must be one of {', '.join(REVIEW_MODES)}, not {mode!r}")
             policy[key] = mode
@@ -263,7 +263,7 @@ def review_policy_from_text(text: str) -> dict:
                 review.glob_regex(path)  # raises for syntax the matcher does not support
             policy[key] = paths
         else:
-            number = _scalar(value, key)
+            number = _scalar(value, f"review.{key}")
             if not number.isdigit():
                 raise ValueError(f"review.max_rework_rounds must be a whole number, not {number!r}")
             policy[key] = int(number)
@@ -277,6 +277,31 @@ def review_policy(path: str = PROJECT_FILE) -> dict:
             return review_policy_from_text(f.read())
     except FileNotFoundError:
         return default_review_policy()
+
+
+def security_paths_from_text(text: str) -> list:
+    """The top-level `security_paths:` globs of a project.yml given as text: paths whose change makes SECURITY
+    required on top of the plugin's built-in rules. [] when absent. The gate reads it from the PR's base branch, so a
+    PR cannot drop its own requirement. ValueError when it is set but cannot be read (a second key, an empty list,
+    an unsupported glob): guessing would drop a required review."""
+    from . import review  # glob syntax lives with the matcher
+
+    lines = (text or "").splitlines()
+    starts = [i for i, line in enumerate(lines) if re.match(r"^security_paths:", line)]
+    if not starts:
+        return []
+    if len(starts) > 1:
+        raise ValueError("project.yml has more than one top-level `security_paths:` key; keep one")
+    inline = re.match(r"^security_paths:[ \t]*(.*)$", lines[starts[0]]).group(1)
+    paths = _glob_list(inline, lines[starts[0] + 1:], "security_paths")
+    if not paths and _split_outside_quotes(inline, "security_paths")[0].replace(" ", "") == "[]":
+        return []
+    if not paths:
+        raise ValueError("security_paths is set but empty or unreadable; list globs such as "
+                         "[\"apps/runner/templates/**\"] or remove the key")
+    for path in paths:
+        review.glob_regex(path, "security_paths")  # raises for syntax the matcher does not support
+    return paths
 
 
 def read_text(path: str = PROJECT_FILE) -> str:

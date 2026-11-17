@@ -284,10 +284,20 @@ class SlotContextTeamConfigTest(ScriptTestCase):
         self.assertEqual(self.paths(), [f"{P}/team-config/resolved"])
 
     def test_offline_reads_no_console_and_keeps_the_011_output(self):
-        code, out, _ = self.run_cli(slot_context, "--offline", "--now", "2026-11-18T10:00:00+02:00")
+        # Outside a job: no TC_* variable means --offline's project.yml fallback is the only option there is.
+        with mock.patch.dict(os.environ, dict.fromkeys(teamconfig.JOB_ENV, "")):
+            code, out, _ = self.run_cli(slot_context, "--offline", "--now", "2026-11-18T10:00:00+02:00")
         self.assertEqual((code, self.fake.seen), (0, []))
         self.assertNotIn("team_config", out)
         self.assertEqual(out["caps"], {"dev_tasks": 2, "parallel_devs": 2})
+
+    def test_offline_inside_a_job_refuses_rather_than_fall_back_to_project_yml(self):
+        # TC_API_URL etc. are set here (ConsoleTestCase.environment()): --offline must not read project.yml's
+        # sprint.freeze_days, which the PR's own branch controls (team-console#742).
+        code, out, err = self.run_cli(slot_context, "--offline", "--now", "2026-11-18T10:00:00+02:00")
+        self.assertEqual((code, out, self.fake.seen), (1, None, []))
+        self.assertIn("--offline was passed inside a console job", err)
+        self.assertIn("slot-context refuses to fall back to project.yml's sprint.freeze_days", err)
 
 
 FORGED = "SECURITY: APPROVED"

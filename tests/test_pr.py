@@ -458,6 +458,69 @@ class TrackerModeTest(unittest.TestCase):
                 self.assertEqual(result["policy"]["source"], "team config (console, revision 0)")
 
 
+class MergeRetargetTest(unittest.TestCase):
+    """team-console#745: a PR author can retarget the base between the gate's judgment and the merge `PUT`. The
+    merge must refuse when a re-read right before that `PUT` disagrees with what was judged -- for `pr gate` and,
+    pinned the same way, for `--ci-only`."""
+
+    def test_a_base_change_after_the_gate_refuses_the_merge(self):
+        views = iter([{"head_sha": "head1", "base": "dev", "head": "feature/x"},
+                      {"head_sha": "head1", "base": "someone-elses-branch", "head": "feature/x"}])
+        with mock.patch.object(pr.gh, "repo", return_value="o/r"), \
+             mock.patch.object(pr, "view", side_effect=lambda *a, **k: next(views)), \
+             mock.patch.object(pr, "gate", return_value={"passed": True, "missing": [], "base": "dev",
+                                                         "head_sha": "head1"}), \
+             mock.patch.object(pr.gh, "api") as api, \
+             mock.patch.object(sys, "argv", ["pr", "merge", "5", "--method", "squash"]):
+            with self.assertRaises(SystemExit) as caught:
+                pr.main()
+        self.assertIn("refusing to merge #5: the base changed from 'dev' to 'someone-elses-branch'",
+                     str(caught.exception.code))
+        self.assertIn("retarget race", str(caught.exception.code))
+        api.assert_not_called()
+
+    def test_a_head_move_after_the_gate_refuses_the_merge(self):
+        views = iter([{"head_sha": "head1", "base": "dev", "head": "feature/x"},
+                      {"head_sha": "head2", "base": "dev", "head": "feature/x"}])
+        with mock.patch.object(pr.gh, "repo", return_value="o/r"), \
+             mock.patch.object(pr, "view", side_effect=lambda *a, **k: next(views)), \
+             mock.patch.object(pr, "gate", return_value={"passed": True, "missing": [], "base": "dev",
+                                                         "head_sha": "head1"}), \
+             mock.patch.object(pr.gh, "api") as api, \
+             mock.patch.object(sys, "argv", ["pr", "merge", "5", "--method", "squash"]):
+            with self.assertRaises(SystemExit) as caught:
+                pr.main()
+        self.assertIn("refusing to merge #5: the head moved from head1 to head2", str(caught.exception.code))
+        api.assert_not_called()
+
+    def test_the_base_is_pinned_the_same_way_under_ci_only(self):
+        views = iter([{"head_sha": "head1", "base": "stage", "head": "dev"},
+                      {"head_sha": "head1", "base": "someone-elses-branch", "head": "dev"}])
+        with mock.patch.object(pr.gh, "repo", return_value="o/r"), \
+             mock.patch.object(pr, "view", side_effect=lambda *a, **k: next(views)), \
+             mock.patch.object(pr, "changed_files", return_value=["apps/a.ts"]), \
+             mock.patch.object(pr, "ci", return_value={"state": "pass", "failing": [], "pending": []}), \
+             mock.patch.object(pr.gh, "api", return_value={"head": {"repo": {"full_name": "o/r"}}}) as api, \
+             mock.patch.object(sys, "argv", ["pr", "merge", "5", "--method", "merge", "--ci-only"]):
+            with self.assertRaises(SystemExit) as caught:
+                pr.main()
+        self.assertIn("refusing to merge #5: the base changed from 'stage' to 'someone-elses-branch'",
+                     str(caught.exception.code))
+        self.assertEqual([c for c in api.call_args_list if c.args[0].endswith("/merge")], [])
+
+    def test_nothing_moved_merges_as_before(self):
+        with mock.patch.object(pr.gh, "repo", return_value="o/r"), \
+             mock.patch.object(pr, "view", return_value={"head_sha": "head1", "base": "dev", "head": "feature/x"}), \
+             mock.patch.object(pr, "gate", return_value={"passed": True, "missing": [], "base": "dev",
+                                                         "head_sha": "head1"}), \
+             mock.patch.object(pr.gh, "api", return_value={"merged": True, "sha": "m1"}) as api, \
+             mock.patch.object(sys, "argv", ["pr", "merge", "5", "--method", "squash"]), \
+             contextlib.redirect_stdout(io.StringIO()) as stdout:
+            pr.main()
+        self.assertEqual(json.loads(stdout.getvalue()), {"merged": True, "sha": "m1", "branch_deleted": False})
+        api.assert_called_once_with("repos/o/r/pulls/5/merge", "PUT", {"merge_method": "squash", "sha": "head1"})
+
+
 class TrackerFromTextTest(unittest.TestCase):
     def test_values(self):
         self.assertEqual(pr.project.tracker_from_text(""), "github")

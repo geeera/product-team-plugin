@@ -4,6 +4,17 @@ Products follow the `stable` channel (or a pinned tag, `team.plugin_ref` in `.pr
 first `slot-pm` of the day runs `vendor self-update` and opens a PR with the entries in between. Breaking changes (a renamed label, a changed script contract, a new required
 `project.yml` key) are marked **Breaking** with the migration step.
 
+## Unreleased
+
+- **Fix: `slot-context --offline` refuses inside a console job** instead of reading `sprint.freeze_days` from
+  `.product-team/project.yml`, which the PR's own branch could otherwise set (team-console#742, threat model T10).
+  Exit 1, one reason line, the same style as the other team-config refusals; no skill or agent passes `--offline`
+  today, so this closes a latent path rather than changing current behaviour.
+- **Fix: `pr merge` refuses on a base retarget between the gate and the merge call.** `pr gate` (and the
+  `--ci-only` check) now pin the base and head sha they judged; `pr merge` re-reads the PR right before the
+  `PUT …/merge` and refuses if either moved, closing the window where a PR author could retarget the base after
+  the gate judged it on the old one (team-console#745).
+
 ## 0.12.0-pre.2
 
 A pre-release, like `0.12.0-pre.1` below, with everything in it plus the team console's team configuration

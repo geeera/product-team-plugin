@@ -217,6 +217,20 @@ def refused(reason: str) -> dict:
     return {"passed": False, "missing": [reason], "required": [], "verdicts": {}, "ci": {}, "security_reasons": []}
 
 
+def retarget_refusal(repo: str, n: int, judged_base: str, judged_head_sha: str) -> str:
+    """Re-reads the PR right before the merge `PUT`, pinned to the base and head the gate (or `--ci-only`) judged:
+    a PR author can retarget the base between that judgment and the merge call (team-console#745), landing a PR on
+    a branch whose gate policy, reviewers and `tracker:` were never re-checked. "" when nothing moved."""
+    current = view(repo, n)
+    if current["base"] != judged_base:
+        return (f"the base changed from {judged_base!r} to {current['base']!r} after it was judged (retarget "
+                "race): rerun the gate (or --ci-only check) and the merge")
+    if current["head_sha"] != judged_head_sha:
+        return (f"the head moved from {judged_head_sha} to {current['head_sha']} after it was judged: rerun the "
+                "gate (or --ci-only check) and the merge")
+    return ""
+
+
 def gate(repo: str, n: int) -> dict:
     """Inside a console job the policy is the console's `gates`, read first and failing closed (ADR 0009 T10).
     Outside a job it depends on `tracker:` in project.yml on the PR's base branch: `console` refuses to judge
@@ -250,6 +264,7 @@ def gate(repo: str, n: int) -> dict:
         return refused(str(exc))
     result = review.gate(reviews, info["head_sha"], bool(reasons), logins, roles)
     result["why"] = why
+    result["base"], result["head_sha"] = info["base"], info["head_sha"]
     if team is None:
         result["policy"] = {k: policy[k] for k in ("configured", "qa", "reviewer", "code_paths", "max_rework_rounds")}
     else:
@@ -633,16 +648,22 @@ def main() -> None:
                     refusal = "; ".join(problems[:5])
                 if refusal:
                     sys.exit(f"--ci-only refused: {refusal}")
-            if args.ci_only:
                 state = ci(repo, info["head_sha"])
                 if state["state"] != "pass":
                     sys.exit(f"refusing to merge #{args.number}: CI is {state['state']} {state['failing'] or state['pending']}")
+                judged_base, judged_head_sha = info["base"], info["head_sha"]
             else:
                 result = gate(repo, args.number)
                 if not result["passed"]:
                     sys.exit(f"refusing to merge #{args.number}: " + "; ".join(result["missing"]))
+                judged_base, judged_head_sha = result["base"], result["head_sha"]
+            # Pinned to the base and head the check above judged: a retarget between that judgment and this PUT
+            # would land the PR on a branch nobody re-checked (team-console#745).
+            refusal = retarget_refusal(repo, args.number, judged_base, judged_head_sha)
+            if refusal:
+                sys.exit(f"refusing to merge #{args.number}: {refusal}")
             res = gh.api(f"repos/{repo}/pulls/{args.number}/merge", "PUT",
-                         {"merge_method": args.method, "sha": info["head_sha"]})
+                         {"merge_method": args.method, "sha": judged_head_sha})
             deleted = False
             if args.delete_branch:
                 reason = branch_deletion_blocker(repo, args.number, info)

@@ -4,6 +4,15 @@ Products follow the `stable` channel (or a pinned tag, `team.plugin_ref` in `.pr
 first `slot-pm` of the day runs `vendor self-update` and opens a PR with the entries in between. Breaking changes (a renamed label, a changed script contract, a new required
 `project.yml` key) are marked **Breaking** with the migration step.
 
+## 0.11.1
+
+- **Feature: project `security_paths` in `.product-team/project.yml`** (backport of 0.12.0-pre PR #45). A top-level
+  list of globs (same syntax as `review.code_paths`) whose change makes `pr security-check` / `pr gate` require
+  SECURITY, with `project security path (<glob>): <path>` as the reason. It adds to the built-in rules and never
+  removes one, and it is read from the PR's base branch only, so a PR cannot drop its own requirement
+  (team-console#788: the runner workflow template and its renderer). A base branch it cannot read or a list it
+  cannot parse requires SECURITY (fails closed). No key: behaviour unchanged.
+
 ## 0.11.0
 
 - **Owner requests to the PM** (geeera/team-console ADR 0005). The team console lets the owner ask the PM to move

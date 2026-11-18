@@ -43,6 +43,12 @@ review:
   max_rework_rounds: 1       # guidance for the orchestrator, not enforced by the gate: after this many rework
                              # rounds only blockers go back; the rest become follow-up issues
 
+# Extra paths whose change makes SECURITY required (`pr security-check`), on top of the plugin's built-in rules
+# (auth, data, payments, uploads, secrets, dependencies, CI, agent tooling). Globs as in code_paths. Read from the
+# PR's base branch, so a PR cannot drop its own requirement; a list the gate cannot read requires SECURITY. Optional.
+# security_paths:
+#   - "apps/runner/templates/**"
+
 team:
   # Release channel the daily self-update follows: `stable` (every release) or a tag such as v0.3.0 (pinned).
   plugin_ref: stable

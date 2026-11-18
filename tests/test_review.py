@@ -54,6 +54,63 @@ class MorePathsTest(unittest.TestCase):
                 self.assertEqual(review.security_reasons([path]), [])
 
 
+RUNNER_SECURITY_PATHS = """review:
+  qa: always
+security_paths:            # the runner workflow template and its renderer (team-console#788)
+  - "apps/runner/templates/**"
+  - libs/shared/actions-workflow/**
+  - apps/runner/src/actions-template.spec.ts
+team:
+  plugin_ref: stable
+"""
+RUNNER_PATHS = ("apps/runner/templates/workflow.yml", "libs/shared/actions-workflow/src/render.ts",
+                "apps/runner/src/actions-template.spec.ts")
+
+
+class ProjectSecurityPathsTest(unittest.TestCase):
+    """`security_paths:` in project.yml adds to the built-in sensitive paths (team-console#788)."""
+
+    def test_a_project_security_path_requires_security_with_the_path_as_reason(self):
+        globs = project.security_paths_from_text(RUNNER_SECURITY_PATHS)
+        for path in RUNNER_PATHS:
+            with self.subTest(path=path):
+                reasons = review.security_reasons([path], (), globs)
+                self.assertEqual(len(reasons), 1)
+                self.assertTrue(reasons[0].startswith("project security path ("))
+                self.assertTrue(reasons[0].endswith(f"): {path}"))
+
+    def test_the_paths_are_not_sensitive_without_the_project_list(self):
+        for path in RUNNER_PATHS:
+            with self.subTest(path=path):
+                self.assertEqual(review.security_reasons([path]), [])
+
+    def test_built_in_paths_stay_required_and_keep_their_reason(self):
+        globs = project.security_paths_from_text(RUNNER_SECURITY_PATHS)
+        self.assertEqual(review.security_reasons(["apps/api/src/auth/login.ts"], (), globs),
+                         ["sensitive path: apps/api/src/auth/login.ts"])
+        self.assertEqual(review.security_reasons(["package.json"], (), ["package.json"]),
+                         ["dependencies or CI: package.json"])
+
+    def test_unrelated_paths_stay_unrequired(self):
+        globs = project.security_paths_from_text(RUNNER_SECURITY_PATHS)
+        self.assertEqual(review.security_reasons(["apps/runner/src/main.ts", "libs/shared/ui/x.ts"], (), globs), [])
+
+    def test_inline_and_absent_and_empty_lists(self):
+        self.assertEqual(project.security_paths_from_text('security_paths: ["a/**", b.ts]  # x\n'), ["a/**", "b.ts"])
+        self.assertEqual(project.security_paths_from_text("review:\n  qa: always\n"), [])
+        self.assertEqual(project.security_paths_from_text(""), [])
+        self.assertEqual(project.security_paths_from_text("security_paths: []\n"), [])
+
+    def test_an_unreadable_list_is_refused_not_guessed(self):
+        for text in ("security_paths:\nteam:\n", "security_paths: apps/**\n", 'security_paths: ["{a,b}/**"]\n',
+                     "security_paths: [a]\nsecurity_paths: [b]\n", "security_paths:\n  - '!apps/**'\n"):
+            with self.subTest(text=text):
+                with self.assertRaises(ValueError) as caught:
+                    project.security_paths_from_text(text)
+                self.assertIn("security_paths", str(caught.exception))
+                self.assertNotIn("review.", str(caught.exception))
+
+
 class AgentToolingTest(unittest.TestCase):
     def test_files_that_steer_agents_or_the_gate_need_security(self):
         for path in (".claude/settings.json", ".claude/agents/qa.md", ".claude/product-team/scripts/pr",

@@ -250,4 +250,5 @@ It does not:
 | `history: rest-only` / `history_error`: GraphQL is unavailable in this session | expected in Claude Code cloud sessions (GraphQL is blocked there): edited comments are ignored, unedited ones count; nothing to fix |
 | `history: rest-only` / `history_error`: anything else | GitHub's GraphQL API did not answer (outage, or a token without Issues read); the run went on with REST timestamps; the next run retries GraphQL |
 | `answers` → `ignored`: it may have been edited and its edit history could not be fetched | you (or anyone) edited the comment and this session has no edit history; write the command again in a new comment |
+| `security-check`: `security_paths could not be read from project.yml on the base branch …` or `project.yml on the base branch: security_paths …` | the gate failed closed: fix `security_paths` on the base branch (reference/workflow.md → Review gate) or run the SECURITY review |
 | `inbox update`: warning: could not pin | pinning needs GraphQL; pin the "Needs you" issue by hand once, the scripts find it by label |

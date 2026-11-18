@@ -35,7 +35,10 @@ DEPENDENCY_FILES = re.compile(
 )
 
 
-def security_reasons(paths: Iterable[str], labels: Iterable[str] = ()) -> List[str]:
+def security_reasons(paths: Iterable[str], labels: Iterable[str] = (), security_paths: Iterable[str] = ()) -> List[str]:
+    """Why a PR needs SECURITY. `security_paths` are the project's own globs (`security_paths:` in project.yml on the
+    base branch): they only add to the built-in rules, never remove one."""
+    project_paths = [(p, glob_regex(p, "security_paths")) for p in security_paths if p.strip()]
     reasons = []
     if "security" in set(labels):
         reasons.append("issue labelled security")
@@ -46,13 +49,17 @@ def security_reasons(paths: Iterable[str], labels: Iterable[str] = ()) -> List[s
             reasons.append(f"sensitive path: {path}")
         elif DEPENDENCY_FILES.search(path):
             reasons.append(f"dependencies or CI: {path}")
+        else:
+            glob = next((p for p, rx in project_paths if rx.match(path)), None)
+            if glob is not None:
+                reasons.append(f"project security path ({glob}): {path}")
     return reasons
 
 
 PR_FILES_LIMIT = 3000  # GET /pulls/N/files returns at most this many files
 
 
-def glob_regex(pattern: str) -> "re.Pattern[str]":
+def glob_regex(pattern: str, what: str = "review.code_paths") -> "re.Pattern[str]":
     """A path glob as a regex over the whole repo-relative path: `**` crosses directories, `*` and `?` do not,
     a trailing `/` means everything below, and a pattern without `/` matches the file name in any directory.
     Case-insensitive. ValueError for syntax it does not support (`{a,b}`, `[abc]`, `!negation`): silently reading
@@ -61,11 +68,11 @@ def glob_regex(pattern: str) -> "re.Pattern[str]":
     while pattern.startswith("./"):
         pattern = pattern[2:]
     if pattern.startswith("!") or "{" in pattern or "[" in pattern:
-        raise ValueError(f"review.code_paths: {pattern!r} is not supported; use plain globs with *, ** and ? "
+        raise ValueError(f"{what}: {pattern!r} is not supported; use plain globs with *, ** and ? "
                          "(one pattern per alternative, no negation)")
     pattern = pattern.lstrip("/")
     if not pattern:
-        raise ValueError("review.code_paths has an empty pattern")
+        raise ValueError(f"{what} has an empty pattern")
     if pattern.endswith("/"):
         pattern += "**"
     if "/" not in pattern:

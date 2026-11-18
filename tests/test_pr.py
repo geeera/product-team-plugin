@@ -142,6 +142,64 @@ class BaseProjectTextTest(unittest.TestCase):
                 pr.base_project_text("o/r", "dev")
 
 
+class SecurityPathsFromBaseBranchTest(unittest.TestCase):
+    """`pr security-check` reads `security_paths` from the PR's base branch only (team-console#788)."""
+
+    BASE = 'security_paths: ["apps/runner/templates/**"]\n'
+    HEAD_DROPS_IT = "security_paths: []\n"
+
+    def check(self, files, raw=None, base="dev", config=None):
+        def by_ref(path, _accept):
+            if raw is not None:
+                return raw(path)
+            return self.BASE if path.endswith("ref=refs/heads/dev") else self.HEAD_DROPS_IT
+        with mock.patch.object(pr, "linked_issue_labels", return_value=[]), \
+                mock.patch.object(pr, "view", return_value={"base": base, "head": "fix/9-x", "head_sha": "h"}), \
+                mock.patch.object(pr.gh, "raw", side_effect=by_ref) as fetched:
+            reasons = pr.security_check("o/r", 9, list(files), config)
+        return reasons, [c.args[0] for c in fetched.call_args_list]
+
+    def test_a_base_branch_security_path_requires_the_review(self):
+        reasons, fetched = self.check(["apps/runner/templates/workflow.yml"])
+        self.assertEqual(reasons, ["project security path (apps/runner/templates/**): "
+                                   "apps/runner/templates/workflow.yml"])
+        self.assertEqual(fetched, ["repos/o/r/contents/.product-team/project.yml?ref=refs/heads/dev"])
+
+    def test_the_heads_edit_of_security_paths_is_ignored(self):
+        # The PR empties the list on its own branch; the base still has it, so the review stays required.
+        reasons, fetched = self.check(["apps/runner/templates/workflow.yml", ".product-team/project.yml"])
+        self.assertIn("project security path (apps/runner/templates/**): apps/runner/templates/workflow.yml", reasons)
+        self.assertIn("agent tooling or gate config: .product-team/project.yml", reasons)
+        self.assertFalse(any("fix/9-x" in f for f in fetched))
+
+    def test_no_project_yml_or_no_key_keeps_the_built_in_behaviour(self):
+        def missing(_path):
+            raise pr.gh.GhError("GET … → HTTP 404: Not Found")
+        for raw in (missing, lambda _p: "review:\n  qa: always\n"):
+            with self.subTest(raw=raw):
+                self.assertEqual(self.check(["apps/runner/templates/workflow.yml"], raw)[0], [])
+                self.assertEqual(self.check(["apps/api/auth.ts"], raw)[0], ["sensitive path: apps/api/auth.ts"])
+
+    def test_a_base_it_cannot_read_fails_closed(self):
+        def broken(_path):
+            raise pr.gh.GhError("GET … → HTTP 500")
+        reasons, _ = self.check(["docs/a.md"], broken)
+        self.assertEqual(len(reasons), 1)
+        self.assertIn("security_paths could not be read from project.yml on the base branch dev", reasons[0])
+        self.assertTrue(reasons[0].endswith("review required"))
+
+    def test_an_unreadable_list_on_the_base_fails_closed(self):
+        reasons, _ = self.check(["docs/a.md"], lambda _p: 'security_paths: ["{a,b}/**"]\n')
+        self.assertEqual(len(reasons), 1)
+        self.assertIn("security_paths", reasons[0])
+        self.assertTrue(reasons[0].endswith("review required"))
+
+    def test_the_gates_base_config_is_reused_not_read_again(self):
+        reasons, fetched = self.check(["apps/runner/templates/a.yml"], config=self.BASE)
+        self.assertEqual(reasons, ["project security path (apps/runner/templates/**): apps/runner/templates/a.yml"])
+        self.assertEqual(fetched, [])
+
+
 PROPORTIONAL = """team:
   reviewer_logins: []
 review:

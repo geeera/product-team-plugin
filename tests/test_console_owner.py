@@ -128,7 +128,9 @@ class SecurityCheckTest(ScriptTestCase):
     def check(self, pull=PULL, files=("docs/a.md",), number=57):
         with mock.patch.object(pr.gh, "repo", return_value="acme/tc"), \
                 mock.patch.object(pr.gh, "api", return_value=dict(pull, number=number)), \
-                mock.patch.object(pr, "changed_files", return_value=list(files)):
+                mock.patch.object(pr, "changed_files", return_value=list(files)), \
+                mock.patch.object(pr, "view", return_value={"base": "dev"}), \
+                mock.patch.object(pr, "base_project_text", return_value=""):
             return self.run_cli(pr, "security-check", str(number))
 
     def test_the_fixture_links_decide(self):

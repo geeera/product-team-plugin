@@ -6,6 +6,12 @@ first `slot-pm` of the day runs `vendor self-update` and opens a PR with the ent
 
 ## Unreleased
 
+- **Feature: project `security_paths` in `.product-team/project.yml`.** A top-level list of globs (same syntax as
+  `review.code_paths`) whose change makes `pr security-check` / `pr gate` require SECURITY, with
+  `project security path (<glob>): <path>` as the reason. It adds to the built-in rules and never removes one, and
+  it is read from the PR's base branch only, so a PR cannot drop its own requirement (team-console#788: the runner
+  workflow template and its renderer). A base branch it cannot read or a list it cannot parse requires SECURITY
+  (fails closed). No key: behaviour unchanged.
 - **Chore: bump `tests/contract/console.lock` to team-console `a62056a2` (PR #777).** Re-vendored the team-config
   fixtures `get.recommended.json`, `put.changed.json`, `reset.economy.json`, `revisions.list.json` and
   `revisions.get.json`, which gained `reason` and `createdByName` additively. The plugin still reads only the nested

@@ -259,4 +259,5 @@ It does not:
 | `security-check`: `the items linked to PR #N could not be read from the console` | the gate failed closed and requires SECURITY: run the review, or fix the console or the job environment and check again |
 | `security-check`: `PR #N is linked to no item in the console` | the gate failed closed: link the PR to its item (`pr link-pr N`) or run the SECURITY review |
 | `security-check`: `PR #N is in …, but the console project's repository is …` | `TC_PROJECT` names another project than this repository's: fix the job environment; until then SECURITY is required |
+| `security-check`: `security_paths could not be read from project.yml on the base branch …` or `project.yml on the base branch: security_paths …` | the gate failed closed: fix `security_paths` on the base branch (reference/workflow.md → Review gate) or run the SECURITY review |
 | `pr link-pr` / `backlog link-pr`: `PR #N does not name TC-…` | the PR does not say which item it is for: add `Closes TC-…` to the PR body, then link again |
